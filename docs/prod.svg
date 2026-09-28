@@ -1,0 +1,98 @@
+<svg viewBox="0 0 900 462" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Production today: the real fleet, read-only. prod/rollout.yaml holds the policy for when writes are enabled: a canary of one host per hardware model, then waves to 5%, 25% and 100%, at most one host of a rack in a wave, the first wave strict, a halt over 2% failed, a 30 minute soak, 50 at once. Today redfish_poller.py collects every BMC and shows health, firmware, inventory, telemetry, capabilities and diff views, and rollout.py plan pre-flights and plans waves, read-only; run --yes is refused because no host is writable. Both use the prod/ folder: the inventory, the baseline, the policy and a ReadOnly account per vendor in .env. They speak Redfish over HTTPS, GET only, to the real fleet: each vendor's own Redfish implementation, ASUS Z13PH-D16 and Gigabyte TO24-JD1 on AMI's Redfish server, Dell PowerEdge R630 and R730xd on iDRAC 8, HPE ProLiant DL360 Gen9 on iLO 4, each on the BMC chip of its motherboard.">
+  <style>
+    .rfp text { font-family: var(--mono, monospace); }
+    .rfp .bg { fill: var(--bg-deep, #050708); }
+    .rfp .box { fill: var(--surface, #0d1417); stroke: var(--line, #2a3538); }
+    .rfp .name { fill: var(--fg, #e6f7fa); font-size: 13px; font-weight: 600; }
+    .rfp .sub { fill: var(--dim, #6f8f97); font-size: 10px; }
+    .rfp .band { fill: var(--dim, #6f8f97); font-size: 9.5px; letter-spacing: .14em; }
+    .rfp .lbl { fill: var(--dim, #6f8f97); font-size: 10px; }
+    .rfp .wire { fill: none; stroke: var(--dim, #6f8f97); stroke-width: 1; }
+    .rfp .cut { fill: none; stroke-width: 1; stroke-dasharray: 5 5; opacity: .75; }
+    /* the hardware layer in its own colour, the same key as the portfolio's drawings */
+    .rfp .ind .box { stroke: color-mix(in srgb, var(--amber, #ffb454) 40%, transparent); }
+    .rfp .ind .hi { fill: var(--amber, #ffb454); }
+    .rfp .ind .wire-hi { fill: none; stroke: var(--amber, #ffb454); stroke-width: 1.4; }
+    .rfp .ind .cut { stroke: var(--amber, #ffb454); }
+  </style>
+  <defs>
+    <marker id="rfp-dim" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto">
+      <path d="M0 0 8 4 0 8z" style="fill: var(--dim, #6f8f97)"/>
+    </marker>
+    <marker id="rfp-amber" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto">
+      <path d="M0 0 8 4 0 8z" style="fill: var(--amber, #ffb454)"/>
+    </marker>
+  </defs>
+  <g class="rfp">
+    <rect class="bg" x="0" y="0" width="900" height="462" rx="12"/>
+
+    <!-- the policy for when writes are enabled: the rollout itself is rollout.svg -->
+    <g class="ind"><text class="band hi" x="20" y="24">PRODUCTION · THE REAL FLEET · READ-ONLY TODAY: NO HOST IS writable</text></g>
+    <rect class="box" x="20" y="34" width="860" height="44" rx="8"/>
+    <text class="name" x="450" y="52" text-anchor="middle">prod/rollout.yaml · for when writes are enabled</text>
+    <text class="sub" x="450" y="68" text-anchor="middle">canary 1 per model → waves to 5%, 25%, 100% · ≤ 1 per rack · wave 1 strict · halt over 2% · soak 30 min · 50 at once</text>
+
+    <!-- today: the tools, read-only, and the prod/ folder they share -->
+    <rect class="box" x="40" y="94" width="250" height="76" rx="8"/>
+    <text class="name" x="165" y="116" text-anchor="middle">redfish_poller.py</text>
+    <text class="sub" x="165" y="134" text-anchor="middle">collect: crawl each BMC's tree</text>
+    <text class="sub" x="165" y="148" text-anchor="middle">health · firmware · inventory</text>
+    <text class="sub" x="165" y="162" text-anchor="middle">telemetry · capabilities · diff</text>
+
+    <rect class="box" x="325" y="94" width="250" height="76" rx="8"/>
+    <text class="name" x="450" y="116" text-anchor="middle">Site folder · prod/</text>
+    <text class="sub" x="450" y="134" text-anchor="middle">inventory · baseline · rollout.yaml</text>
+    <text class="sub" x="450" y="148" text-anchor="middle">.env: ReadOnly credentials</text>
+    <text class="sub" x="450" y="162" text-anchor="middle">out: snapshots · reports</text>
+
+    <rect class="box" x="610" y="94" width="250" height="76" rx="8"/>
+    <text class="name" x="735" y="116" text-anchor="middle">rollout.py plan</text>
+    <text class="sub" x="735" y="134" text-anchor="middle">pre-flight: go · skip · block</text>
+    <text class="sub" x="735" y="148" text-anchor="middle">canary and waves, read-only</text>
+    <text class="sub" x="735" y="162" text-anchor="middle">run --yes refused: none writable</text>
+
+    <path class="wire" d="M290 132H321" marker-end="url(#rfp-dim)"/>
+    <path class="wire" d="M610 132H579" marker-end="url(#rfp-dim)"/>
+
+    <!-- Redfish to the real fleet: reads only -->
+    <g class="ind">
+      <path class="wire-hi" d="M165 170V194M735 170V194M165 194H735"/>
+      <text class="lbl hi" x="450" y="187" text-anchor="middle">Redfish REST · HTTPS · a ReadOnly account per vendor</text>
+      <path class="wire-hi" d="M450 194V222" marker-end="url(#rfp-amber)"/>
+      <text class="lbl hi" x="460" y="214">GET only</text>
+
+      <!-- the real fleet: each vendor's firmware on its own BMC chip -->
+      <rect class="cut" x="20" y="226" width="860" height="216" rx="10"/>
+      <text class="band hi" x="36" y="244">REAL FLEET · FOUR VENDORS, ONE API</text>
+
+      <rect class="box" x="40" y="254" width="820" height="44" rx="8"/>
+      <text class="name" x="450" y="273" text-anchor="middle">Redfish service · each vendor's own implementation</text>
+      <text class="sub" x="450" y="289" text-anchor="middle">the same DMTF schemas, laid out and filled differently · the tools read standard properties only</text>
+
+      <rect class="box" x="40" y="312" width="190" height="60" rx="8"/>
+      <text class="name hi" x="135" y="332" text-anchor="middle">ASUS</text>
+      <text class="sub" x="135" y="349" text-anchor="middle">Z13PH-D16</text>
+      <text class="sub" x="135" y="363" text-anchor="middle">AMI Redfish Server</text>
+
+      <rect class="box" x="250" y="312" width="190" height="60" rx="8"/>
+      <text class="name hi" x="345" y="332" text-anchor="middle">Dell</text>
+      <text class="sub" x="345" y="349" text-anchor="middle">PowerEdge R630, R730xd</text>
+      <text class="sub" x="345" y="363" text-anchor="middle">iDRAC 8</text>
+
+      <rect class="box" x="460" y="312" width="190" height="60" rx="8"/>
+      <text class="name hi" x="555" y="332" text-anchor="middle">HPE</text>
+      <text class="sub" x="555" y="349" text-anchor="middle">ProLiant DL360 Gen9</text>
+      <text class="sub" x="555" y="363" text-anchor="middle">iLO 4</text>
+
+      <rect class="box" x="670" y="312" width="190" height="60" rx="8"/>
+      <text class="name hi" x="765" y="332" text-anchor="middle">Gigabyte</text>
+      <text class="sub" x="765" y="349" text-anchor="middle">TO24-JD1</text>
+      <text class="sub" x="765" y="363" text-anchor="middle">AMI Redfish Server</text>
+
+      <rect class="box" x="40" y="386" width="820" height="44" rx="8"/>
+      <text class="name hi" x="450" y="405" text-anchor="middle">BMC chip on each motherboard</text>
+      <text class="sub" x="450" y="421" text-anchor="middle">its own CPU, RAM, flash and NIC · reads sensors over I²C, PECI, PMBus · up with the host off</text>
+    </g>
+    <path class="wire" d="M135 298V312M345 298V312M555 298V312M765 298V312M135 372V386M345 372V386M555 372V386M765 372V386"/>
+  </g>
+</svg>

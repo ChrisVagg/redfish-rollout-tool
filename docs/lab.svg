@@ -1,0 +1,184 @@
+<svg viewBox="0 0 900 590" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="The lab: ten emulated BMCs in three racks, where the rollout really updates firmware. lab/rollout.yaml plans a canary of one BMC, bmc1, marked canary: true; wave 1 of three, bmc2 to bmc4, strict; wave 2 of the other six; at most two BMCs of a rack in a wave, a halt over 10% failed, a 60 second soak, ten at once. redfish_poller.py and pipeline.sh with rollout.py share the lab/ folder: the inventory of ten writable BMCs, the policy, the baseline and the image catalog, and the snapshots, run records and reports. They speak Redfish over HTTPS with OpenBMC's default login: reads, updates and resets. Docker Compose runs one container per BMC on 127.0.0.1 ports 2441 to 2450. In each, QEMU's gb200nvl-bmc machine stands in for the server, emulating only its BMC, an AST2600 chip, which runs OpenBMC's GB200 NVL firmware and bmcweb serving Redfish on port 443, from a 64 MiB flash volume kept across restarts. bmc6 to bmc10 boot 90 seconds after the others. make lab-up fetches the two newest GB200 NVL builds from OpenBMC's Jenkins, boots the older and approves the newer, starts the containers in two batches, and restarts any BMC whose boot came up degraded.">
+  <style>
+    .rfl text { font-family: var(--mono, monospace); }
+    .rfl .bg { fill: var(--bg-deep, #050708); }
+    .rfl .box { fill: var(--surface, #0d1417); stroke: var(--line, #2a3538); }
+    .rfl .grp { fill: none; stroke: var(--line, #2a3538); }
+    .rfl .name { fill: var(--fg, #e6f7fa); font-size: 13px; font-weight: 600; }
+    .rfl .sub { fill: var(--dim, #6f8f97); font-size: 10px; }
+    .rfl .band { fill: var(--dim, #6f8f97); font-size: 9.5px; letter-spacing: .14em; }
+    .rfl .lbl { fill: var(--dim, #6f8f97); font-size: 10px; }
+    .rfl .hi { fill: var(--teal, #00ffc8); }
+    .rfl .wire { fill: none; stroke: var(--dim, #6f8f97); stroke-width: 1; }
+    .rfl .wire-hi { fill: none; stroke: var(--teal, #00ffc8); stroke-width: 1.4; }
+    .rfl .cut { fill: none; stroke: var(--teal, #00ffc8); stroke-width: 1; stroke-dasharray: 5 5; opacity: .75; }
+    /* which wave a BMC is in: the same colours as the canary and wave 1 in rollout.svg */
+    .rfl .canary .box { stroke: color-mix(in srgb, var(--teal, #00ffc8) 60%, transparent); }
+    .rfl .canary .name, .rfl .c-canary { fill: var(--teal, #00ffc8); }
+    .rfl .w1 .box { stroke: color-mix(in srgb, var(--violet, #b18cff) 60%, transparent); }
+    .rfl .w1 .name, .rfl .c-w1 { fill: var(--violet, #b18cff); }
+    /* a QEMU server: drive bays and a power LED on its front, the BMC chip inside with its pins */
+    .rfl .bay { fill: var(--dim, #6f8f97); opacity: .45; }
+    .rfl .led { fill: var(--teal, #00ffc8); }
+    .rfl .chip { fill: var(--bg-deep, #050708); stroke: color-mix(in srgb, var(--teal, #00ffc8) 55%, transparent); }
+    .rfl .pins { fill: none; stroke: var(--dim, #6f8f97); stroke-width: 1.2; }
+  </style>
+  <defs>
+    <marker id="rfl-dim" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto">
+      <path d="M0 0 8 4 0 8z" style="fill: var(--dim, #6f8f97)"/>
+    </marker>
+    <marker id="rfl-teal" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto">
+      <path d="M0 0 8 4 0 8z" style="fill: var(--teal, #00ffc8)"/>
+    </marker>
+  </defs>
+  <g class="rfl">
+    <rect class="bg" x="0" y="0" width="900" height="590" rx="12"/>
+
+    <!-- the lab's policy: the rollout itself is rollout.svg -->
+    <text class="band hi" x="20" y="24">LAB · 10 EMULATED BMCs · WRITES ALLOWED · make lab-pipeline-update</text>
+    <rect class="box" x="20" y="34" width="860" height="34" rx="8"/>
+    <text class="sub" x="450" y="55" text-anchor="middle">lab/rollout.yaml · <tspan class="c-canary">canary bmc1</tspan> → <tspan class="c-w1">wave 1 of 3, strict</tspan> → wave 2 of 6 · ≤ 2 per rack · halt over 10% · soak 60 s · 10 at once</text>
+
+    <!-- the tools and the lab/ folder they share -->
+    <rect class="box" x="40" y="86" width="250" height="76" rx="8"/>
+    <text class="name" x="165" y="108" text-anchor="middle">redfish_poller.py</text>
+    <text class="sub" x="165" y="126" text-anchor="middle">collect: crawl each BMC's tree</text>
+    <text class="sub" x="165" y="140" text-anchor="middle">health · firmware · inventory</text>
+    <text class="sub" x="165" y="154" text-anchor="middle">telemetry · capabilities · diff</text>
+
+    <rect class="box" x="325" y="86" width="250" height="76" rx="8"/>
+    <text class="name" x="450" y="108" text-anchor="middle">Site folder · lab/</text>
+    <text class="sub" x="450" y="126" text-anchor="middle">inventory: 10 BMCs, writable</text>
+    <text class="sub" x="450" y="140" text-anchor="middle">rollout.yaml · baseline · images</text>
+    <text class="sub" x="450" y="154" text-anchor="middle">out: snapshots · runs · reports</text>
+
+    <rect class="box" x="610" y="86" width="250" height="76" rx="8"/>
+    <text class="name" x="735" y="108" text-anchor="middle">pipeline.sh · rollout.py</text>
+    <text class="sub" x="735" y="126" text-anchor="middle">plan → canary → waves → report</text>
+    <text class="sub" x="735" y="140" text-anchor="middle">every step recorded (jsonl)</text>
+    <text class="sub" x="735" y="154" text-anchor="middle">report.json · report.html</text>
+
+    <path class="wire" d="M290 124H321" marker-end="url(#rfl-dim)"/>
+    <path class="wire" d="M610 124H579" marker-end="url(#rfl-dim)"/>
+
+    <!-- Redfish to the ten BMCs -->
+    <path class="wire-hi" d="M165 162V186M735 162V186M165 186H735"/>
+    <text class="lbl hi" x="450" y="179" text-anchor="middle">Redfish REST · HTTPS · root / 0penBmc</text>
+    <path class="wire-hi" d="M450 186V214" marker-end="url(#rfl-teal)"/>
+    <text class="lbl hi" x="460" y="206">GET · POST update · POST reset</text>
+
+    <!-- docker compose: one container per BMC -->
+    <rect class="cut" x="20" y="218" width="860" height="296" rx="10"/>
+    <text class="band hi" x="36" y="236">DOCKER COMPOSE · 10 QEMU SERVERS IN 3 RACKS, A BMC IN EACH · 127.0.0.1:2441-2450</text>
+
+    <!-- every container: QEMU is the server, and the BMC runs inside it -->
+    <rect class="grp" x="40" y="246" width="300" height="240" rx="8"/>
+    <text class="name" x="190" y="266" text-anchor="middle">Every container</text>
+    <text class="sub" x="190" y="280" text-anchor="middle">one per BMC · about 2 GiB of RAM</text>
+
+    <rect class="box" x="52" y="288" width="276" height="150" rx="6"/>
+    <rect class="bay" x="60" y="293" width="8" height="8" rx="1"/><rect class="bay" x="72" y="293" width="8" height="8" rx="1"/><rect class="bay" x="84" y="293" width="8" height="8" rx="1"/><rect class="bay" x="96" y="293" width="8" height="8" rx="1"/><rect class="bay" x="108" y="293" width="8" height="8" rx="1"/><rect class="bay" x="120" y="293" width="8" height="8" rx="1"/><rect class="bay" x="132" y="293" width="8" height="8" rx="1"/><rect class="bay" x="144" y="293" width="8" height="8" rx="1"/>
+    <circle class="led" cx="318" cy="297" r="2.5"/>
+    <text class="name" x="190" y="320" text-anchor="middle">QEMU server · gb200nvl-bmc</text>
+    <text class="sub" x="190" y="333" text-anchor="middle">only its BMC is emulated, no host CPU</text>
+
+    <path class="pins" d="M70 352H76M304 352H310M70 360H76M304 360H310M70 368H76M304 368H310M70 376H76M304 376H310M70 384H76M304 384H310M70 392H76M304 392H310M70 400H76M304 400H310M70 408H76M304 408H310M70 416H76M304 416H310"/>
+    <rect class="chip" x="76" y="342" width="228" height="88" rx="4"/>
+    <text class="name hi" x="190" y="359" text-anchor="middle">BMC · AST2600 chip</text>
+    <rect class="box" x="86" y="366" width="208" height="26" rx="5"/>
+    <text class="name" x="190" y="384" text-anchor="middle">OpenBMC GB200 NVL</text>
+    <rect class="box" x="86" y="398" width="208" height="26" rx="5"/>
+    <text class="name hi" x="190" y="416" text-anchor="middle">bmcweb · Redfish :443</text>
+
+    <path class="wire" d="M190 430V446"/>
+    <rect class="box" x="52" y="446" width="276" height="32" rx="6"/>
+    <text class="name" x="190" y="459" text-anchor="middle">bmcN-flash volume</text>
+    <text class="sub" x="190" y="472" text-anchor="middle">the BMC's 64 MiB flash, kept on restart</text>
+
+    <!-- the racks: waves take one server of each rack in turn, at most two of a rack per wave -->
+    <rect class="grp" x="360" y="246" width="156" height="240" rx="8"/>
+    <text class="name" x="438" y="266" text-anchor="middle">rack r1</text>
+    <text class="sub" x="438" y="282" text-anchor="middle">4 servers</text>
+    <g class="canary">
+      <rect class="box" x="370" y="292" width="136" height="40" rx="6"/><rect class="bay" x="378" y="300" width="4" height="24" rx="1"/><rect class="bay" x="384" y="300" width="4" height="24" rx="1"/><rect class="bay" x="390" y="300" width="4" height="24" rx="1"/>
+      <circle class="led" cx="496" cy="312" r="2.5"/>
+      <text class="name" x="442" y="309" text-anchor="middle">bmc1 :2441</text>
+      <text class="sub" x="442" y="324" text-anchor="middle">canary: true</text>
+    </g>
+    <g class="w1">
+      <rect class="box" x="370" y="340" width="136" height="40" rx="6"/><rect class="bay" x="378" y="348" width="4" height="24" rx="1"/><rect class="bay" x="384" y="348" width="4" height="24" rx="1"/><rect class="bay" x="390" y="348" width="4" height="24" rx="1"/>
+      <circle class="led" cx="496" cy="360" r="2.5"/>
+      <text class="name" x="442" y="357" text-anchor="middle">bmc4 :2444</text>
+      <text class="sub" x="442" y="372" text-anchor="middle">wave 1</text>
+    </g>
+    <g class="srv">
+      <rect class="box" x="370" y="388" width="136" height="40" rx="6"/><rect class="bay" x="378" y="396" width="4" height="24" rx="1"/><rect class="bay" x="384" y="396" width="4" height="24" rx="1"/><rect class="bay" x="390" y="396" width="4" height="24" rx="1"/>
+      <circle class="led" cx="496" cy="408" r="2.5"/>
+      <text class="name" x="442" y="405" text-anchor="middle">bmc7 :2447</text>
+      <text class="sub" x="442" y="420" text-anchor="middle">wave 2 · +90s</text>
+    </g>
+    <g class="srv">
+      <rect class="box" x="370" y="436" width="136" height="40" rx="6"/><rect class="bay" x="378" y="444" width="4" height="24" rx="1"/><rect class="bay" x="384" y="444" width="4" height="24" rx="1"/><rect class="bay" x="390" y="444" width="4" height="24" rx="1"/>
+      <circle class="led" cx="496" cy="456" r="2.5"/>
+      <text class="name" x="442" y="453" text-anchor="middle">bmc10 :2450</text>
+      <text class="sub" x="442" y="468" text-anchor="middle">wave 2 · +90s</text>
+    </g>
+
+    <rect class="grp" x="532" y="246" width="156" height="240" rx="8"/>
+    <text class="name" x="610" y="266" text-anchor="middle">rack r2</text>
+    <text class="sub" x="610" y="282" text-anchor="middle">3 servers</text>
+    <g class="w1">
+      <rect class="box" x="542" y="292" width="136" height="40" rx="6"/><rect class="bay" x="550" y="300" width="4" height="24" rx="1"/><rect class="bay" x="556" y="300" width="4" height="24" rx="1"/><rect class="bay" x="562" y="300" width="4" height="24" rx="1"/>
+      <circle class="led" cx="668" cy="312" r="2.5"/>
+      <text class="name" x="614" y="309" text-anchor="middle">bmc2 :2442</text>
+      <text class="sub" x="614" y="324" text-anchor="middle">wave 1</text>
+    </g>
+    <g class="srv">
+      <rect class="box" x="542" y="340" width="136" height="40" rx="6"/><rect class="bay" x="550" y="348" width="4" height="24" rx="1"/><rect class="bay" x="556" y="348" width="4" height="24" rx="1"/><rect class="bay" x="562" y="348" width="4" height="24" rx="1"/>
+      <circle class="led" cx="668" cy="360" r="2.5"/>
+      <text class="name" x="614" y="357" text-anchor="middle">bmc5 :2445</text>
+      <text class="sub" x="614" y="372" text-anchor="middle">wave 2</text>
+    </g>
+    <g class="srv">
+      <rect class="box" x="542" y="388" width="136" height="40" rx="6"/><rect class="bay" x="550" y="396" width="4" height="24" rx="1"/><rect class="bay" x="556" y="396" width="4" height="24" rx="1"/><rect class="bay" x="562" y="396" width="4" height="24" rx="1"/>
+      <circle class="led" cx="668" cy="408" r="2.5"/>
+      <text class="name" x="614" y="405" text-anchor="middle">bmc8 :2448</text>
+      <text class="sub" x="614" y="420" text-anchor="middle">wave 2 · +90s</text>
+    </g>
+
+    <rect class="grp" x="704" y="246" width="156" height="240" rx="8"/>
+    <text class="name" x="782" y="266" text-anchor="middle">rack r3</text>
+    <text class="sub" x="782" y="282" text-anchor="middle">3 servers</text>
+    <g class="w1">
+      <rect class="box" x="714" y="292" width="136" height="40" rx="6"/><rect class="bay" x="722" y="300" width="4" height="24" rx="1"/><rect class="bay" x="728" y="300" width="4" height="24" rx="1"/><rect class="bay" x="734" y="300" width="4" height="24" rx="1"/>
+      <circle class="led" cx="840" cy="312" r="2.5"/>
+      <text class="name" x="786" y="309" text-anchor="middle">bmc3 :2443</text>
+      <text class="sub" x="786" y="324" text-anchor="middle">wave 1</text>
+    </g>
+    <g class="srv">
+      <rect class="box" x="714" y="340" width="136" height="40" rx="6"/><rect class="bay" x="722" y="348" width="4" height="24" rx="1"/><rect class="bay" x="728" y="348" width="4" height="24" rx="1"/><rect class="bay" x="734" y="348" width="4" height="24" rx="1"/>
+      <circle class="led" cx="840" cy="360" r="2.5"/>
+      <text class="name" x="786" y="357" text-anchor="middle">bmc6 :2446</text>
+      <text class="sub" x="786" y="372" text-anchor="middle">wave 2 · +90s</text>
+    </g>
+    <g class="srv">
+      <rect class="box" x="714" y="388" width="136" height="40" rx="6"/><rect class="bay" x="722" y="396" width="4" height="24" rx="1"/><rect class="bay" x="728" y="396" width="4" height="24" rx="1"/><rect class="bay" x="734" y="396" width="4" height="24" rx="1"/>
+      <circle class="led" cx="840" cy="408" r="2.5"/>
+      <text class="name" x="786" y="405" text-anchor="middle">bmc9 :2449</text>
+      <text class="sub" x="786" y="420" text-anchor="middle">wave 2 · +90s</text>
+    </g>
+
+    <g class="canary"><rect class="box" x="360" y="494" width="10" height="10" rx="2"/></g>
+    <text class="lbl" x="376" y="503">canary</text>
+    <g class="w1"><rect class="box" x="432" y="494" width="10" height="10" rx="2"/></g>
+    <text class="lbl" x="448" y="503">wave 1</text>
+    <rect class="box" x="504" y="494" width="10" height="10" rx="2"/>
+    <text class="lbl" x="520" y="503">wave 2 · +90s: the second boot batch</text>
+
+    <!-- make lab-up, in one line -->
+    <path class="wire" d="M450 530V518" marker-end="url(#rfl-dim)"/>
+    <rect class="box" x="40" y="530" width="820" height="44" rx="8"/>
+    <text class="name" x="450" y="548" text-anchor="middle">make lab-up</text>
+    <text class="sub" x="450" y="564" text-anchor="middle">images.sh: the two newest builds from OpenBMC's Jenkins, boot the older, approve the newer → compose up in two batches → heal.sh</text>
+  </g>
+</svg>

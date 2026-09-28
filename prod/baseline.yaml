@@ -1,0 +1,55 @@
+# Approved firmware per hardware model.
+
+"ASUSTeK COMPUTER INC. Z13PH-D16 Series":  # 6 hosts
+  "System BIOS": "0801"
+  "Manager (BMC)": "1.01.2"
+  "BMCImage1": "1.01.2"
+  "Drive SAMSUNG MZVL21T0HCLR-00B00": "GXA7801Q"
+  "Controller SAMSUNG MZQL27T6HBLA-00A07": "GDC5602Q"
+  "NIC DevType7_NIC0": "26.33.10.48"
+  "NIC DevType7_NIC1": "22.32.20.04"
+  "NIC DevType7_NIC2": "1.2829.0"
+
+"Dell Inc. PowerEdge R630":  # 2 hosts
+  "System BIOS": "2.19.0"
+  "Manager (BMC)": "2.86.86.86"
+  "Power Supply.Slot.1": "00.14.7A"
+  "Dell OS Driver Pack, 18.12.04, A00": "18.12.04"
+  "Dell 32 Bit uEFI Diagnostics, version 4239, 4239A36, 4239.44": "4239A36"
+  "System CPLD": "1.0.1"
+  "Lifecycle Controller": "2.86.86.86"
+  "NIC Intel(R) 10G 2P X520 Adapter": "19.5.12"
+  "PSU PWR SPLY,750W,RDNT,DELTA      ": "00.14.7A"
+
+"Dell Inc. PowerEdge R730xd":  # 1 host
+  "System BIOS": "2.19.0"
+  "Manager (BMC)": "2.86.86.86"
+  "Backplane 0": "2.20"
+  "Power Supply.Slot.1": "00.24.6D"
+  "OS COLLECTOR 1.0, OSC_1.0, X23-00": "OSC_1.0"
+  "Disk 0 in Backplane 1 of Integrated RAID Controller 1": "DL2E"
+  "Internal Dual SD Module": "0.15"
+  "Dell OS Driver Pack, 18.12.04, A00": "18.12.04"
+  "Dell 64 Bit uEFI Diagnostics, version 4239, 4239A14, 4239.22": "4239A14"
+  "System CPLD": "1.0.1"
+  "Lifecycle Controller": "2.86.86.86"
+  "Drive INTEL SSDSC2BX20": "G201DL2E"
+  "Drive SAMSUNG MZ7L31T9": "JXTE204Q"
+  "Controller PERC H730 Mini": "25.5.9.0001"
+  "NIC BRCM GbE 4P 5720-t rNDC": "22.00.6"
+  "NIC Intel(R) 10G 2P X520 Adapter": "19.5.12"
+  "PSU PWR SPLY,750W,RDNT,DELTA      ": "00.24.6D"
+
+"Giga Computing TO24-JD1-00":  # 1 host
+  "Manager (BMC)": "12.10.10"
+  "BMC": "12.10.10"
+  "BPB_CPLD1": "03"
+  "BPB_CPLD2": "03"
+  "BPB_CPLD3": "03"
+  "BPB_CPLD4": "03"
+  "MB_CPLD1": "ff"
+
+"HPE ProLiant DL360 Gen9": 
+  "System BIOS": "P89 v2.92 (11/23/2021)"
+  "Manager (BMC)": "iLO 4 v2.81"
+  "PSU 720478-B21": "1.01 2.00"

@@ -1,0 +1,16 @@
+.env
+prod/inventory.yaml
+__pycache__/
+.pytest_cache/
+venv/
+snapshots/
+reports/
+images/
+lab/qemu-system-arm
+lab/bmc.mtd
+lab/images.yaml
+lab/baseline.yaml
+lab/scenario/
+/lab/runs/
+/prod/runs/
+todo

@@ -1,0 +1,9 @@
+# How firmware rolls out on the lab: rollout.py plan and run read it, their options override it for one run, and the
+# plan records what it used. With the lab's 10 BMCs in 3 racks: a canary of 1, then waves of 3 and 6.
+canary_per_model: 1   # hosts of each hardware model that go first; hosts marked canary: true in inventory.yaml first
+waves: [33, 100]      # after the canary: the cumulative % of the other hosts done after each wave
+max_per_rack: 2       # hosts of one rack in the same wave, at most; the rest wait for a later wave
+strict_waves: 1       # the first waves after the canary that, like it, halt on any failure
+halt_at: 0.1          # later waves: halt when more than this share of the hosts tried failed
+max_parallel: 10      # updates running at once in a wave
+soak: 60              # seconds to wait after a wave, then check its hosts again, before the next wave

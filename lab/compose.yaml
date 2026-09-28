@@ -1,0 +1,65 @@
+# The lab: ten emulated OpenBMC GB200 NVL BMCs, one QEMU per container, each on its own flash volume so a firmware
+# update survives a restart. 
+# Redfish on 127.0.0.1:2441-2450, SSH on 127.0.0.1:2221-2230, only reachable from this machine. Each takes ~2 GiB RAM.
+name: redfish-lab
+x-bmc: &bmc
+  build: .
+  image: redfish-lab/openbmc-gb200nvl
+  restart: unless-stopped
+services:
+  bmc1:
+    <<: *bmc
+    ports: ["127.0.0.1:2441:443", "127.0.0.1:2221:22"]
+    volumes: ["bmc1-flash:/flash"]
+  bmc2:
+    <<: *bmc
+    ports: ["127.0.0.1:2442:443", "127.0.0.1:2222:22"]
+    volumes: ["bmc2-flash:/flash"]
+  bmc3:
+    <<: *bmc
+    ports: ["127.0.0.1:2443:443", "127.0.0.1:2223:22"]
+    volumes: ["bmc3-flash:/flash"]
+  bmc4:
+    <<: *bmc
+    ports: ["127.0.0.1:2444:443", "127.0.0.1:2224:22"]
+    volumes: ["bmc4-flash:/flash"]
+  bmc5:
+    <<: *bmc
+    ports: ["127.0.0.1:2445:443", "127.0.0.1:2225:22"]
+    volumes: ["bmc5-flash:/flash"]
+  bmc6:
+    <<: *bmc
+    environment: [BOOT_DELAY=90]  
+    ports: ["127.0.0.1:2446:443", "127.0.0.1:2226:22"]
+    volumes: ["bmc6-flash:/flash"]
+  bmc7:
+    <<: *bmc
+    environment: [BOOT_DELAY=90]  
+    ports: ["127.0.0.1:2447:443", "127.0.0.1:2227:22"]
+    volumes: ["bmc7-flash:/flash"]
+  bmc8:
+    <<: *bmc
+    environment: [BOOT_DELAY=90] 
+    ports: ["127.0.0.1:2448:443", "127.0.0.1:2228:22"]
+    volumes: ["bmc8-flash:/flash"]
+  bmc9:
+    <<: *bmc
+    environment: [BOOT_DELAY=90]  
+    ports: ["127.0.0.1:2449:443", "127.0.0.1:2229:22"]
+    volumes: ["bmc9-flash:/flash"]
+  bmc10:
+    <<: *bmc
+    environment: [BOOT_DELAY=90]  
+    ports: ["127.0.0.1:2450:443", "127.0.0.1:2230:22"]
+    volumes: ["bmc10-flash:/flash"]
+volumes:
+  bmc1-flash:
+  bmc2-flash:
+  bmc3-flash:
+  bmc4-flash:
+  bmc5-flash:
+  bmc6-flash:
+  bmc7-flash:
+  bmc8-flash:
+  bmc9-flash:
+  bmc10-flash:

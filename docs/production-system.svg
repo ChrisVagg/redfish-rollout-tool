@@ -1,0 +1,143 @@
+<svg viewBox="0 0 900 628" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="A production firmware-update system, the target for this rollout at fleet scale. Supply chain: vendor images are downloaded, ingested with their checksum and signature checked, tested on lab hosts of every model, and promoted into an approved store such as Artifactory or S3. Control plane: an operator requests and approves a rollout through an API and CLI; a workflow engine such as Argo or Temporal reads the firmware catalog of baselines per model and the inventory in Nautobot, keeps its execution history in its own store, and writes each host's state, locks and audit trail to a rollout state database in PostgreSQL. Each site, on its management network: a site agent takes the work of each wave, gets short-lived credentials from Vault, drains and undrains hosts through the scheduler, Slurm or Kubernetes, drives updates, tasks and resets over Redfish on the BMCs, and reports inventory and health back; the BMCs pull images from a site image cache, which fetches each image from the approved store once per site; the BMCs manage the GPU hosts. Observability: the engine and the agents send events and metrics to Prometheus and Grafana, and halts and quarantines raise alerts in PagerDuty. Numbered badges mark where each rollout stage happens: 0 ingest, 1 plan and pre-flight, 2 drain, 3 update, 4 reset, 5 post-checks, 6 undrain or roll back.">
+  <style>
+    .ps text { font-family: var(--mono, monospace); }
+    .ps .bg { fill: var(--bg-deep, #050708); }
+    .ps .box { fill: var(--surface, #0d1417); stroke: var(--line, #2a3538); }
+    .ps .name { fill: var(--fg, #e6f7fa); font-size: 12.5px; font-weight: 600; }
+    .ps .sub { fill: var(--dim, #6f8f97); font-size: 10px; }
+    .ps .band { fill: var(--dim, #6f8f97); font-size: 9.5px; letter-spacing: .14em; }
+    .ps .band.hi { fill: var(--teal, #00ffc8); }
+    .ps .lbl { fill: var(--dim, #6f8f97); font-size: 10px; }
+    .ps .cut { fill: none; stroke: var(--line, #2a3538); stroke-width: 1; stroke-dasharray: 5 5; }
+    /* a connection in its service's colour; the hardware link is the only solid one */
+    .ps .edge { fill: none; stroke-width: 1.2; stroke-dasharray: 5 4; }
+    .ps .edge.g-hw { stroke-dasharray: none; }
+    .ps .elabel { fill: var(--fg, #e6f7fa); font-size: 10px; paint-order: stroke; stroke: var(--bg-deep, #050708); stroke-width: 4px; stroke-linejoin: round; }
+    .ps .badge circle { fill: var(--amber, #ffb454); }
+    .ps .badge text { fill: var(--bg-deep, #050708); font-size: 10px; font-weight: 700; }
+    .ps .g-img { stroke: #00ffc8; } .ps .bar.g-img { fill: #00ffc8; stroke: none; }
+    .ps .g-rf { stroke: #ffb454; } .ps .bar.g-rf { fill: #ffb454; stroke: none; }
+    .ps .g-sch { stroke: #b18cff; } .ps .bar.g-sch { fill: #b18cff; stroke: none; }
+    .ps .g-wf { stroke: #6ea8ff; } .ps .bar.g-wf { fill: #6ea8ff; stroke: none; }
+    .ps .g-inv { stroke: #7cc977; } .ps .bar.g-inv { fill: #7cc977; stroke: none; }
+    .ps .g-obs { stroke: #ff5c8a; } .ps .bar.g-obs { fill: #ff5c8a; stroke: none; }
+    .ps .g-sec { stroke: #e5c04a; } .ps .bar.g-sec { fill: #e5c04a; stroke: none; }
+    .ps .g-hw { stroke: #6f8f97; } .ps .bar.g-hw { fill: #6f8f97; stroke: none; }
+  </style>
+  <defs>
+    <marker id="ps-img" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path d="M0 0 8 4 0 8z" style="fill: #00ffc8"/></marker>
+    <marker id="ps-rf" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path d="M0 0 8 4 0 8z" style="fill: #ffb454"/></marker>
+    <marker id="ps-sch" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path d="M0 0 8 4 0 8z" style="fill: #b18cff"/></marker>
+    <marker id="ps-wf" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path d="M0 0 8 4 0 8z" style="fill: #6ea8ff"/></marker>
+    <marker id="ps-inv" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path d="M0 0 8 4 0 8z" style="fill: #7cc977"/></marker>
+    <marker id="ps-obs" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path d="M0 0 8 4 0 8z" style="fill: #ff5c8a"/></marker>
+    <marker id="ps-sec" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path d="M0 0 8 4 0 8z" style="fill: #e5c04a"/></marker>
+  </defs>
+  <g class="ps">
+    <rect class="bg" x="0" y="0" width="900" height="628" rx="12"/>
+    <text class="band hi" x="20" y="24">SUPPLY CHAIN · BEFORE ANY ROLLOUT</text>
+    <rect class="cut" x="20" y="30" width="860" height="74" rx="10"/>
+    <rect class="box" x="40" y="44" width="190" height="46" rx="8"/><rect class="bar g-img" x="40" y="52" width="3" height="30" rx="1.5"/>
+    <text class="name" x="135" y="72" text-anchor="middle">Vendor downloads</text>
+    <rect class="box" x="250" y="44" width="190" height="46" rx="8"/><rect class="bar g-img" x="250" y="52" width="3" height="30" rx="1.5"/>
+    <text class="name" x="345" y="64" text-anchor="middle">Ingest</text><text class="sub" x="345" y="80" text-anchor="middle">checksum · signature</text>
+    <rect class="box" x="460" y="44" width="190" height="46" rx="8"/><rect class="bar g-img" x="460" y="52" width="3" height="30" rx="1.5"/>
+    <text class="name" x="555" y="64" text-anchor="middle">Lab test</text><text class="sub" x="555" y="80" text-anchor="middle">real hosts, all models</text>
+    <rect class="box" x="670" y="44" width="190" height="46" rx="8"/><rect class="bar g-img" x="670" y="52" width="3" height="30" rx="1.5"/>
+    <text class="name" x="765" y="64" text-anchor="middle">Approved store</text><text class="sub" x="765" y="80" text-anchor="middle">Artifactory or S3</text>
+    <path class="edge g-img" d="M230 67H246" marker-end="url(#ps-img)"/>
+    <path class="edge g-img" d="M440 67H456" marker-end="url(#ps-img)"/>
+    <path class="edge g-img" d="M650 67H666" marker-end="url(#ps-img)"/>
+    <text class="band hi" x="20" y="124">CONTROL PLANE</text>
+    <rect class="cut" x="20" y="130" width="610" height="200" rx="10"/>
+    <rect class="box" x="40" y="140" width="170" height="46" rx="8"/><rect class="bar g-wf" x="40" y="148" width="3" height="30" rx="1.5"/>
+    <text class="name" x="125" y="160" text-anchor="middle">Rollout API + CLI</text><text class="sub" x="125" y="176" text-anchor="middle">request · approve</text>
+    <rect class="box" x="40" y="206" width="170" height="46" rx="8"/><rect class="bar g-inv" x="40" y="214" width="3" height="30" rx="1.5"/>
+    <text class="name" x="125" y="226" text-anchor="middle">Firmware catalog</text><text class="sub" x="125" y="242" text-anchor="middle">baselines per model</text>
+    <rect class="box" x="40" y="266" width="170" height="46" rx="8"/><rect class="bar g-inv" x="40" y="274" width="3" height="30" rx="1.5"/>
+    <text class="name" x="125" y="286" text-anchor="middle">Inventory / CMDB</text><text class="sub" x="125" y="302" text-anchor="middle">Nautobot</text>
+    <rect class="box" x="260" y="140" width="170" height="46" rx="8"/><rect class="bar g-wf" x="260" y="148" width="3" height="30" rx="1.5"/>
+    <text class="name" x="345" y="160" text-anchor="middle">Engine store</text><text class="sub" x="345" y="176" text-anchor="middle">workflow history</text>
+    <rect class="box" x="260" y="206" width="170" height="46" rx="8"/><rect class="bar g-wf" x="260" y="214" width="3" height="30" rx="1.5"/>
+    <text class="name" x="345" y="226" text-anchor="middle">Workflow engine</text><text class="sub" x="345" y="242" text-anchor="middle">Argo or Temporal</text>
+    <rect class="box" x="450" y="206" width="170" height="46" rx="8"/><rect class="bar g-wf" x="450" y="214" width="3" height="30" rx="1.5"/>
+    <text class="name" x="535" y="226" text-anchor="middle">Rollout state DB</text><text class="sub" x="535" y="242" text-anchor="middle">PostgreSQL · locks · audit</text>
+    <rect class="box" x="450" y="266" width="170" height="46" rx="8"/><rect class="bar g-sec" x="450" y="274" width="3" height="30" rx="1.5"/>
+    <text class="name" x="535" y="286" text-anchor="middle">Secrets</text><text class="sub" x="535" y="302" text-anchor="middle">Vault</text>
+    <path class="edge g-wf" d="M210 163H235V218H256" marker-end="url(#ps-wf)"/>
+    <path class="edge g-inv" d="M210 229H256" marker-end="url(#ps-inv)"/>
+    <path class="edge g-inv" d="M210 289H235V240H256" marker-end="url(#ps-inv)"/>
+    <path class="edge g-wf" d="M345 190V202" marker-end="url(#ps-wf)" marker-start="url(#ps-wf)"/>
+    <path class="edge g-wf" d="M434 229H446" marker-end="url(#ps-wf)" marker-start="url(#ps-wf)"/>
+    <text class="band hi" x="650" y="124">OBSERVABILITY</text>
+    <rect class="cut" x="650" y="130" width="230" height="170" rx="10"/>
+    <rect class="box" x="666" y="146" width="198" height="46" rx="8"/><rect class="bar g-obs" x="666" y="154" width="3" height="30" rx="1.5"/>
+    <text class="name" x="765" y="166" text-anchor="middle">Metrics and logs</text><text class="sub" x="765" y="182" text-anchor="middle">Prometheus · Grafana</text>
+    <rect class="box" x="666" y="236" width="198" height="46" rx="8"/><rect class="bar g-obs" x="666" y="244" width="3" height="30" rx="1.5"/>
+    <text class="name" x="765" y="256" text-anchor="middle">Alerts</text><text class="sub" x="765" y="272" text-anchor="middle">PagerDuty</text>
+    <path class="edge g-obs" d="M430 214H440V163H662" marker-end="url(#ps-obs)"/>
+    <path class="edge g-obs" d="M765 192V232" marker-end="url(#ps-obs)"/>
+    <text class="elabel" x="758" y="217" text-anchor="end">halts · quarantines</text>
+    <text class="band hi" x="20" y="356">EACH SITE · ON ITS MANAGEMENT NETWORK</text>
+    <rect class="cut" x="20" y="362" width="860" height="170" rx="10"/>
+    <rect class="box" x="260" y="390" width="170" height="46" rx="8"/><rect class="bar g-wf" x="260" y="398" width="3" height="30" rx="1.5"/>
+    <text class="name" x="345" y="410" text-anchor="middle">Site agent</text><text class="sub" x="345" y="426" text-anchor="middle">Redfish worker</text>
+    <rect class="box" x="666" y="390" width="198" height="46" rx="8"/><rect class="bar g-img" x="666" y="398" width="3" height="30" rx="1.5"/>
+    <text class="name" x="765" y="410" text-anchor="middle">Image cache</text><text class="sub" x="765" y="426" text-anchor="middle">HTTP proxy</text>
+    <rect class="box" x="40" y="470" width="170" height="46" rx="8"/><rect class="bar g-sch" x="40" y="478" width="3" height="30" rx="1.5"/>
+    <text class="name" x="125" y="490" text-anchor="middle">Scheduler</text><text class="sub" x="125" y="506" text-anchor="middle">Slurm or Kubernetes</text>
+    <rect class="box" x="450" y="470" width="170" height="46" rx="8"/><rect class="bar g-rf" x="450" y="478" width="3" height="30" rx="1.5"/>
+    <text class="name" x="535" y="490" text-anchor="middle">BMCs</text><text class="sub" x="535" y="506" text-anchor="middle">one per host</text>
+    <rect class="box" x="666" y="470" width="198" height="46" rx="8"/><rect class="bar g-hw" x="666" y="478" width="3" height="30" rx="1.5"/>
+    <text class="name" x="765" y="490" text-anchor="middle">Hosts</text><text class="sub" x="765" y="506" text-anchor="middle">GPU servers</text>
+    <path class="edge g-wf" d="M345 252V386" marker-end="url(#ps-wf)"/>
+    <text class="elabel" x="352" y="300" text-anchor="start">work per wave</text>
+    <path class="edge g-sec" d="M530 312V372H400V386" marker-end="url(#ps-sec)"/>
+    <text class="elabel" x="465" y="367" text-anchor="middle">short-lived creds</text>
+    <path class="edge g-img" d="M860 67H872V413H868" marker-end="url(#ps-img)"/>
+    <text class="elabel" x="866" y="381" text-anchor="end">once per site</text>
+    <path class="edge g-sch" d="M260 413H125V466" marker-end="url(#ps-sch)"/>
+    <text class="elabel" x="192" y="407" text-anchor="middle">drain / undrain</text>
+    <path class="edge g-rf" d="M345 436V458H530V466" marker-end="url(#ps-rf)"/>
+    <text class="elabel" x="438" y="454" text-anchor="middle">Redfish: update · tasks · reset</text>
+    <path class="edge g-img" d="M600 470V462H765V440" marker-end="url(#ps-img)"/>
+    <text class="elabel" x="690" y="458" text-anchor="middle">pulls image</text>
+    <path class="edge g-hw" d="M620 493H666"/>
+    <text class="elabel" x="643" y="510" text-anchor="middle">manages</text>
+    <path class="edge g-inv" d="M290 390V342H125V316" marker-end="url(#ps-inv)"/>
+    <text class="elabel" x="207" y="338" text-anchor="middle">inventory · health</text>
+    <path class="edge g-obs" d="M430 404H640V175H662" marker-end="url(#ps-obs)"/>
+    <text class="elabel" x="535" y="400" text-anchor="middle">events · metrics</text>
+    <g class="badge"><title>Stage 0: Ingest</title><circle cx="430" cy="44" r="8"/><text x="430" y="47.5" text-anchor="middle">0</text></g>
+    <g class="badge"><title>Stage 1: Plan and pre-flight</title><circle cx="235" cy="192" r="8"/><text x="235" y="195.5" text-anchor="middle">1</text></g>
+    <g class="badge"><title>Stage 2: Drain</title><circle cx="143" cy="442" r="8"/><text x="143" y="445.5" text-anchor="middle">2</text></g>
+    <g class="badge"><title>Stage 3: Update</title><circle cx="790" cy="452" r="8"/><text x="790" y="455.5" text-anchor="middle">3</text></g>
+    <g class="badge"><title>Stage 4: Reset</title><circle cx="643" cy="478" r="8"/><text x="643" y="481.5" text-anchor="middle">4</text></g>
+    <g class="badge"><title>Stage 5: Post-checks</title><circle cx="304" cy="368" r="8"/><text x="304" y="371.5" text-anchor="middle">5</text></g>
+    <g class="badge"><title>Stage 6: Undrain, or roll back</title><circle cx="163" cy="442" r="8"/><text x="163" y="445.5" text-anchor="middle">6</text></g>
+    <text class="band" x="20" y="560">CONNECTIONS</text>
+    <path class="edge g-img" d="M150 557H172"/><text class="lbl" x="180" y="560">Images</text>
+    <path class="edge g-rf" d="M335 557H357"/><text class="lbl" x="365" y="560">Redfish (BMC)</text>
+    <path class="edge g-sch" d="M520 557H542"/><text class="lbl" x="550" y="560">Scheduler</text>
+    <path class="edge g-wf" d="M705 557H727"/><text class="lbl" x="735" y="560">Workflow and state</text>
+    <path class="edge g-inv" d="M150 577H172"/><text class="lbl" x="180" y="580">Inventory and catalog</text>
+    <path class="edge g-obs" d="M335 577H357"/><text class="lbl" x="365" y="580">Observability</text>
+    <path class="edge g-sec" d="M520 577H542"/><text class="lbl" x="550" y="580">Secrets</text>
+    <path class="edge g-hw" d="M705 577H727"/><text class="lbl" x="735" y="580">Hardware</text>
+    <text class="band" x="20" y="608">ROLLOUT STAGES</text>
+    <g class="badge"><title>Stage 0: Ingest</title><circle cx="158" cy="605" r="8"/><text x="158" y="608.5" text-anchor="middle">0</text></g>
+    <text class="lbl" x="172" y="608">Ingest</text>
+    <g class="badge"><title>Stage 1: Plan and pre-flight</title><circle cx="232" cy="605" r="8"/><text x="232" y="608.5" text-anchor="middle">1</text></g>
+    <text class="lbl" x="246" y="608">Plan and pre-flight</text>
+    <g class="badge"><title>Stage 2: Drain</title><circle cx="384" cy="605" r="8"/><text x="384" y="608.5" text-anchor="middle">2</text></g>
+    <text class="lbl" x="398" y="608">Drain</text>
+    <g class="badge"><title>Stage 3: Update</title><circle cx="452" cy="605" r="8"/><text x="452" y="608.5" text-anchor="middle">3</text></g>
+    <text class="lbl" x="466" y="608">Update</text>
+    <g class="badge"><title>Stage 4: Reset</title><circle cx="526" cy="605" r="8"/><text x="526" y="608.5" text-anchor="middle">4</text></g>
+    <text class="lbl" x="540" y="608">Reset</text>
+    <g class="badge"><title>Stage 5: Post-checks</title><circle cx="594" cy="605" r="8"/><text x="594" y="608.5" text-anchor="middle">5</text></g>
+    <text class="lbl" x="608" y="608">Post-checks</text>
+    <g class="badge"><title>Stage 6: Undrain, or roll back</title><circle cx="698" cy="605" r="8"/><text x="698" y="608.5" text-anchor="middle">6</text></g>
+    <text class="lbl" x="712" y="608">Undrain, or roll back</text>
+  </g>
+</svg>

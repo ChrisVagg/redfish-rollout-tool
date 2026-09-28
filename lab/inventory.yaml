@@ -1,0 +1,15 @@
+# Fleet inventory. In prod the inventory will retrieve from Configuration Management DB like Nautobot which i have used before.
+# writable: true lets rollout.py run --yes update to update the BMCs in the inventory below
+defaults: {verify: false, scheme: https, timeout: [5, 30], retries: 1, max_failures: 3, deadline: 300,
+           username_env: LAB_USERNAME, password_env: LAB_PASSWORD, writable: true}
+servers:
+  - {host: "127.0.0.1:2441", vendor: OpenBMC, project: lab, rack: r1, canary: true}
+  - {host: "127.0.0.1:2442", vendor: OpenBMC, project: lab, rack: r2}
+  - {host: "127.0.0.1:2443", vendor: OpenBMC, project: lab, rack: r3}
+  - {host: "127.0.0.1:2444", vendor: OpenBMC, project: lab, rack: r1}
+  - {host: "127.0.0.1:2445", vendor: OpenBMC, project: lab, rack: r2}
+  - {host: "127.0.0.1:2446", vendor: OpenBMC, project: lab, rack: r3}
+  - {host: "127.0.0.1:2447", vendor: OpenBMC, project: lab, rack: r1}
+  - {host: "127.0.0.1:2448", vendor: OpenBMC, project: lab, rack: r2}
+  - {host: "127.0.0.1:2449", vendor: OpenBMC, project: lab, rack: r3}
+  - {host: "127.0.0.1:2450", vendor: OpenBMC, project: lab, rack: r1}

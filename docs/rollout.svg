@@ -1,0 +1,150 @@
+<svg viewBox="0 0 900 384" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="The rollout, the same on every site with the policy from the site's rollout.yaml: pipeline.sh plans, updates a canary of each hardware model, then wave by wave, and reports either way. Plan pre-flights every host and saves the waves. After the canary and after each wave a gate decides: the canary and the first strict waves stop the pipeline on any failure, later waves when more than halt_at of the hosts tried failed; a wave that passes soaks, and its hosts are checked again before the next wave. A stop leaves the remaining waves undone and exits 1. Every host goes through six steps, the hosts of one wave in parallel: pre-flight on a live re-read, a scheduler drain when the reset restarts the host, update by multipart push or SimpleUpdate pull applied on reset, a reset of the BMC or the system and a wait until it is back, a post-check of the running version, health and new jobs, then undrain; a failed post-check rolls back by reinstalling the version from before. Every step is recorded twice, its intent before and its result after, in the site's run records, from which the report is built as report.json and report.html.">
+  <style>
+    .rfr text { font-family: var(--mono, monospace); }
+    .rfr .bg { fill: var(--bg-deep, #050708); }
+    .rfr .box { fill: var(--surface, #0d1417); stroke: var(--line, #2a3538); }
+    .rfr .grp { fill: none; stroke: var(--line, #2a3538); }
+    .rfr .name { fill: var(--fg, #e6f7fa); font-size: 13px; font-weight: 600; }
+    .rfr .sub { fill: var(--dim, #6f8f97); font-size: 10px; }
+    .rfr .band { fill: var(--dim, #6f8f97); font-size: 9.5px; letter-spacing: .14em; }
+    .rfr .lbl { fill: var(--dim, #6f8f97); font-size: 10px; }
+    .rfr .hi { fill: var(--teal, #00ffc8); }
+    .rfr .wire { fill: none; stroke: var(--dim, #6f8f97); stroke-width: 1; }
+    .rfr .cut { fill: none; stroke: var(--teal, #00ffc8); stroke-width: 1; stroke-dasharray: 5 5; opacity: .75; }
+    /* the canary and the strict first wave: the same colours as the racks in lab.svg */
+    .rfr .canary .box { stroke: color-mix(in srgb, var(--teal, #00ffc8) 60%, transparent); }
+    .rfr .canary .name { fill: var(--teal, #00ffc8); }
+    .rfr .w1 .box { stroke: color-mix(in srgb, var(--violet, #b18cff) 60%, transparent); }
+    .rfr .w1 .name { fill: var(--violet, #b18cff); }
+    /* the way out, drawn quieter than the way through: a failed gate stops the pipeline, a failed post-check rolls back */
+    .rfr .back { fill: none; stroke: var(--rose, #ff5c8a); stroke-width: 1; stroke-dasharray: 3 3; opacity: .8; }
+    .rfr .gate { fill: var(--surface, #0d1417); stroke: var(--rose, #ff5c8a); }
+    .rfr .stop { fill: none; stroke: color-mix(in srgb, var(--rose, #ff5c8a) 55%, transparent); }
+    .rfr .lbl.back-lbl { fill: var(--rose, #ff5c8a); }
+    /* draw.io-style marching dashes on the way through only */
+    @keyframes rfr-flow { to { stroke-dashoffset: -32; } }
+    .rfr .flow { stroke-dasharray: 5 11; animation: rfr-flow 1.6s linear infinite; }
+    @media (prefers-reduced-motion: reduce) {
+      .rfr .flow { animation: none; stroke-dasharray: none; }
+    }
+  </style>
+  <defs>
+    <marker id="rfr-dim" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto">
+      <path d="M0 0 8 4 0 8z" style="fill: var(--dim, #6f8f97)"/>
+    </marker>
+    <marker id="rfr-rose" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto">
+      <path d="M0 0 8 4 0 8z" style="fill: var(--rose, #ff5c8a)"/>
+    </marker>
+  </defs>
+  <g class="rfr">
+    <rect class="bg" x="0" y="0" width="900" height="384" rx="12"/>
+
+    <!-- the pipeline: plan, a canary per model, then wave by wave; a gate after each -->
+    <text class="band hi" x="20" y="24">THE ROLLOUT · pipeline.sh · THE SAME ON EVERY SITE · POLICY FROM &lt;site&gt;/rollout.yaml</text>
+    <rect class="cut" x="20" y="30" width="860" height="290" rx="10"/>
+
+    <rect class="stop" x="320" y="44" width="416" height="26" rx="6"/>
+    <text class="lbl back-lbl" x="528" y="61" text-anchor="middle">STOP · the waves left don't run · exit 1</text>
+    <path class="back" d="M736 57H798V96" marker-end="url(#rfr-rose)"/>
+
+    <rect class="box" x="40" y="100" width="124" height="60" rx="8"/>
+    <text class="name" x="102" y="122" text-anchor="middle">1 · plan</text>
+    <text class="sub" x="102" y="139" text-anchor="middle">pre-flight · waves</text>
+    <text class="sub" x="102" y="152" text-anchor="middle">saves plan.json</text>
+
+    <g class="canary">
+      <rect class="box" x="214" y="100" width="124" height="60" rx="8"/>
+      <text class="name" x="276" y="122" text-anchor="middle">2 · canary</text>
+      <text class="sub" x="276" y="139" text-anchor="middle">1 per model</text>
+      <text class="sub" x="276" y="152" text-anchor="middle">then soak, recheck</text>
+    </g>
+
+    <g class="w1">
+      <rect class="box" x="388" y="100" width="124" height="60" rx="8"/>
+      <text class="name" x="450" y="122" text-anchor="middle">3 · wave 1</text>
+      <text class="sub" x="450" y="139" text-anchor="middle">the smallest share</text>
+      <text class="sub" x="450" y="152" text-anchor="middle">then soak, recheck</text>
+    </g>
+
+    <rect class="box" x="562" y="100" width="124" height="60" rx="8"/>
+    <text class="name" x="624" y="122" text-anchor="middle">wave 2 … N</text>
+    <text class="sub" x="624" y="139" text-anchor="middle">growing to 100%</text>
+    <text class="sub" x="624" y="152" text-anchor="middle">soak but the last</text>
+
+    <rect class="box" x="736" y="100" width="124" height="60" rx="8"/>
+    <text class="name" x="798" y="122" text-anchor="middle">4 · report</text>
+    <text class="sub" x="798" y="139" text-anchor="middle">runs either way</text>
+    <text class="sub" x="798" y="152" text-anchor="middle">report.json · html</text>
+
+    <path class="wire flow" d="M164 130H210" marker-end="url(#rfr-dim)"/>
+
+    <!-- a gate after each: pass goes on, fail goes to STOP -->
+    <path class="wire flow" d="M338 130H355M371 130H384" marker-end="url(#rfr-dim)"/>
+    <path class="gate" d="M363 122l8 8-8 8-8-8z"/>
+    <text class="lbl" x="363" y="152" text-anchor="middle">pass</text>
+    <path class="back" d="M363 122V74" marker-end="url(#rfr-rose)"/>
+    <text class="lbl back-lbl" x="369" y="92">any failed</text>
+
+    <path class="wire flow" d="M512 130H529M545 130H558" marker-end="url(#rfr-dim)"/>
+    <path class="gate" d="M537 122l8 8-8 8-8-8z"/>
+    <text class="lbl" x="537" y="152" text-anchor="middle">pass</text>
+    <path class="back" d="M537 122V74" marker-end="url(#rfr-rose)"/>
+    <text class="lbl back-lbl" x="543" y="92">any failed · strict</text>
+
+    <path class="wire flow" d="M686 130H703M719 130H732" marker-end="url(#rfr-dim)"/>
+    <path class="gate" d="M711 122l8 8-8 8-8-8z"/>
+    <text class="lbl" x="711" y="152" text-anchor="middle">pass</text>
+    <path class="back" d="M711 122V74" marker-end="url(#rfr-rose)"/>
+    <text class="lbl back-lbl" x="717" y="92">&gt; halt_at</text>
+
+    <path class="wire" d="M276 160V172M450 160V172M624 160V172M276 172H624"/>
+    <path class="wire flow" d="M450 172V182" marker-end="url(#rfr-dim)"/>
+
+    <!-- every host of the canary and of each wave: steps 1 to 6 -->
+    <rect class="grp" x="40" y="186" width="820" height="120" rx="8"/>
+    <text class="band" x="56" y="204">STEPS 1-6 ON EVERY HOST · A WAVE'S HOSTS IN PARALLEL · THE NEXT WAVE WAITS FOR ALL</text>
+
+    <rect class="box" x="56" y="214" width="118" height="56" rx="8"/>
+    <text class="name" x="115" y="234" text-anchor="middle">1 pre-flight</text>
+    <text class="sub" x="115" y="249" text-anchor="middle">live re-read</text>
+    <text class="sub" x="115" y="262" text-anchor="middle">go, else skip</text>
+
+    <rect class="box" x="190" y="214" width="118" height="56" rx="8"/>
+    <text class="name" x="249" y="234" text-anchor="middle">2 drain</text>
+    <text class="sub" x="249" y="249" text-anchor="middle">if the host resets</text>
+    <text class="sub" x="249" y="262" text-anchor="middle">scheduler command</text>
+
+    <rect class="box" x="324" y="214" width="118" height="56" rx="8"/>
+    <text class="name" x="383" y="234" text-anchor="middle">3 update</text>
+    <text class="sub" x="383" y="249" text-anchor="middle">push or pull</text>
+    <text class="sub" x="383" y="262" text-anchor="middle">apply OnReset</text>
+
+    <rect class="box" x="458" y="214" width="118" height="56" rx="8"/>
+    <text class="name" x="517" y="234" text-anchor="middle">4 reset</text>
+    <text class="sub" x="517" y="249" text-anchor="middle">BMC or system</text>
+    <text class="sub" x="517" y="262" text-anchor="middle">wait until back</text>
+
+    <rect class="box" x="592" y="214" width="118" height="56" rx="8"/>
+    <text class="name" x="651" y="234" text-anchor="middle">5 post-check</text>
+    <text class="sub" x="651" y="249" text-anchor="middle">version = target</text>
+    <text class="sub" x="651" y="262" text-anchor="middle">health · new jobs</text>
+
+    <rect class="box" x="726" y="214" width="118" height="56" rx="8"/>
+    <text class="name" x="785" y="234" text-anchor="middle">6 undrain</text>
+    <text class="sub" x="785" y="249" text-anchor="middle">host back in</text>
+    <text class="sub" x="785" y="262" text-anchor="middle">the scheduler</text>
+
+    <path class="wire flow" d="M174 242H186" marker-end="url(#rfr-dim)"/>
+    <path class="wire flow" d="M308 242H320" marker-end="url(#rfr-dim)"/>
+    <path class="wire flow" d="M442 242H454" marker-end="url(#rfr-dim)"/>
+    <path class="wire flow" d="M576 242H588" marker-end="url(#rfr-dim)"/>
+    <path class="wire flow" d="M710 242H722" marker-end="url(#rfr-dim)"/>
+
+    <path class="back" d="M651 270V284H383V275" marker-end="url(#rfr-rose)"/>
+    <text class="lbl back-lbl" x="517" y="298" text-anchor="middle">post-check failed → roll back: reinstall the old version, reset, check</text>
+
+    <!-- the evidence -->
+    <rect class="box" x="40" y="334" width="820" height="34" rx="8"/>
+    <text class="sub" x="450" y="355" text-anchor="middle">every step recorded twice, intent before and result after · &lt;site&gt;/runs/&lt;run id&gt;.jsonl → report.json · report.html</text>
+  </g>
+</svg>
