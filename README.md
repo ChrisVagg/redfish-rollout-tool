@@ -32,9 +32,10 @@ Every host, in the canary and in each wave, goes through six steps; the hosts of
    `Task` of its `TaskService`; every change of `TaskState`, `PercentComplete` and `Messages` is recorded, and the
    report shows the task, its messages and its progress under the step.
 4. **reset**: `Manager.Reset` or `ComputerSystem.Reset`, graceful first, then wait until it answers again.
-5. **post-check**: the target version runs, health is OK or no worse than before, and no new job failed or hangs.
-6. **undrain**. When the post-check failed, **roll back** first: reinstall the version from before, reset, check
-   again. A host that can't be rolled back stays drained for a person (`needs_attention`).
+5. **post-check**: the target version runs, health is OK and no new job failed or stale.
+6. **rollback**. When the post-check failed, roll back first: reinstall the version from before, reset, check
+   again. A host that can't be rolled back stays drained and needs attention from a person in site(`needs_attention`).
+7. **undrain**. If the post-check pass undrain the nodes - hosts.
 
 Pre-flight gives each host **go**, **skip** (nothing to do, or busy: try a later wave) or **block** (a person has to
 look), with every reason. It blocks a downgrade or a version order it can't tell (unless `--allow-downgrade`), a
