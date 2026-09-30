@@ -14,3 +14,5 @@ lab/scenario/
 /lab/runs/
 /prod/runs/
 todo
+# local screenshots, taken through a see-through terminal: the README uses docs/runs/
+docs/lab-images/

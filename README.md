@@ -54,6 +54,12 @@ and run records.
 
 ![The report of an update of all ten BMCs](docs/runs/update.svg)
 
+<details><summary>The terminal while it ran: every stage, and every step of every BMC as it happened</summary>
+
+![The terminal of make lab-pipeline-update](docs/runs/update-live.svg)
+
+</details>
+
 **A rollout that goes wrong** (`hybrid`): wave 1 has a good host, one whose new firmware fails its post-check and is
 rolled back, and one whose BMC refuses the image. Wave 1 is strict, so the pipeline stops there and wave 2 never
 starts. The other bad updates, one fault each, are under [Bad updates](#bad-updates).
@@ -66,7 +72,7 @@ Needs Linux x86-64, Docker with Compose, Python 3.10+ and `curl`.
 
 ```sh
 make setup                 # venv/ and requirements.txt
-make lab-up                # downloads QEMU and two OpenBMC builds, boots 10 BMCs (~5 min)
+make lab-up                # downloads QEMU and two OpenBMC builds (~230 MB), boots 10 BMCs (~7 min)
 make lab-pipeline-plan     # dry run: plan, canary, waves; nothing is written
 make lab-pipeline-update   # the rollout: a canary of 1 BMC, then waves of 3 and 6
 make lab-pipeline-report   # the verdict, what needs a person, every host by wave (HOST=… for its steps)
