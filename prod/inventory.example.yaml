@@ -1,11 +1,10 @@
-defaults:          
-  workers: 4       
-  scheme: http     
+# Copy to prod/inventory.yaml (git-ignored) and list your BMCs. The credentials come from the environment variables
+# named here, which make reads from prod/.env: a ReadOnly account is all the poller and plan need.
+defaults: {scheme: https, verify: false}
 
-vendors:            
-  vendor_name: &vendor_name {username_env: redfish_username, password_env: redfish_psw}
+vendors:
+  dell: &dell {username_env: DELL_REDFISH_USERNAME, password_env: DELL_REDFISH_PASSWORD}
 
 servers:
-  - {host: ip, vendor: ASUS, project: project_name, <<: *vedor_name}
-
-  
+  - {host: 10.0.0.5, vendor: Dell, project: cluster-a, rack: r1, <<: *dell}
+  - {host: 10.0.0.6, vendor: Dell, project: cluster-a, rack: r2, <<: *dell}

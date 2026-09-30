@@ -16,3 +16,4 @@ lab/scenario/
 todo
 # local screenshots, taken through a see-through terminal: the README uses docs/runs/
 docs/lab-images/
+schemas/

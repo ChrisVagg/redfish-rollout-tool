@@ -339,7 +339,7 @@ rollout.py          plan, run, report
 test_rollout.py     checks of the wave plan: python test_rollout.py
 constants.py        what to crawl, table columns, rollout constants
 helpers.py          shared helpers
-schemas/            DMTF Redfish JSON Schemas, for sensor units
+schemas/            DMTF Redfish JSON Schemas for sensor units, downloaded on first use (git-ignored)
 lab/                the emulated BMCs: Dockerfile, compose.yaml, images.sh, heal.sh, scenario.sh, inventory.yaml,
                     rollout.yaml
 prod/               the real fleet: baseline.yaml, rollout.yaml; inventory.yaml and .env stay local
