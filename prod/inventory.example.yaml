@@ -6,6 +6,6 @@ vendors:
   vendor_name: &vendor_name {username_env: redfish_username, password_env: redfish_psw}
 
 servers:
-  - {host: 10.11.12.10, vendor: ASUS, project: LQC4, <<: *vedor_name}
+  - {host: ip, vendor: ASUS, project: project_name, <<: *vedor_name}
 
   
