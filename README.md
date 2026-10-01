@@ -216,8 +216,7 @@ With the lab's 10 BMCs in 3 racks: canary 2441 (fw image), wave 1 of 3 (one per 
 
 Equipment running production services runs the same tools, the same pipeline and the same six steps with `SITE=prod`; only the inventory, the credentials and the policy change.
 
-The operations in these systems -**ASUS**, **HPE**, **Supermicro**, **DELL**- are **read-only**: `make prod-collect`, the views (`make prod-health`, `prod-firmware`...) and
-`make prod-plan`.
+The operations in these systems -**ASUS**, **DELL**, **HPE**, **Gigabyte**, **Supermicro**- are **read-only**: `make prod-collect`, the views (`make prod-health`, `prod-firmware`...) and `make prod-plan`.
 
 [prod/inventory.example.yaml](prod/inventory.example.yaml)
 

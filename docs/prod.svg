@@ -1,4 +1,4 @@
-<svg viewBox="0 0 900 462" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Production today: the real fleet, read-only. prod/rollout.yaml holds the policy for when writes are enabled: a canary of one host per hardware model, then waves to 5%, 25% and 100%, at most one host of a rack in a wave, the first wave strict, a halt over 2% failed, a 30 minute soak, 50 at once. Today poller.py collects every BMC and shows health, firmware, inventory, telemetry, capabilities and diff views, and rollout.py plan pre-flights and plans waves, read-only; run --yes is refused because no host is writable. Both use the prod/ folder: the inventory, the baseline, the policy and a ReadOnly account per vendor in .env. They speak Redfish over HTTPS, GET only, to the real fleet: each vendor's own Redfish implementation, ASUS Z13PH-D16 and Gigabyte TO24-JD1 on AMI's Redfish server, Dell PowerEdge R630 and R730xd on iDRAC 8, HPE ProLiant DL360 Gen9 on iLO 4, each on the BMC chip of its motherboard.">
+<svg viewBox="0 0 900 462" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Production today: the real fleet, read-only. prod/rollout.yaml holds the policy for when writes are enabled: a canary of one host per hardware model, then waves to 5%, 25% and 100%, at most one host of a rack in a wave, the first wave strict, a halt over 2% failed, a 30 minute soak, 50 at once. Today poller.py collects every BMC and shows health, firmware, inventory, telemetry, capabilities and diff views, and rollout.py plan pre-flights and plans waves, read-only; run --yes is refused because no host is writable. Both use the prod/ folder: the inventory, the baseline, the policy and a ReadOnly account per vendor in .env. They speak Redfish over HTTPS, GET only, to the real fleet: each vendor's own Redfish implementation, ASUS Z13PH-D16 and Gigabyte TO24-JD1 on AMI's Redfish server, Dell PowerEdge R630 and R730xd on iDRAC 8, HPE ProLiant DL360 Gen9 on iLO 4, Supermicro SYS-221H-TNR on Supermicro's BMC firmware, each on the BMC chip of its motherboard.">
   <style>
     .rfp text { font-family: var(--mono, monospace); }
     .rfp .bg { fill: var(--bg-deep, #050708); }
@@ -63,36 +63,41 @@
 
       <!-- the real fleet: each vendor's firmware on its own BMC chip -->
       <rect class="cut" x="20" y="226" width="860" height="216" rx="10"/>
-      <text class="band hi" x="36" y="244">REAL FLEET · FOUR VENDORS, ONE API</text>
+      <text class="band hi" x="36" y="244">REAL FLEET · FIVE VENDORS, ONE API</text>
 
       <rect class="box" x="40" y="254" width="820" height="44" rx="8"/>
       <text class="name" x="450" y="273" text-anchor="middle">Redfish service · each vendor's own implementation</text>
       <text class="sub" x="450" y="289" text-anchor="middle">the same DMTF schemas, laid out and filled differently · the tools read standard properties only</text>
 
-      <rect class="box" x="40" y="312" width="190" height="60" rx="8"/>
-      <text class="name hi" x="135" y="332" text-anchor="middle">ASUS</text>
-      <text class="sub" x="135" y="349" text-anchor="middle">Z13PH-D16</text>
-      <text class="sub" x="135" y="363" text-anchor="middle">AMI Redfish Server</text>
+      <rect class="box" x="40" y="312" width="152" height="60" rx="8"/>
+      <text class="name hi" x="116" y="332" text-anchor="middle">ASUS</text>
+      <text class="sub" x="116" y="349" text-anchor="middle">Z13PH-D16</text>
+      <text class="sub" x="116" y="363" text-anchor="middle">AMI Redfish Server</text>
 
-      <rect class="box" x="250" y="312" width="190" height="60" rx="8"/>
-      <text class="name hi" x="345" y="332" text-anchor="middle">Dell</text>
-      <text class="sub" x="345" y="349" text-anchor="middle">PowerEdge R630, R730xd</text>
-      <text class="sub" x="345" y="363" text-anchor="middle">iDRAC 8</text>
+      <rect class="box" x="207" y="312" width="152" height="60" rx="8"/>
+      <text class="name hi" x="283" y="332" text-anchor="middle">Dell</text>
+      <text class="sub" x="283" y="349" text-anchor="middle">PowerEdge R630, R730xd</text>
+      <text class="sub" x="283" y="363" text-anchor="middle">iDRAC 8</text>
 
-      <rect class="box" x="460" y="312" width="190" height="60" rx="8"/>
-      <text class="name hi" x="555" y="332" text-anchor="middle">HPE</text>
-      <text class="sub" x="555" y="349" text-anchor="middle">ProLiant DL360 Gen9</text>
-      <text class="sub" x="555" y="363" text-anchor="middle">iLO 4</text>
+      <rect class="box" x="374" y="312" width="152" height="60" rx="8"/>
+      <text class="name hi" x="450" y="332" text-anchor="middle">HPE</text>
+      <text class="sub" x="450" y="349" text-anchor="middle">ProLiant DL360 Gen9</text>
+      <text class="sub" x="450" y="363" text-anchor="middle">iLO 4</text>
 
-      <rect class="box" x="670" y="312" width="190" height="60" rx="8"/>
-      <text class="name hi" x="765" y="332" text-anchor="middle">Gigabyte</text>
-      <text class="sub" x="765" y="349" text-anchor="middle">TO24-JD1</text>
-      <text class="sub" x="765" y="363" text-anchor="middle">AMI Redfish Server</text>
+      <rect class="box" x="541" y="312" width="152" height="60" rx="8"/>
+      <text class="name hi" x="617" y="332" text-anchor="middle">Gigabyte</text>
+      <text class="sub" x="617" y="349" text-anchor="middle">TO24-JD1</text>
+      <text class="sub" x="617" y="363" text-anchor="middle">AMI Redfish Server</text>
+
+      <rect class="box" x="708" y="312" width="152" height="60" rx="8"/>
+      <text class="name hi" x="784" y="332" text-anchor="middle">Supermicro</text>
+      <text class="sub" x="784" y="349" text-anchor="middle">SYS-221H-TNR</text>
+      <text class="sub" x="784" y="363" text-anchor="middle">Supermicro BMC</text>
 
       <rect class="box" x="40" y="386" width="820" height="44" rx="8"/>
       <text class="name hi" x="450" y="405" text-anchor="middle">BMC chip on each motherboard</text>
       <text class="sub" x="450" y="421" text-anchor="middle">its own CPU, RAM, flash and NIC · reads sensors over I²C, PECI, PMBus · up with the host off</text>
     </g>
-    <path class="wire" d="M135 298V312M345 298V312M555 298V312M765 298V312M135 372V386M345 372V386M555 372V386M765 372V386"/>
+    <path class="wire" d="M116 298V312M283 298V312M450 298V312M617 298V312M784 298V312M116 372V386M283 372V386M450 372V386M617 372V386M784 372V386"/>
   </g>
 </svg>
