@@ -208,19 +208,18 @@ used. It is reviewed like code: it decides how many hosts a bad image can reach 
 | `max_parallel` | 10 | 50 | Updates running at once within a wave: the BMCs and the image server set the limit. |
 | `soak` | 60 s | 30 min | After a wave, wait, then check its hosts again before the next wave: some faults show only after a while. |
 
-With the lab's 10 BMCs in 3 racks: canary 2441, wave 1 of 3 (one per rack), wave 2 of 6 (two per rack).
+With the lab's 10 BMCs in 3 racks: canary 2441 (fw image), wave 1 of 3 (one per rack), wave 2 of 6 (two per rack).
 
-## Production approach
+## Approach in production IT Equipment
 
 ![Production](docs/prod.svg)
 
-Production runs the same tools, the same pipeline and the same six steps with `SITE=prod`; only the inventory, the
-credentials and the policy change.
+Equipment running production services runs the same tools, the same pipeline and the same six steps with `SITE=prod`; only the inventory, the credentials and the policy change.
 
-Today production is **read-only**: `make prod-collect`, the views (`make prod-health`, `prod-firmware`...) and
-`make prod-plan` run against real ASUS, Dell, HPE and Gigabyte BMCs with a ReadOnly account. `rollout.py run --yes`
-refuses every host not marked `writable: true`, and no production host is. The inventory and credentials are
-git-ignored, so create them ([prod/inventory.example.yaml](prod/inventory.example.yaml) shows the format):
+The operations in these systems -**ASUS**, **HPE**, **Supermicro**, **DELL**- are **read-only**: `make prod-collect`, the views (`make prod-health`, `prod-firmware`...) and
+`make prod-plan`.
+
+[prod/inventory.example.yaml](prod/inventory.example.yaml)
 
 ```yaml
 # prod/inventory.yaml
@@ -266,19 +265,26 @@ To run it:
 - **Run**: with `prod/.env` exported, `SITE=prod ./pipeline.sh "Manager (BMC)"` is the dry run and `YES=1` updates.
   It runs from an admin host on the BMC management network.
 
-### A production system
+---
+## Not built yet
+- Rolling back by switching to the other A/B bank (a host that would need it stays drained as
+`needs_attention`.
+- Rolling out ring by ring or region by region.
+
+### A production system - scaling for a large fleet
 
 ![A production firmware-update system](docs/production-system.svg)
 
 At fleet scale the rollout becomes a distributed system. The figure is the target, in four parts:
 
 - **Supply chain**: a vendor image is downloaded, its checksum and signature checked, tested on lab hosts of every
-  model, then promoted into an approved store (Artifactory or S3). Nothing else reaches a BMC.
+  model, then promoted into an approved store (Artifactory or S3).
 - **Control plane**: an operator requests a rollout through an API and CLI, and approves the canary. A workflow engine
-  (Argo or Temporal) reads the firmware catalog (the baseline per model) and the inventory (Nautobot), pre-flights,
+  (Argo or Temporal) reads the firmware catalog (the **baseline** per model) and the inventory (Nautobot), pre-flights,
   plans the canary and waves, and applies the gates. A rollout state database (PostgreSQL) holds each host's state and
   wave, a lock per host so two rollouts never touch the same host, and an append-only audit trail; a gate is a query on
-  it. The engine's own store only keeps workflow history, to resume after a crash.
+  it. 
+- DB for storing the state of hosts after a failed stage.
 - **Each site**: a site agent on the management network takes the work of each wave, gets short-lived BMC credentials
   from Vault, drains hosts through the scheduler (Slurm or Kubernetes) and drives the update over Redfish. The BMCs
   pull the image from a cache in their site, so each file crosses the WAN once per site.
@@ -305,30 +311,6 @@ How this repository maps onto it:
 | Secrets | `prod/.env`, git-ignored | Vault, short-lived credentials |
 | Observability | the report: terminal, HTML and `report.json` | metrics, and alerts on a halt |
 
-Not built yet: rolling back by switching to the other A/B bank (a host that would need it stays drained as
-`needs_attention`), and rolling out ring by ring or region by region in one command; today that is one pipeline per
-ring, with its own inventory.
-
-## The Redfish service in a BMC
-
-A BMC (baseboard management controller) is a small computer on the server's motherboard, with its own CPU, memory,
-flash and network port. It runs whenever the server has power, even with the host off, and reads the board's sensors,
-power supplies and firmware versions. Redfish is the DMTF's REST API for it: JSON over HTTPS, rooted at
-`/redfish/v1`, with one resource model across vendors.
-
-| Resource | Used for |
-|---|---|
-| `Systems`, `Chassis`, `Managers` | identity, health, sensors; `Manager.Reset` restarts the BMC |
-| `UpdateService` → `FirmwareInventory` | the firmware running, images staged, what can be updated |
-| `MultipartHttpPushUri`, `SimpleUpdate` | hand an image to the BMC: push the file, or give it a URL to pull |
-| `TaskService` | follow an update until it ends |
-| `SessionService` | a login token instead of Basic auth on every request |
-
-In OpenBMC the Redfish service is **bmcweb**. It serves `/redfish/v1` on port 443 and maps each request to D-Bus
-objects owned by the phosphor services: sensors, power state, and the software manager that verifies and activates
-firmware images. The production BMCs (iDRAC, iLO, AMI MegaRAC) run their vendor's own implementation, which lays out
-and fills the tree differently. The tools read standard DMTF properties only, and report what a BMC doesn't expose in
-standard form as "not reported" rather than guess.
 
 ## Layout
 

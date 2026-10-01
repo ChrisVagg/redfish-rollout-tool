@@ -28,7 +28,25 @@ def test_fleet():
     assert sorted(s["host"] for _, hosts in plan for s in hosts) == sorted(s["host"] for s in servers)
 
 
+# Push or pull, against what the BMC allows: a target or a URL scheme outside AllowableValues means no, before any drain
+def test_ways_in():
+    import rollout
+    rollout.update_targets_of = lambda found, component: ["/redfish/v1/Managers/bmc"]
+    found = {"/redfish/v1/UpdateService": {
+        "@odata.type": "#UpdateService.v1_11_0.UpdateService", "MultipartHttpPushUri": "/redfish/v1/UpdateService/up",
+        "Actions": {"#UpdateService.SimpleUpdate": {
+            "target": "/redfish/v1/UpdateService/Actions/UpdateService.SimpleUpdate",
+            "TransferProtocol@Redfish.AllowableValues": ["HTTPS"],
+            "Targets@Redfish.AllowableValues": ["/redfish/v1/Managers/bmc"]}}}}
+    push, pull = rollout.ways_in(found, "Manager (BMC)", "https://mirror/bmc.tar")
+    assert push == "yes · /redfish/v1/UpdateService/up" and pull.startswith("yes · HTTPS")
+    assert rollout.ways_in(found, "Manager (BMC)", "http://mirror/bmc.tar")[1].startswith("no: HTTP not in")
+    rollout.update_targets_of = lambda found, component: ["/redfish/v1/Systems/system/Bios"]
+    assert "not in Targets@AllowableValues" in rollout.ways_in(found, "System BIOS")[1]
+
+
 if __name__ == "__main__":
     test_lab()
     test_fleet()
+    test_ways_in()
     print("ok")

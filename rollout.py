@@ -189,11 +189,41 @@ def entries(found, component) -> list[dict]:
 
 
 # How this BMC takes an image: multipart push, SimpleUpdate with its transfer protocols, the older HttpPushUri
+# A SimpleUpdate parameter's AllowableValues, from the action itself or its ActionInfo; None when the BMC lists none
+def allowable(found, action, name) -> list | None:
+    info = found.get(norm(action.get("@Redfish.ActionInfo") or "")) or {}
+    listed = [p.get("AllowableValues") for p in info.get("Parameters") or [] if p.get("Name") == name]
+    return action.get(f"{name}@Redfish.AllowableValues") or next(filter(None, listed), None)
+
+
+# How a component's image can reach the BMC: (push, pull), each "yes · …", "no: why" or "not verified: …". Push sends
+# the file to MultipartHttpPushUri; pull has the BMC fetch a URL with SimpleUpdate, whose Targets and TransferProtocol
+# must be in their AllowableValues when the BMC lists them. url: the catalog's image when it's a URL, to check its scheme
+def ways_in(found, component, url=None) -> tuple[str, str]:
+    update = first_of(found, "UpdateService")
+    targets = update_targets_of(found, component)
+    if not update or update.get("ServiceEnabled") is False:
+        return "no: no update service", "no: no update service"
+    push = (f"yes · {update['MultipartHttpPushUri']}" if update.get("MultipartHttpPushUri")
+            else "no: no MultipartHttpPushUri")
+    action = obj(obj(update.get("Actions")).get("#UpdateService.SimpleUpdate"))
+    if not action:
+        return push, "no: no SimpleUpdate action"
+    allowed_targets, protocols = allowable(found, action, "Targets"), allowable(found, action, "TransferProtocol")
+    outside = [t for t in targets if allowed_targets is not None and t not in allowed_targets]
+    scheme = url.split("://")[0].upper() if url and "://" in url else None
+    if outside:
+        return push, f"no: {', '.join(outside)} not in Targets@AllowableValues"
+    if scheme and protocols is not None and scheme not in protocols:
+        return push, f"no: {scheme} not in TransferProtocol@AllowableValues ({', '.join(protocols)})"
+    listed = (f"{', '.join(protocols)}" if protocols is not None else "protocols not listed") + \
+        (" · targets listed" if allowed_targets is not None else " · targets not listed")
+    return push, ("yes · " if allowed_targets is not None and protocols is not None else "not verified: ") + listed
+
+
 def update_methods(found, update) -> list[str]:
     action = obj(obj(update.get("Actions")).get("#UpdateService.SimpleUpdate"))
-    info = found.get(norm(action.get("@Redfish.ActionInfo") or "")) or {}
-    listed = [p.get("AllowableValues") for p in info.get("Parameters") or [] if p.get("Name") == "TransferProtocol"]
-    protocols = action.get("TransferProtocol@Redfish.AllowableValues") or next(iter(listed), None)
+    protocols = allowable(found, action, "TransferProtocol")
     return [*(["multipart"] if update.get("MultipartHttpPushUri") else []),
             *([f"SimpleUpdate ({', '.join(protocols or ['protocols not listed'])})"] if action else []),
             *(["HttpPushUri"] if update.get("HttpPushUri") else [])]
@@ -441,6 +471,11 @@ def check(found, baselines, key, policy=None) -> dict:
     test("update service", update and update.get("ServiceEnabled") is not False and methods,
          "no UpdateService" if not update else "UpdateService disabled" if update.get("ServiceEnabled") is False
          else f"UpdateService: {result['methods']}" if methods else "no update method")
+    file = (target or {}).get("file", "")
+    push, pull = ways_in(found, component, file if "://" in file else None)
+    if target:
+        way = pull if "://" in file else push
+        test("pull allowed" if "://" in file else "push allowed", not way.startswith("no:"), way)
     if "HttpPushUriTargetsBusy" in update:
         test("push targets free", update["HttpPushUriTargetsBusy"] is not True,
              f"HttpPushUriTargetsBusy {text(update['HttpPushUriTargetsBusy'])}", defer=True)
@@ -558,16 +593,20 @@ def host_report(server, found, read_at, baselines, policy) -> list:
     outside = [c for c in components if c in wanted and c not in update_targets(found)]  # baselined, not updatable
     results = {c: check(found, baselines, c, policy) for c in components if c in wanted and c not in outside}
     rows = []
+
+    # lambda c: a component -> (push, pull), the pull checked against its catalog image's URL when it has one
+    ways = lambda c: ways_in(found, c, (image_for(policy["images"], found, model, c, wanted.get(c)) or {}).get("file")
+                             if c in wanted else None) if c not in outside else ("-", "in-band only")
     for c in components:
         version, r = running.get(c, (None, ""))[0], results.get(c)
         if r:
             why = "\n".join([*r["reasons"], *filter(None, r["notes"])]) or "-"
-            rows.append((c, text(ids.get(c)), text(version), text(r["want"]), r["direction"], r["updateable"],
+            rows.append((c, text(ids.get(c)), text(version), text(r["want"]), r["direction"], r["updateable"], *ways(c),
                          r["ab"], r["rollback"], r["verdict"], why))
         else:
             why = "update it in-band, from the host OS" if c in outside else "-"
             back = "-" if c in outside else rollback_path(found, c, policy["images"], model, version)
-            rows.append((c, text(ids.get(c)), text(version), text(wanted.get(c)), "-", can[c], ab_bank(found, c),
+            rows.append((c, text(ids.get(c)), text(version), text(wanted.get(c)), "-", can[c], *ways(c), ab_bank(found, c),
                          back, "-", why))
     system, manager, update = (first_of(found, t) for t in ("ComputerSystem", "Manager", "UpdateService"))
     size = update.get("MaxImageSizeBytes")

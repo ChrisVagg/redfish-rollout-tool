@@ -93,8 +93,8 @@ JOBS_ROW = ("Host", "Resource", "Name", "State", "Status", "Message", "Time")
 PREFLIGHT_ROW = ("Host", "Project", "Model", "Updateable", "A/B bank", "Rollback", "Running", "Baseline", "Direction",
                  "Verdict", "Reasons", "Update methods")
 PLAN_ROW = ("Wave", "Hosts", "Members")
-HOST_ROW = ("Component", "SoftwareId", "Running", "Baseline", "Direction", "Updateable", "A/B bank", "Rollback",
-            "Verdict", "Reasons")
+HOST_ROW = ("Component", "SoftwareId", "Running", "Baseline", "Direction", "Updateable", "Push", "Pull", "A/B bank",
+            "Rollback", "Verdict", "Reasons")
 # Job and task states of work still going on: pre-flight skips the host for now. Any other state but Completed
 # (Exception, Killed, Cancelled, Interrupted, UserIntervention...) blocks it until a person looks.
 RUNNING_STATES = {"New", "Starting", "Running", "Suspended", "Pending", "Stopping", "Service", "Continue", "Validating",
