@@ -317,7 +317,8 @@ How this repository maps onto it:
 ```
 Makefile            every command: make help
 pipeline.sh         plan → canary → waves → report
-redfish_poller.py   collect, then the views: health, firmware, inventory, telemetry, capabilities, diff
+poller.py           collect, then the views: health, firmware, inventory, telemetry, capabilities, diff
+redfish.py          the Redfish connection both tools share: session, token, GET, POST, PATCH
 rollout.py          plan, run, report
 test_rollout.py     checks of the wave plan: python test_rollout.py
 constants.py        what to crawl, table columns, rollout constants

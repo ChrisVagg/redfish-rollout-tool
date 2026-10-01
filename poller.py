@@ -38,112 +38,26 @@ from datetime import datetime, timezone
 from functools import lru_cache, partial
 from pathlib import Path
 from typing import Any
-from urllib.parse import urljoin
 
 import requests
 import urllib3
 import yaml
-from requests.adapters import HTTPAdapter
 from rich.console import Group
 from rich.rule import Rule
 from rich.table import Column, Table
 from rich.text import Text
-from urllib3.util.retry import Retry
 
 from constants import (ACTION, ALLOWED, BASELINE, CAPABILITIES_ROW, CHASSIS, COMPLIANCE_ROW, CRITICAL, DMTF, FIELDS,
                        FW_PARTS, HEADERS, INVENTORY_FILE, INVENTORY_ROW, JOBS_ROW, JOB_TYPES, KIND, LIMIT, LINKS,
-                       MANAGER, OEM_PATH, PREVIOUS, PROPS, READINGS, ROOT, SCHEMAS, SENSORS, SERVICE, SEVERITY, SILENT,
-                       SKIP, STATUS_LEAF, SUMMARY, SYSTEM, TELEMETRY_ROW, TEMPLATES, VOLATILE, WILDCARD)
+                       MANAGER, OEM_PATH, PREVIOUS, PROPS, READINGS, ROOT, SCHEMAS, SENSORS, SERVICE, SEVERITY, SKIP,
+                       STATUS_LEAF, SUMMARY, SYSTEM, TELEMETRY_ROW, TEMPLATES, VOLATILE, WILDCARD)
 from helpers import (at, block, choose, connection, details, discrete, first_of, first_real, identity, items, label,
                      load, named, norm, obj, of, output_options, per_host, pick, pointer, previous, properties,
                      reachable, real, reason, rollup, rtype, show, snapshot_path, tally, text)
+from redfish import call, login, logout, tunnel
 
 log = logging.getLogger("redfish")
 _schema_lock = threading.Lock()  # one schema file read or downloaded at a time across the host threads
-
-
-# ---- Connection: one persistent HTTPS connection per BMC; every call goes over it ----
-
-# A keep-alive HTTPS connection to one BMC with Basic auth, and the limits of its crawl
-def tunnel(server) -> tuple[requests.Session, str, dict]:
-    """One socket: the BMCs speak HTTP/1.1 only (no HTTP/2 multiplexing), so calls go one after another over it.
-    Limits, from the inventory [default]:
-      timeout       [5, 30]  seconds per request: connect, read
-      retries       [2]      per request, back-off 1s, 2s, 4s...: dropped connections, timeouts, 429/502/503/504
-                             (a Retry-After header is honoured)
-      max_failures  [3]      requests in a row without any answer before the host is given up
-      deadline      [600]    seconds for the whole crawl of one host
-    Returns (session, base URL, limits); limits also counts the failures in a row and holds the deadline time."""
-    session = requests.Session()
-    try:
-        session.auth = (os.environ[server["username_env"]], os.environ[server["password_env"]])
-    except KeyError as e:
-        sys.exit(f"{server['host']}: env var {e} not set: run it through make (make help), or export it first")
-    session.verify = server["verify"]
-    session.headers["Accept"] = "application/json"
-    retry = Retry(total=server.get("retries", 2), backoff_factor=1, status_forcelist=[429, 502, 503, 504])
-    session.mount(server["scheme"] + "://", HTTPAdapter(pool_connections=1, pool_maxsize=1, max_retries=retry))
-    limits = {"timeout": tuple(server.get("timeout", (5, 30))), "max_failures": server.get("max_failures", 3),
-              "deadline": server.get("deadline", 600), "until": float("inf"), "failures": 0}
-    return session, f"{server['scheme']}://{server['host']}", limits
-
-
-# GET one resource over the BMC's connection; a failed GET comes back as {"error": reason} for the report
-def call(tunnel, uri) -> dict:
-    """Raises ConnectionAbortedError, which stops the crawl of this host, past the host's deadline, when this is the
-    max_failures-th request in a row without an answer, or on a 401: every further request would be another failed
-    login, and BMCs lock the account after a few."""
-    session, base, limits = tunnel
-    if time.monotonic() > limits["until"]:
-        raise ConnectionAbortedError(f"stopped at the {limits['deadline']}s deadline")
-    try:
-        r = session.get(base + uri, timeout=limits["timeout"])
-        limits["failures"] = 0  # answer with error status
-        if r.status_code == 401:
-            raise ConnectionAbortedError("Incorrect credentials.")
-        r.raise_for_status()
-        return r.json()
-    except SILENT as e:
-        limits["failures"] += 1
-        error = f"{type(e).__name__}: {reason(str(e))}"
-        if limits["failures"] >= limits["max_failures"]:
-            raise ConnectionAbortedError(f"not responding, {limits['failures']} requests in a row: {error}")
-        return {"error": error}
-    except ValueError:
-        content = r.headers.get("Content-Type", "no content type")
-        return {"error": f"Answer not from redfish service: {content} from {r.url}"}
-    except requests.RequestException as e:
-        return {"error": f"{type(e).__name__}: {reason(str(e))}"}
-
-
-# Swap Basic auth for a Redfish session token; returns the session URI to log out, or None
-def login(tunnel) -> str | None:
-    """iDRAC re-checks the password on every Basic-auth request (~4s each), a token costs one login. On None,
-    Basic auth stays."""
-    session, base, limits = tunnel
-    uri = obj(obj(call(tunnel, ROOT).get("Links")).get("Sessions")).get("@odata.id")  # None: unreachable, discover says
-    if not uri:
-        return None
-    user, password = session.auth
-    try:
-        r = session.post(base + uri, json={"UserName": user, "Password": password}, timeout=limits["timeout"])
-    except requests.RequestException as e:
-        log.warning("%s: login: %s, staying on Basic auth", base, reason(str(e)))
-        return None
-    token = r.headers.get("X-Auth-Token")  # iDRAC sends one even with an error status
-    if not token:
-        return None
-    session.auth, session.headers["X-Auth-Token"] = None, token
-    return r.headers.get("Location")
-
-
-# Close the session: BMCs allow only a handful, a leaked one holds a slot until it times out
-def logout(tunnel, location) -> None:
-    session, base, limits = tunnel
-    try:
-        session.delete(urljoin(base, location), timeout=limits["timeout"])
-    except requests.RequestException as e:
-        log.warning("%s: logout: %s", base, reason(str(e)))
 
 
 # ---- Discovery: recursive from the service root, each resource once ----
@@ -838,7 +752,7 @@ def view_detail(args) -> list:
     try:
         snap = json.loads(snapshot_path(args.host).read_text())
     except FileNotFoundError:
-        sys.exit(f"no snapshot for {args.host}: run 'redfish_poller.py collect' first")
+        sys.exit(f"no snapshot for {args.host}: run 'poller.py collect' first")
     return [report(snap, snap["resources"])]
 
 

@@ -3,7 +3,7 @@
 #   lab/   10 emulated OpenBMC BMCs (QEMU in Docker), where the rollout really updates firmware
 # The tools read their site from SITE (prod by default). `make` lists each site's targets and the variables they take.
 PY     := venv/bin/python
-POLL   := $(PY) redfish_poller.py
+POLL   := $(PY) poller.py
 VIEWS  := health firmware inventory telemetry capabilities diff
 WIDTH  := 200
 DOCKER := docker compose -f lab/compose.yaml

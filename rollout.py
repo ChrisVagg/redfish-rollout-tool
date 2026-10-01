@@ -48,7 +48,6 @@ from datetime import datetime, timezone
 from functools import lru_cache, partial
 from itertools import zip_longest
 from pathlib import Path
-from urllib.parse import urljoin
 
 import requests
 import urllib3
@@ -61,9 +60,10 @@ from constants import (ACTION_ROW, ACTIONS_ROW, BASELINE, DOTTED, FAILED_STATES,
                        INVENTORY_FILE, LEFT_OUT_ROW, NEXT_STEP, PLAN_ROW, PREFLIGHT_ROW, PROPS, REPORT_SCHEMA,
                        RESET_PREFERENCE, ROLLOUT, ROLLOUT_DEFAULTS, ROOT, RUNNING_STATES, RUNS, SEMVER, SITE,
                        STEP_ROW, STYLE, VERSIONS_ROW, WAVE_ROW)
-from helpers import block, first_of, first_real, identity, label, norm, obj, of, output_options, reason, show, text
-from redfish_poller import (call, firmware, host_baseline, image_state, inventory_groups, load_baseline, load_servers,
-                            login, logout, open_jobs, software_ids, tunnel)
+from helpers import block, first_of, first_real, identity, label, norm, obj, of, output_options, show, text
+from poller import (firmware, host_baseline, image_state, inventory_groups, load_baseline, load_servers, open_jobs,
+                    software_ids)
+from redfish import call, login, logout, send, tunnel
 
 log = logging.getLogger("redfish")
 
@@ -724,20 +724,6 @@ def record(path, host, step, state, **detail) -> None:
     with _record_lock, open(path, "a") as f:
         f.write(json.dumps(event, default=str) + "\n")
     log.info("%s: %s %s%s", host, step, state, f" · {detail['detail']}" if detail.get("detail") else "")
-
-
-# One HTTP request with its status: (status, headers, JSON body); status 0 when the BMC doesn't answer
-def send(tunnel, method, uri, timeout=None, **kwargs) -> tuple[int, dict, dict]:
-    session, base, limits = tunnel
-    try:
-        r = session.request(method, urljoin(base, uri), timeout=timeout or limits["timeout"], **kwargs)
-    except requests.RequestException as e:
-        return 0, {}, {"error": {"message": f"{type(e).__name__}: {reason(str(e))}"}}
-    try:
-        body = r.json() if r.content else {}
-    except ValueError:
-        body = {}
-    return r.status_code, r.headers, obj(body)
 
 
 # A failed answer as text: the Redfish error's first extended message, else its message, with the status

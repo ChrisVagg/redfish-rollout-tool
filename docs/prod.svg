@@ -1,4 +1,4 @@
-<svg viewBox="0 0 900 462" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Production today: the real fleet, read-only. prod/rollout.yaml holds the policy for when writes are enabled: a canary of one host per hardware model, then waves to 5%, 25% and 100%, at most one host of a rack in a wave, the first wave strict, a halt over 2% failed, a 30 minute soak, 50 at once. Today redfish_poller.py collects every BMC and shows health, firmware, inventory, telemetry, capabilities and diff views, and rollout.py plan pre-flights and plans waves, read-only; run --yes is refused because no host is writable. Both use the prod/ folder: the inventory, the baseline, the policy and a ReadOnly account per vendor in .env. They speak Redfish over HTTPS, GET only, to the real fleet: each vendor's own Redfish implementation, ASUS Z13PH-D16 and Gigabyte TO24-JD1 on AMI's Redfish server, Dell PowerEdge R630 and R730xd on iDRAC 8, HPE ProLiant DL360 Gen9 on iLO 4, each on the BMC chip of its motherboard.">
+<svg viewBox="0 0 900 462" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Production today: the real fleet, read-only. prod/rollout.yaml holds the policy for when writes are enabled: a canary of one host per hardware model, then waves to 5%, 25% and 100%, at most one host of a rack in a wave, the first wave strict, a halt over 2% failed, a 30 minute soak, 50 at once. Today poller.py collects every BMC and shows health, firmware, inventory, telemetry, capabilities and diff views, and rollout.py plan pre-flights and plans waves, read-only; run --yes is refused because no host is writable. Both use the prod/ folder: the inventory, the baseline, the policy and a ReadOnly account per vendor in .env. They speak Redfish over HTTPS, GET only, to the real fleet: each vendor's own Redfish implementation, ASUS Z13PH-D16 and Gigabyte TO24-JD1 on AMI's Redfish server, Dell PowerEdge R630 and R730xd on iDRAC 8, HPE ProLiant DL360 Gen9 on iLO 4, each on the BMC chip of its motherboard.">
   <style>
     .rfp text { font-family: var(--mono, monospace); }
     .rfp .bg { fill: var(--bg-deep, #050708); }
@@ -34,7 +34,7 @@
 
     <!-- today: the tools, read-only, and the prod/ folder they share -->
     <rect class="box" x="40" y="94" width="250" height="76" rx="8"/>
-    <text class="name" x="165" y="116" text-anchor="middle">redfish_poller.py</text>
+    <text class="name" x="165" y="116" text-anchor="middle">poller.py</text>
     <text class="sub" x="165" y="134" text-anchor="middle">collect: crawl each BMC's tree</text>
     <text class="sub" x="165" y="148" text-anchor="middle">health · firmware · inventory</text>
     <text class="sub" x="165" y="162" text-anchor="middle">telemetry · capabilities · diff</text>
