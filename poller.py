@@ -18,6 +18,9 @@
   capabilities              What each hardware model can do: Redfish version, services, actions, firmware update
                             methods, telemetry support.
   diff                      What changed on each host between the previous collect and the latest one.
+  exporter [INVENTORY]      Crawl every BMC each --interval and serve the readings, health, firmware and BMC
+                            resources as Prometheus metrics on --listen. One session per BMC, kept across crawls;
+                            a host whose fresh login is refused is not asked again until a restart.
   detail HOST               Everything about one host: inventory, services, actions, health and telemetry. A
                             reading's unit comes from the BMC's MetricDefinitions, else the DMTF JSON Schema of the
                             resource (downloaded once into ./schemas), else the resource itself (ReadingUnits).
@@ -29,6 +32,7 @@ import json
 import logging
 import os
 import re
+import signal
 import sys
 import threading
 import time
@@ -36,6 +40,8 @@ from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from functools import lru_cache, partial
+from math import inf
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
@@ -50,11 +56,11 @@ from rich.text import Text
 from constants import (ACTION, ALLOWED, BASELINE, CAPABILITIES_ROW, CHASSIS, COMPLIANCE_ROW, CRITICAL, DMTF, FIELDS,
                        FW_PARTS, HEADERS, INVENTORY_FILE, INVENTORY_ROW, JOBS_ROW, JOB_TYPES, KIND, LIMIT, LINKS,
                        MANAGER, OEM_PATH, PREVIOUS, PROPS, READINGS, ROOT, SCHEMAS, SENSORS, SERVICE, SEVERITY, SKIP,
-                       STATUS_LEAF, SUMMARY, SYSTEM, TELEMETRY_ROW, TEMPLATES, VOLATILE, WILDCARD)
+                       STATUS_LEAF, SUMMARY, SYSTEM, TELEMETRY_ROW, TEMPLATES, THRESHOLD, VOLATILE, WILDCARD)
 from helpers import (at, block, choose, connection, details, discrete, first_of, first_real, identity, items, label,
-                     load, named, norm, obj, of, output_options, per_host, pick, pointer, previous, properties,
-                     reachable, real, reason, rollup, rtype, show, snapshot_path, tally, text)
-from redfish import call, login, logout, tunnel
+                     link, load, named, norm, obj, of, output_options, per_host, pick, pointer, previous, properties,
+                     reachable, real, reason, rollup, rtype, sample, show, snapshot_path, tally, text, uri_of)
+from redfish import REFUSED, call, login, logout, tunnel
 
 log = logging.getLogger("redfish")
 _schema_lock = threading.Lock()  # one schema file read or downloaded at a time across the host threads
@@ -75,9 +81,9 @@ def links(doc) -> list[str]:
 def discover(tunnel, uri, found) -> dict:
     # ponytail: one stack frame per link hop; iterate with an explicit stack if a BMC ever nests ~900 deep
     found[uri] = call(tunnel, uri)
-    # lambda link: a linked URI -> True when it hasn't been fetched yet
-    for link in filter(lambda link: link not in found, links(found[uri])):
-        discover(tunnel, link, found)
+    # lambda u: a linked URI -> True when it hasn't been fetched yet
+    for child in filter(lambda u: u not in found, links(found[uri])):
+        discover(tunnel, child, found)
     return found
 
 
@@ -108,18 +114,29 @@ def download(name) -> dict:
     return doc
 
 
+# The newest versioned schema file of a type, as its unversioned file lists them: Sensor -> Sensor.v1_11_0.json
+def newest(name) -> str:
+    listed = re.findall(rf"{re.escape(name)}\.v\d+_\d+_\d+\.json", json.dumps(schema_file(name + ".json")))
+    return listed[-1] if listed else name + ".json"
+
+
 # {property: unit} for every property with a unit in the type's schema
 @lru_cache(maxsize=None)
 def schema_units(name, version) -> dict[str, str]:
     """Without a version (iLO 4): the newest versioned schema the unversioned file lists."""
-    if version:
-        file = f"{name}.{version}.json"
-    else:
-        listed = re.findall(rf"{re.escape(name)}\.v\d+_\d+_\d+\.json", json.dumps(schema_file(name + ".json")))
-        file = listed[-1] if listed else name + ".json"
-    schema = schema_file(file)
+    schema = schema_file(f"{name}.{version}.json" if version else newest(name))
     return {p: s["units"] for d in (schema.get("definitions") or {}).values()
             for p, s in (obj(d).get("properties") or {}).items() if "units" in obj(s)}
+
+
+# The unit DMTF's newest Sensor schema gives a ReadingType ("The `ReadingUnits` property shall contain `J`", older
+# versions "the ReadingUnits value shall be 'Cel'"); None without one. For sensors that report no ReadingUnits
+@lru_cache(maxsize=None)
+def reading_type_unit(reading_type) -> str | None:
+    types = obj(obj(schema_file(newest("Sensor")).get("definitions")).get("ReadingType"))
+    said = obj(types.get("enumLongDescriptions")).get(reading_type) or ""
+    m = re.search(r"ReadingUnits`? (?:property shall contain(?: either)?|value shall be) [`'](.+?)[`']", said)
+    return m[1] if m else None
 
 
 # ---- Telemetry: every numeric property with a unit that measures something ----
@@ -144,7 +161,9 @@ def definition(definitions, metric) -> dict:
 # A record for one numeric property (keys: kind and FIELDS); kind is None for a number that measures nothing
 def reading(uri, doc, definitions, path, value) -> dict:
     """Its unit comes from the BMC's MetricDefinition for it, else the DMTF schema, else a sibling '<Property>Units'
-    (Sensor.ReadingUnits), else, for a Sensor's threshold (Thresholds/UpperCritical/Reading), the sensor's own unit.
+    (Sensor.ReadingUnits), else the unit DMTF's Sensor schema gives its ReadingType, else, for a threshold without a unit
+    of its own (a Sensor's Thresholds/UpperCritical/Reading, a Fan's UpperThresholdCritical), the unit of the object
+    holding it.
     What it measures comes from the unit, else from the Sensor's ReadingType; Role says reading or limit. Name, Status
     and Critical are those of the nearest named object holding it (the sensor, fan or power supply)."""
     keys = path.split("/")
@@ -155,8 +174,8 @@ def reading(uri, doc, definitions, path, value) -> dict:
     item, prop, last = obj(at(doc, keys[:i])), "/".join(keys[i:]), keys[-1]
     unit = md.get("Units") or schema_units(name, version).get(last) or obj(at(doc, keys[:-1])).get(last + "Units")
     kind = KIND.get(unit)
-    if last == "Reading":  # a Sensor, or one of its thresholds: the sensor's own unit and ReadingType
-        unit = unit or item.get("ReadingUnits")
+    if last == "Reading" or (not unit and "Threshold" in prop):  # a Sensor, a Fan, or a threshold of one
+        unit = unit or item.get("ReadingUnits") or reading_type_unit(item.get("ReadingType"))
         kind = kind or KIND.get(unit) or item.get("ReadingType")
     flat = properties(item)
     return {"kind": kind, "resource": pointer(uri, keys[:i]), "name": named(item), "property": prop,
@@ -361,19 +380,7 @@ def overview(rows) -> Table | list:
 
 # Crawl one host into ./snapshots/<host>.json; the snapshot before it moves to ./snapshots/previous
 def snapshot(server, tunnel) -> dict:
-    start, found, stopped = time.monotonic(), {}, None
-    tunnel[2]["until"] = start + tunnel[2]["deadline"]
-    try:
-        location = login(tunnel)
-        try:
-            discover(tunnel, ROOT, found)
-        finally:
-            if location:
-                logout(tunnel, location)
-    except ConnectionAbortedError as e:  # raised by call(): what was found so far is kept, the views say why
-        stopped = str(e)
-        log.warning("%s: %s", server["host"], stopped)
-    seconds = round(time.monotonic() - start, 1)
+    found, seconds, stopped = crawl(server, tunnel)
     log.info("%s: %d resources in %.0fs", server["host"], len(found), seconds)
     snap = {"host": server["host"], "vendor": server.get("vendor", "-"), "project": server.get("project", "-"),
             "collected": datetime.now(timezone.utc).isoformat(timespec="seconds"), "seconds": seconds,
@@ -384,6 +391,24 @@ def snapshot(server, tunnel) -> dict:
         path.replace(PREVIOUS / path.name)  # the crawl before, for the diff view
     path.write_text(json.dumps(snap))
     return snap
+
+
+# One crawl of a host's tree: (resources found, seconds, why it stopped or None); deadline caps the host's own.
+# keep: the tunnel already holds a session, the crawl neither logs in nor out
+def crawl(server, tunnel, deadline=None, keep=False) -> tuple[dict, float, str | None]:
+    start, found, stopped = time.monotonic(), {}, None
+    tunnel[2].update(until=start + min(tunnel[2]["deadline"], deadline or tunnel[2]["deadline"]), failures=0)
+    try:
+        location = None if keep else login(tunnel)
+        try:
+            discover(tunnel, ROOT, found)
+        finally:
+            if location:
+                logout(tunnel, location)
+    except ConnectionAbortedError as e:  # raised by call(): what was found so far is kept, the views say why
+        stopped = str(e)
+        log.warning("%s: %s", server["host"], stopped)
+    return found, round(time.monotonic() - start, 1), stopped
 
 
 # Every server of the inventory, the inventory's defaults filled in
@@ -401,6 +426,249 @@ def collect(args) -> list:
         snaps = list(pool.map(snapshot, servers, tunnels))
     # lambda s: a snapshot -> its summary row
     return [overview(per_host(lambda s: summary(s, s["resources"], s["seconds"]), snaps))]
+
+
+# ---- Updates: what Redfish can update on a host and how an image can reach it; rollout.py's pre-flight and the
+# exporter read the same ----
+
+# The firmware inventory entries a component's update touches, so pre-flight can check them
+def entries(found, component) -> list[dict]:
+    """An inventory row's own entries. For System BIOS and Manager (BMC): the entries a manager lists in
+    Links.SoftwareImages, or whose RelatedItem points at the system's BIOS or at the manager, together with the other
+    images of the same component (same SoftwareId), such as a staged one that carries no links."""
+    groups = inventory_groups(found)
+    if component in groups:
+        return [d for _, d in groups[component]]
+    owners = {"System BIOS": {link(d, "Bios") for _, d in of(found, "ComputerSystem")},
+              "Manager (BMC)": {u for u, _ in of(found, "Manager")}}.get(component, set())
+    images = [i for _, m in of(found, "Manager") for i in obj(m.get("Links")).get("SoftwareImages") or []]
+    listed = set(map(uri_of, images)) if component == "Manager (BMC)" else set()
+    inventory = of(found, "SoftwareInventory")
+    linked = [u for u, d in inventory if u in listed or owners & set(map(uri_of, d.get("RelatedItem") or []))]
+    ids = {d.get("SoftwareId") for u, d in inventory if u in linked} - {None}
+    return [d for u, d in inventory if u in linked or d.get("SoftwareId") in ids]
+
+
+# A SimpleUpdate parameter's AllowableValues, from the action itself or its ActionInfo; None when the BMC lists none
+def allowable(found, action, name) -> list | None:
+    info = found.get(norm(action.get("@Redfish.ActionInfo") or "")) or {}
+    listed = [p.get("AllowableValues") for p in info.get("Parameters") or [] if p.get("Name") == name]
+    return action.get(f"{name}@Redfish.AllowableValues") or next(filter(None, listed), None)
+
+
+# How this BMC takes an image: multipart push, SimpleUpdate with its transfer protocols, the older HttpPushUri
+# How a component's image can reach the BMC: (push, pull), each "yes · …", "no: why" or "not verified: …". Push
+# sends the file to MultipartHttpPushUri; pull has the BMC fetch a URL with SimpleUpdate, whose Targets and
+# TransferProtocol must be in their AllowableValues when the BMC lists them. url: the catalog's image when it's a URL
+def ways_in(found, component, url=None) -> tuple[str, str]:
+    update = first_of(found, "UpdateService")
+    targets = update_targets_of(found, component)
+    if not update or update.get("ServiceEnabled") is False:
+        return "no: no update service", "no: no update service"
+    push = (f"yes · {update['MultipartHttpPushUri']}" if update.get("MultipartHttpPushUri")
+            else "no: no MultipartHttpPushUri")
+    action = obj(obj(update.get("Actions")).get("#UpdateService.SimpleUpdate"))
+    if not action:
+        return push, "no: no SimpleUpdate action"
+    allowed_targets, protocols = allowable(found, action, "Targets"), allowable(found, action, "TransferProtocol")
+    outside = [t for t in targets if allowed_targets is not None and t not in allowed_targets]
+    scheme = url.split("://")[0].upper() if url and "://" in url else None
+    if outside:
+        return push, f"no: {', '.join(outside)} not in Targets@AllowableValues"
+    if scheme and protocols is not None and scheme not in protocols:
+        return push, f"no: {scheme} not in TransferProtocol@AllowableValues ({', '.join(protocols)})"
+    listed = (f"{', '.join(protocols)}" if protocols is not None else "protocols not listed") + \
+        (" · targets listed" if allowed_targets is not None else " · targets not listed")
+    return push, ("yes · " if allowed_targets is not None and protocols is not None else "not verified: ") + listed
+
+
+# What an update can target on this BMC: System BIOS, Manager (BMC) and every firmware inventory row
+def update_targets(found) -> set[str]:
+    """The firmware view's other rows (drives, controllers, NICs, PSUs read from their own resources) only report a
+    version: Redfish updates what the BMC lists in its firmware inventory."""
+    return {"System BIOS", "Manager (BMC)", *inventory_groups(found)}
+
+
+# Whether Redfish can update a component on this host, and why not: the Updateable column
+def updatable(found, component) -> str:
+    """Redfish has no reason field; the reasons are the schema's meaning of the properties. No: the component isn't in
+    the firmware inventory (its version comes from another resource), an entry of it is WriteProtected ("cannot be
+    altered or overwritten"), or its entries have Updateable false ("the service cannot update this software, it is
+    for reporting purposes only"). Not verified: no inventory entry is linked to it (System BIOS and Manager (BMC)
+    on BMCs without RelatedItem), or its entries don't report Updateable."""
+    if component not in update_targets(found):
+        return "no: not in the firmware inventory"
+    touched = entries(found, component)
+    flags = [d.get("Updateable") for d in touched]
+    if not touched:
+        return "not verified: no inventory entry linked"
+    if any(d.get("WriteProtected") is True for d in touched):
+        return "no: WriteProtected (cannot be overwritten)"
+    if True in flags:
+        return "yes"
+    if all(flag is False for flag in flags):
+        return "no: Updateable false (reporting only)"
+    return "not verified: Updateable not reported"
+
+
+# The targets of an update: the component's RelatedItem, else its inventory entries; [] lets the BMC decide
+def update_targets_of(found, component) -> list[str]:
+    touched = entries(found, component)
+    related = {u for d in touched for u in map(uri_of, d.get("RelatedItem") or []) if u}
+    return sorted(related or {u for u in map(uri_of, touched) if u})
+
+
+# ---- Exporter: every BMC's telemetry as Prometheus metrics, read again every interval ----
+
+# A threshold property's name in DMTF's Sensor schema: UpperThresholdNonCritical and Thresholds/UpperCaution/Reading
+# are both UpperCaution; None for any other property
+def threshold(prop) -> str | None:
+    m = THRESHOLD.search(prop)
+    if not m:
+        return None
+    side, level = (m[1], m[2]) if m[1] else (m[3], m[4])
+    return side + ("Caution" if level == "NonCritical" else level)
+
+
+# One host's crawl as Prometheus samples, all from standard properties: what the equipment is (the inventory's vendor,
+# project and rack, the BMC's Manufacturer and Model; "-" until it answers), whether it answered, how long the crawl
+# took and how many of its GETs failed (what they would have read is missing from this read); every reading with its unit, its thresholds and how far past them it is (0 within, 1 caution, 2 critical,
+# 3 fatal, upper or lower); the health of every object with a Status (-1: none reported); each firmware
+# component with its running version, whether Redfish can update it and how an image gets in (push, pull), as
+# rollout.py plan reports it; the BMC's own memory, storage and uptime (ManagerDiagnosticData) and its last reset
+def exposition(server, found, seconds) -> list[str]:
+    host = server["host"]
+    up = bool(found) and "error" not in found.get(ROOT, {})
+    manufacturer, model = identity(found) if up else ("-", "-")
+    out = [sample("redfish_host_info", 1, host=host, vendor=server.get("vendor", "-"), project=server.get("project", "-"),
+                  rack=server.get("rack", "-"), manufacturer=manufacturer, model=model),
+           sample("redfish_up", int(up), host=host), sample("redfish_crawl_seconds", seconds, host=host),
+           sample("redfish_resources", len(found), host=host),
+           sample("redfish_failed_requests", sum("error" in d for d in found.values()), host=host)]
+    if not up:
+        return out
+    records = readings(found)
+    limits = {}  # (object, kind) -> {threshold: value}: an object's thresholds apply to its readings of that kind
+    for r in records:
+        name = r["role"] == "limit" and threshold(r["property"])
+        if name and isinstance(r["value"], (int, float)) and r["value"]:  # 0: none set (iLO 4, AMI's lower ones)
+            limits.setdefault((r["resource"], r["kind"]), {})[name] = r["value"]
+    for r in records:
+        if r["role"] == "reading" and isinstance(r["value"], (int, float)):
+            labels = {"host": host, "kind": r["kind"], "resource": r["resource"], "sensor": r["name"] or "-",
+                      "property": r["property"], "unit": r["unit"] or "-"}  # resource: names repeat (iLO 4's PSUs)
+            out.append(sample("redfish_reading", r["value"], **labels))
+            th, v = limits.get((r["resource"], r["kind"]), {}), r["value"]
+            out += [sample("redfish_reading_threshold", t, **labels, threshold=name) for name, t in th.items()]
+            # lambda level: True when the reading is at or past that level's upper or lower threshold
+            past = lambda level: v >= th.get("Upper" + level, inf) or v <= th.get("Lower" + level, -inf)
+            if th:
+                out.append(sample("redfish_reading_crossed", next(
+                    (n for n, level in ((3, "Fatal"), (2, "Critical"), (1, "Caution")) if past(level)), 0), **labels))
+    for resource, kind, name, health, health_rollup, state in components(found):
+        out.append(sample("redfish_health", {"OK": 0, "Warning": 1, "Critical": 2}.get(health, -1), host=host,
+                          resource=resource, type=kind, name=name, health=health, rollup=health_rollup, state=state))
+    ids, targets = software_ids(found), update_targets(found)
+    for component, (version, _) in firmware(found).items():
+        push, pull = ways_in(found, component) if component in targets else ("-", "-")
+        out.append(sample("redfish_firmware_info", 1, host=host, component=component, version=text(version),
+                          software_id=ids.get(component, "-"), updateable=updatable(found, component), push=push,
+                          pull=pull))
+    for uri, d in of(found, "Manager"):
+        if d.get("LastResetTime"):
+            reset = datetime.fromisoformat(d["LastResetTime"]).timestamp()
+            out.append(sample("redfish_manager_last_reset_timestamp_seconds", reset, host=host, manager=uri))
+    for uri, d in of(found, "ManagerDiagnosticData"):
+        memory = obj(d.get("MemoryStatistics"))
+        out += [sample("redfish_bmc_memory_bytes", memory[k], host=host, type=k.removesuffix("Bytes").lower())
+                for k in ("TotalBytes", "AvailableBytes") if isinstance(memory.get(k), (int, float))]
+        if isinstance(d.get("FreeStorageSpaceKiB"), (int, float)):
+            out.append(sample("redfish_bmc_free_storage_bytes", d["FreeStorageSpaceKiB"] * 1024, host=host))
+    return out
+
+
+# poller.py exporter: crawl every BMC each interval, in parallel, and serve the latest metrics on /metrics. Prometheus
+# scrapes them; the crawl runs on its own cycle, so a slow BMC never makes a scrape wait
+def exporter(args) -> list:
+    # A fresh clone has no prod/inventory.yaml: serve no BMC and stay up, so the stack starts the same everywhere
+    servers = load_servers(args.config) if Path(args.config).exists() else []
+    if not servers:
+        log.warning("exporter: no BMC in %s, nothing to read", args.config)
+    for server in servers:
+        tunnel(server)  # fails on missing credentials before any request
+    parts = {server["host"]: [] for server in servers}  # host -> the samples of its latest read
+    # One Redfish session per BMC, kept across reads: a login per read would fill the BMC's own log (iDRAC's
+    # Lifecycle Log, iLO's security log) with one entry per read
+    sessions = {}  # host -> (tunnel, session URI)
+    refused = set()  # hosts whose fresh login got a 401: never asked again, a BMC locks the account after a few
+    stopping = threading.Event()  # set on the way out: no read starts, so none logs in again after the logout
+
+    # One host's samples: a crawl of at most 3 intervals; a payload that breaks them counts as the host not answering
+    def read(server) -> list[str]:
+        host = server["host"]
+        if host in refused:
+            return [sample("redfish_up", 0, host=host), sample("redfish_login_refused", 1, host=host)]
+        try:
+            # A 401 on a kept session: the BMC ended it (a reset, an update's), so log in again and read once more. A
+            # 401 on a fresh login: the credentials, never asked again
+            for fresh in (host not in sessions, True):
+                if fresh:
+                    bmc = tunnel(server)
+                    sessions[host] = (bmc, login(bmc))
+                found, seconds, stopped = crawl(server, sessions[host][0], args.interval * 3, keep=True)
+                if stopped != REFUSED or stopping.is_set():
+                    break
+                sessions.pop(host)
+                if fresh:
+                    refused.add(host)
+                    log.error("%s: login refused, not asked again until a restart: check its credentials", host)
+                    break
+                log.info("%s: the BMC ended its session, logging in again", host)
+            # A session the BMC would end before the next read (SessionService.SessionTimeout: AMI's is 30 s) is
+            # logged out now, freeing its slot; no session, Basic auth: a new connection next read
+            timeout = first_of(found, "SessionService").get("SessionTimeout")
+            if host in sessions and (not sessions[host][1] or isinstance(timeout, int) and timeout < args.interval):
+                bmc, location = sessions.pop(host)
+                if location:
+                    logout(bmc, location)
+            return exposition(server, found, seconds)
+        except Exception:  # BMC payloads are untrusted: one odd host must not stop the others
+            log.exception("%s: left out of this read", host)
+            return [sample("redfish_up", 0, host=host)]
+
+    # Each BMC on its own loop: a slow one (a full iDRAC 8 crawl takes minutes) never holds up the others
+    def watch(server) -> None:
+        while not stopping.is_set():
+            start = time.monotonic()
+            parts[server["host"]] = read(server)
+            time.sleep(max(0.0, args.interval - (time.monotonic() - start)))
+
+    class Metrics(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            body = "".join(x + "\n" for part in list(parts.values()) for x in part).encode()
+            self.send_response(200 if self.path == "/metrics" else 404)
+            self.send_header("Content-Type", "text/plain; version=0.0.4")
+            self.end_headers()
+            self.wfile.write(body if self.path == "/metrics" else b"")
+
+        def log_message(self, *args) -> None:  # a scrape every 10 s isn't news
+            pass
+
+    for server in servers:
+        threading.Thread(target=watch, args=(server,), daemon=True).start()
+    address, port = args.listen.rsplit(":", 1)
+    log.info("exporter: %d BMCs every %ss, metrics on http://%s/metrics", len(servers), args.interval, args.listen)
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))  # docker stop: log out below
+    try:
+        ThreadingHTTPServer((address, int(port)), Metrics).serve_forever()
+    finally:  # a session left open holds one of the BMC's few slots until it times out
+        stopping.set()
+        log.info("stopping: logging out of %d BMCs; a read still running ends on a 401, not a credentials problem",
+                 len(sessions))
+        for bmc, location in list(sessions.values()):
+            if location:
+                logout(bmc, location)
+    return []
 
 
 # ---- Views: each reads the snapshots and returns what it shows ----
@@ -772,6 +1040,11 @@ def main() -> None:
     command("telemetry", view_telemetry, "every sensor of every host, with its limits")
     command("capabilities", view_capabilities, "what each hardware model can do")
     command("diff", view_diff, "what changed since the previous collect")
+    e = commands.add_parser("exporter", help="read every BMC each interval, serve the metrics to Prometheus")
+    e.add_argument("config", nargs="?", default=INVENTORY_FILE, help="the BMCs [<site>/inventory.yaml]")
+    e.add_argument("--listen", default="127.0.0.1:9101", help="address:port to serve /metrics on [127.0.0.1:9101]")
+    e.add_argument("--interval", type=float, default=10, help="seconds between two reads of every BMC [10]")
+    e.set_defaults(run=exporter)
     d = commands.add_parser("detail", parents=[output], help="everything about one host")
     d.add_argument("host")
     d.set_defaults(run=view_detail)

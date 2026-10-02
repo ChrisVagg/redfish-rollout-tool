@@ -1,4 +1,4 @@
-<svg viewBox="0 0 900 628" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="A production firmware-update system, the target for this rollout at fleet scale. Supply chain: vendor images are downloaded, ingested with their checksum and signature checked, tested on lab hosts of every model, and promoted into an approved store such as Artifactory or S3. Control plane: an operator requests and approves a rollout through an API and CLI; a workflow engine such as Argo or Temporal reads the firmware catalog of baselines per model and the inventory in Nautobot, keeps its execution history in its own store, and writes each host's state, locks and audit trail to a rollout state database in PostgreSQL. Each site, on its management network: a site agent takes the work of each wave, gets short-lived credentials from Vault, drains and undrains hosts through the scheduler, Slurm or Kubernetes, drives updates, tasks and resets over Redfish on the BMCs, and reports inventory and health back; the BMCs pull images from a site image cache, which fetches each image from the approved store once per site; the BMCs manage the GPU hosts. Observability: the engine and the agents send events and metrics to Prometheus and Grafana, and halts and quarantines raise alerts in PagerDuty. Numbered badges mark where each rollout stage happens: 0 ingest, 1 plan and pre-flight, 2 drain, 3 update, 4 reset, 5 post-checks, 6 undrain or roll back.">
+<svg viewBox="0 0 900 628" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="A production firmware-update system, the target for this rollout at fleet scale. Supply chain: vendor images are downloaded, ingested with their checksum and signature checked, tested on lab hosts of every model, and promoted into an approved store such as Artifactory or S3. Control plane: an operator requests and approves a rollout through an API and CLI; a workflow engine such as Temporal (or Argo) reads the firmware catalog of baselines and images per model and the inventory in Nautobot, keeps its execution history in its own store, and writes each host's state, locks and audit trail to a rollout state database in PostgreSQL. Each site, on its management network: a site agent takes the work of each wave, gets short-lived credentials from Vault, drains and undrains hosts through the scheduler, Slurm or Kubernetes, drives updates, tasks and resets over Redfish on the BMCs, and reports inventory and health back; a site image cache fetches each image from the approved store once per site; a BMC that offers SimpleUpdate pulls it from the cache, and for a push-only BMC the agent reads it from the cache and pushes it to MultipartHttpPushUri; the BMCs manage the GPU hosts. Observability: the engine and the agents send events and metrics to Prometheus and Grafana, and halts and quarantines raise alerts in PagerDuty. Numbered badges mark where each rollout stage happens: 0 ingest, 1 plan and pre-flight, 2 drain, 3 update, 4 reset, 5 post-checks, 6 undrain or roll back.">
   <style>
     .ps text { font-family: var(--mono, monospace); }
     .ps .bg { fill: var(--bg-deep, #050708); }
@@ -53,13 +53,13 @@
     <rect class="box" x="40" y="140" width="170" height="46" rx="8"/><rect class="bar g-wf" x="40" y="148" width="3" height="30" rx="1.5"/>
     <text class="name" x="125" y="160" text-anchor="middle">Rollout API + CLI</text><text class="sub" x="125" y="176" text-anchor="middle">request · approve</text>
     <rect class="box" x="40" y="206" width="170" height="46" rx="8"/><rect class="bar g-inv" x="40" y="214" width="3" height="30" rx="1.5"/>
-    <text class="name" x="125" y="226" text-anchor="middle">Firmware catalog</text><text class="sub" x="125" y="242" text-anchor="middle">baselines per model</text>
+    <text class="name" x="125" y="226" text-anchor="middle">Firmware catalog</text><text class="sub" x="125" y="242" text-anchor="middle">baselines · images per model</text>
     <rect class="box" x="40" y="266" width="170" height="46" rx="8"/><rect class="bar g-inv" x="40" y="274" width="3" height="30" rx="1.5"/>
     <text class="name" x="125" y="286" text-anchor="middle">Inventory / CMDB</text><text class="sub" x="125" y="302" text-anchor="middle">Nautobot</text>
     <rect class="box" x="260" y="140" width="170" height="46" rx="8"/><rect class="bar g-wf" x="260" y="148" width="3" height="30" rx="1.5"/>
     <text class="name" x="345" y="160" text-anchor="middle">Engine store</text><text class="sub" x="345" y="176" text-anchor="middle">workflow history</text>
     <rect class="box" x="260" y="206" width="170" height="46" rx="8"/><rect class="bar g-wf" x="260" y="214" width="3" height="30" rx="1.5"/>
-    <text class="name" x="345" y="226" text-anchor="middle">Workflow engine</text><text class="sub" x="345" y="242" text-anchor="middle">Argo or Temporal</text>
+    <text class="name" x="345" y="226" text-anchor="middle">Workflow engine</text><text class="sub" x="345" y="242" text-anchor="middle">Temporal (or Argo)</text>
     <rect class="box" x="450" y="206" width="170" height="46" rx="8"/><rect class="bar g-wf" x="450" y="214" width="3" height="30" rx="1.5"/>
     <text class="name" x="535" y="226" text-anchor="middle">Rollout state DB</text><text class="sub" x="535" y="242" text-anchor="middle">PostgreSQL · locks · audit</text>
     <rect class="box" x="450" y="266" width="170" height="46" rx="8"/><rect class="bar g-sec" x="450" y="274" width="3" height="30" rx="1.5"/>
@@ -83,7 +83,7 @@
     <rect class="box" x="260" y="390" width="170" height="46" rx="8"/><rect class="bar g-wf" x="260" y="398" width="3" height="30" rx="1.5"/>
     <text class="name" x="345" y="410" text-anchor="middle">Site agent</text><text class="sub" x="345" y="426" text-anchor="middle">Redfish worker</text>
     <rect class="box" x="666" y="390" width="198" height="46" rx="8"/><rect class="bar g-img" x="666" y="398" width="3" height="30" rx="1.5"/>
-    <text class="name" x="765" y="410" text-anchor="middle">Image cache</text><text class="sub" x="765" y="426" text-anchor="middle">HTTP proxy</text>
+    <text class="name" x="765" y="410" text-anchor="middle">Image cache</text><text class="sub" x="765" y="426" text-anchor="middle">HTTPS cache</text>
     <rect class="box" x="40" y="470" width="170" height="46" rx="8"/><rect class="bar g-sch" x="40" y="478" width="3" height="30" rx="1.5"/>
     <text class="name" x="125" y="490" text-anchor="middle">Scheduler</text><text class="sub" x="125" y="506" text-anchor="middle">Slurm or Kubernetes</text>
     <rect class="box" x="450" y="470" width="170" height="46" rx="8"/><rect class="bar g-rf" x="450" y="478" width="3" height="30" rx="1.5"/>
@@ -101,7 +101,9 @@
     <path class="edge g-rf" d="M345 436V458H530V466" marker-end="url(#ps-rf)"/>
     <text class="elabel" x="438" y="454" text-anchor="middle">Redfish: update · tasks · reset</text>
     <path class="edge g-img" d="M600 470V462H765V440" marker-end="url(#ps-img)"/>
-    <text class="elabel" x="690" y="458" text-anchor="middle">pulls image</text>
+    <text class="elabel" x="690" y="458" text-anchor="middle">pull: SimpleUpdate</text>
+    <path class="edge g-img" d="M666 428H434" marker-end="url(#ps-img)"/>
+    <text class="elabel" x="548" y="424" text-anchor="middle">file, to push it</text>
     <path class="edge g-hw" d="M620 493H666"/>
     <text class="elabel" x="643" y="510" text-anchor="middle">manages</text>
     <path class="edge g-inv" d="M290 390V342H125V316" marker-end="url(#ps-inv)"/>

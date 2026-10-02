@@ -1,0 +1,469 @@
+{
+ "uid": "prod-pipeline",
+ "title": "Prod · Pipeline",
+ "description": "A rollout as rollout.py run pushes it: hosts by wave and state, versions, steps, checks and gates",
+ "schemaVersion": 39,
+ "editable": false,
+ "time": {
+  "from": "now-1h",
+  "to": "now"
+ },
+ "refresh": "5s",
+ "tags": [
+  "redfish",
+  "prod"
+ ],
+ "links": [
+  {
+   "type": "dashboards",
+   "tags": [
+    "prod"
+   ],
+   "title": "Prod",
+   "asDropdown": false,
+   "includeVars": false,
+   "keepTime": true
+  }
+ ],
+ "panels": [
+  {
+   "type": "text",
+   "title": "",
+   "id": 99,
+   "gridPos": {
+    "x": 0,
+    "y": 0,
+    "w": 24,
+    "h": 3
+   },
+   "options": {
+    "mode": "markdown",
+    "content": "**Production is read-only.** `rollout.py run --yes` refuses hosts not marked `writable: true`, and none in `prod/inventory.yaml` is, so no pipeline pushes here. `make prod-plan` shows what a rollout would do."
+   }
+  },
+  {
+   "type": "stat",
+   "title": "Hosts by state",
+   "gridPos": {
+    "x": 0,
+    "y": 3,
+    "w": 12,
+    "h": 5
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "sum by (state) (rollout_hosts{site=\"$site\",pipeline=\"$pipeline\"})",
+     "legendFormat": "{{state}}",
+     "refId": "A",
+     "instant": false,
+     "range": true
+    }
+   ],
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "id": 1,
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ]
+    },
+    "textMode": "value_and_name",
+    "colorMode": "none"
+   }
+  },
+  {
+   "type": "stat",
+   "title": "Gate after each wave",
+   "gridPos": {
+    "x": 12,
+    "y": 3,
+    "w": 12,
+    "h": 5
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "max by (wave) (rollout_gate_halted{site=\"$site\",pipeline=\"$pipeline\"})",
+     "legendFormat": "{{wave}}",
+     "refId": "A",
+     "instant": false,
+     "range": true
+    }
+   ],
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "id": 2,
+   "fieldConfig": {
+    "defaults": {
+     "mappings": [
+      {
+       "type": "value",
+       "options": {
+        "0": {
+         "text": "passed",
+         "color": "green",
+         "index": 0
+        },
+        "1": {
+         "text": "HALTED",
+         "color": "red",
+         "index": 1
+        }
+       }
+      }
+     ],
+     "color": {
+      "mode": "fixed",
+      "fixedColor": "green"
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ]
+    },
+    "textMode": "value_and_name",
+    "colorMode": "background"
+   }
+  },
+  {
+   "type": "timeseries",
+   "title": "Hosts by state over the run",
+   "gridPos": {
+    "x": 0,
+    "y": 8,
+    "w": 12,
+    "h": 8
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "sum by (state) (rollout_hosts{site=\"$site\",pipeline=\"$pipeline\"})",
+     "legendFormat": "{{state}}",
+     "refId": "A",
+     "instant": false,
+     "range": true
+    }
+   ],
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "id": 3,
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 0,
+      "spanNulls": false,
+      "showPoints": "never"
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "table",
+     "placement": "right",
+     "calcs": [
+      "lastNotNull"
+     ],
+     "showLegend": true
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   }
+  },
+  {
+   "type": "state-timeline",
+   "title": "The pipeline's BMCs answering Redfish",
+   "gridPos": {
+    "x": 12,
+    "y": 8,
+    "w": 12,
+    "h": 8
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "redfish_up{site=\"$site\"} and on (host) group by (host) (rollout_host_info{site=\"$site\",pipeline=\"$pipeline\"})",
+     "legendFormat": "{{host}}",
+     "refId": "A",
+     "instant": false,
+     "range": true
+    }
+   ],
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "id": 4,
+   "fieldConfig": {
+    "defaults": {
+     "mappings": [
+      {
+       "type": "value",
+       "options": {
+        "1": {
+         "text": "up",
+         "color": "green",
+         "index": 0
+        },
+        "0": {
+         "text": "down",
+         "color": "red",
+         "index": 1
+        }
+       }
+      }
+     ],
+     "color": {
+      "mode": "thresholds"
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "red",
+        "value": null
+       },
+       {
+        "color": "green",
+        "value": 1
+       }
+      ]
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "showValue": "never",
+    "mergeValues": true,
+    "rowHeight": 0.8,
+    "legend": {
+     "showLegend": false
+    }
+   },
+   "description": "From the site's exporter: each reset after a flash is a gap"
+  },
+  {
+   "type": "table",
+   "title": "Hosts: versions before, target and after",
+   "gridPos": {
+    "x": 0,
+    "y": 16,
+    "w": 24,
+    "h": 9
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "rollout_host_info{site=\"$site\",pipeline=\"$pipeline\"}",
+     "legendFormat": "",
+     "refId": "A",
+     "instant": true,
+     "range": false,
+     "format": "table"
+    }
+   ],
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "id": 5,
+   "transformations": [
+    {
+     "id": "organize",
+     "options": {
+      "excludeByName": {
+       "Time": true,
+       "__name__": true,
+       "job": true,
+       "instance": true,
+       "site": true,
+       "pipeline": true,
+       "Value": true
+      },
+      "renameByName": {},
+      "indexByName": {
+       "wave": 0,
+       "host": 1,
+       "state": 2,
+       "before": 3,
+       "target": 4,
+       "after": 5,
+       "stage": 6
+      }
+     }
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {},
+    "overrides": []
+   },
+   "options": {
+    "showHeader": true,
+    "cellHeight": "sm",
+    "sortBy": []
+   }
+  },
+  {
+   "type": "bargauge",
+   "title": "Longest step, seconds",
+   "gridPos": {
+    "x": 0,
+    "y": 25,
+    "w": 12,
+    "h": 9
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "max by (step) (rollout_step_seconds{site=\"$site\",pipeline=\"$pipeline\"})",
+     "legendFormat": "{{step}}",
+     "refId": "A",
+     "instant": false,
+     "range": true
+    }
+   ],
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "id": 6,
+   "options": {
+    "orientation": "horizontal",
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ]
+    }
+   }
+  },
+  {
+   "type": "table",
+   "title": "Checks after the flash that failed",
+   "gridPos": {
+    "x": 12,
+    "y": 25,
+    "w": 12,
+    "h": 9
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "rollout_check_ok{site=\"$site\",pipeline=\"$pipeline\"} == 0",
+     "legendFormat": "",
+     "refId": "A",
+     "instant": true,
+     "range": false,
+     "format": "table"
+    }
+   ],
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "id": 7,
+   "transformations": [
+    {
+     "id": "organize",
+     "options": {
+      "excludeByName": {
+       "Time": true,
+       "__name__": true,
+       "job": true,
+       "instance": true,
+       "site": true,
+       "pipeline": true,
+       "Value": true
+      },
+      "renameByName": {},
+      "indexByName": {}
+     }
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {},
+    "overrides": []
+   },
+   "options": {
+    "showHeader": true,
+    "cellHeight": "sm",
+    "sortBy": []
+   }
+  }
+ ],
+ "templating": {
+  "list": [
+   {
+    "name": "site",
+    "label": "Site",
+    "type": "constant",
+    "query": "prod",
+    "hide": 2,
+    "current": {
+     "text": "prod",
+     "value": "prod"
+    },
+    "options": [
+     {
+      "text": "prod",
+      "value": "prod",
+      "selected": true
+     }
+    ]
+   },
+   {
+    "name": "pipeline",
+    "label": "Pipeline",
+    "type": "query",
+    "datasource": {
+     "type": "prometheus",
+     "uid": "prometheus"
+    },
+    "hide": 0,
+    "query": {
+     "query": "label_values(rollout_hosts{site=\"$site\"}, pipeline)",
+     "refId": "pipeline"
+    },
+    "refresh": 2,
+    "sort": 2,
+    "multi": false,
+    "includeAll": false
+   }
+  ]
+ }
+}

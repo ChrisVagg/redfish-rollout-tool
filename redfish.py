@@ -12,6 +12,7 @@ from constants import ROOT, SILENT
 from helpers import obj, reason
 
 log = logging.getLogger("redfish")
+REFUSED = "401 Unauthorized: wrong credentials, or the session ended"  # why a crawl stopped on a 401
 
 
 # ---- Connection: one persistent HTTPS connection per BMC; every call goes over it ----
@@ -44,7 +45,7 @@ def call(tunnel, uri) -> dict:
         r = session.get(base + uri, timeout=limits["timeout"])
         limits["failures"] = 0  # answer with error status
         if r.status_code == 401:
-            raise ConnectionAbortedError("Incorrect credentials.")
+            raise ConnectionAbortedError(REFUSED)
         r.raise_for_status()
         return r.json()
     except SILENT as e:

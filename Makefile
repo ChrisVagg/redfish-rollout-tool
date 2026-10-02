@@ -6,11 +6,13 @@ PY     := venv/bin/python
 POLL   := $(PY) poller.py
 VIEWS  := health firmware inventory telemetry capabilities diff
 WIDTH  := 200
-DOCKER := docker compose -f lab/compose.yaml
+DOCKER := docker compose -f lab/docker-compose.yaml
+# Monitoring for both sites: an exporter each, Prometheus, Grafana
+MONITOR := docker compose -f observability/docker-compose.yaml
 # prod: the BMC credentials, from prod/.env
 PROD   := set -a; [ ! -f prod/.env ] || . prod/.env; set +a; SITE=prod
 # lab: OpenBMC's public default account
-LAB    := SITE=lab LAB_USERNAME=root LAB_PASSWORD=0penBmc
+LAB    := SITE=lab LAB_USERNAME=root LAB_PASSWORD=0penBmc PUSHGATEWAY=http://127.0.0.1:9091
 # Pre-flight can't put OpenBMC versions in order, so the lab allows either direction. The waves come from each site's
 # rollout.yaml: lab/rollout.yaml plans a canary of 1, then waves of 3 and 6.
 LAB_PLAN  := --allow-downgrade
@@ -20,7 +22,7 @@ LAB_COMPONENT = $(or $(COMPONENT),Manager (BMC))
 .DELETE_ON_ERROR:
 .PHONY: help setup prod-collect prod-detail prod-report prod-plan lab-up lab-collect lab-detail lab-report lab-plan \
         lab-pipeline-plan lab-pipeline-update lab-pipeline-watch lab-pipeline-report lab-pipeline-fault lab-down \
-        lab-reset
+        lab-reset monitor-up monitor-down monitor-logs
 
 help: ## list the targets and the variables they take
 	@awk -F':.*## ' '/^##@ / {printf "\n%s\n", substr($$0, 5)} \
@@ -40,7 +42,7 @@ help: ## list the targets and the variables they take
 	@echo '  SCENARIO=<name>           silent-fail, unhealthy, rejected, bad-checksum, no-return or hybrid'
 	@echo '  ARGS="…"                  more options for the command, e.g. make prod-health ARGS="--html health.html"'
 	@echo
-	@echo 'The lab, in order: make setup lab-up, then lab-pipeline-plan, lab-pipeline-update, lab-pipeline-report.'
+	@echo 'The lab, in order: make setup lab-up monitor-up, then lab-pipeline-plan, lab-pipeline-update, lab-pipeline-report.'
 	@echo 'lab/baseline.yaml approves the version the lab updates to: swap its commented line to roll back and forth.'
 
 setup: ## create venv/ and install requirements.txt
@@ -105,6 +107,16 @@ lab-down:     ## stop the BMCs; each keeps its flash volume
 lab-reset:    ## stop the BMCs and delete flash volumes: they boot the older build again
 	$(DOCKER) down --volumes
 
+##@ Monitoring: Prometheus, Grafana and an exporter per site in observability/, on 127.0.0.1 only
+monitor-up:   ## start them: Grafana on http://127.0.0.1:3000, a Lab and a Prod folder: Fleet manager, Host, Pipeline
+	$(MONITOR) up --detach --build --wait
+
+monitor-logs: ## follow the exporters' logs: a host left out of a read, a refused login
+	$(MONITOR) logs --follow exporter-lab exporter-prod
+
+monitor-down: ## stop them; Prometheus and Grafana keep their data in volumes
+	$(MONITOR) down
+
 # Every view of a site into <site>/reports/
 prod-report lab-report: %-report:
 	@mkdir -p $*/reports
@@ -119,6 +131,6 @@ lab/qemu-system-arm:
 	curl -sfL -o $@ https://jenkins.openbmc.org/job/latest-qemu-x86/lastSuccessfulBuild/artifact/qemu/build/qemu-system-arm
 	chmod +x $@
 
-# The lab's firmware: the two newest GB200 NVL builds, as lab/images.sh explains
+# Firmware GB200 NVL - nvidia firwmare on top of openBMC -> bmcweb - redfish service
 lab/bmc.mtd lab/images.yaml lab/baseline.yaml &:
 	./lab/images.sh

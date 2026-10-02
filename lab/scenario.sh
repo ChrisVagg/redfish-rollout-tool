@@ -97,7 +97,7 @@ for pair in ${faults[$scenario]//--fault /}; do
     *) continue ;;
   esac
   echo "bmc${port: -1} keeps the aborted task until it restarts, and pre-flight blocks it until then:" \
-    "docker compose -f lab/compose.yaml restart bmc${port: -1}"
+    "docker compose -f lab/docker-compose.yaml restart bmc${port: -1}"
 done
 if [ "$ok" = yes ]; then
   printf '✓ scenario %s: every host ended as expected and the pipeline stopped at its gate (exit %s)\n' \

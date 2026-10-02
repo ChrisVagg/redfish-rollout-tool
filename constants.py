@@ -11,9 +11,9 @@ LINKS = re.compile(r'"[^"]*@(?:odata\.id|odata\.nextLink|Redfish\.ActionInfo)": 
 TYPE = re.compile(r"#?([^.]*)(?:\.(v\d+_\d+_\d+))?")  # '#Chassis.v1_14_0.Chassis' -> Chassis, v1_14_0
 # Not discovered: log services and entries, sessions, accounts, certificates, schema files, registries,
 # event subscriptions, and per-core/per-thread sub-processors (the CPU has TotalCores and TotalThreads). They are
-# large, secret or not equipment.
+# large, secret or not equipment. Any case: iDRAC 8 serves its 238 schema files under /JSONSchemas.
 SKIP = re.compile(r"/(LogServices|Entries|Sessions|Accounts|Roles|Certificates|CertificateLocations|JsonSchemas|"
-                  r"Schemas|Registries|Subscriptions|SubProcessors)(/|$)")
+                  r"Schemas|Registries|Subscriptions|SubProcessors)(/|$)", re.IGNORECASE)
 # Composition templates (AMI: /Systems/Capabilities) and pending-settings copies (AMI: /Systems/Self/SD) are typed
 # like the real resource but are not its current state; links inside these annotations are not followed.
 TEMPLATES = ("@Redfish.CollectionCapabilities", "@Redfish.Settings")
@@ -48,12 +48,15 @@ ROLLOUT_DEFAULTS = {"canary_per_model": 1, "waves": [5, 25, 100], "max_per_rack"
 SNAPSHOTS = SITE / "snapshots"  # the latest crawl of each host, read by the views
 PREVIOUS = SNAPSHOTS / "previous"  # the crawl before it, for the diff view
 DMTF = "https://redfish.dmtf.org/schemas/v1/"
-KIND = {"Cel": "Temperature", "W": "Power", "kW": "Power", "V": "Voltage", "A": "Current", "RPM": "Fan speed",
-        "{rev}/min": "Fan speed", "kW.h": "Energy", "J": "Energy", "L/min": "Liquid flow", "L/s": "Liquid flow",
+KIND = {"Cel": "Temperature", "W": "Power", "kW": "Power", "V": "Voltage", "A": "Current", "RPM": "Rotation speed",
+        "{rev}/min": "Rotation speed", "kW.h": "Energy", "J": "Energy", "L/min": "Liquid flow", "L/s": "Liquid flow",
         "Pa": "Pressure", "kPa": "Pressure", "Hz": "Frequency", "%": "Percent", "Percent": "Percent"}
 # Limits by property names
 LIMIT = re.compile(r"Threshold|Range|Capacity|Limit|Allocated|Requested|Available|Rated|TDP|SetPoint|Throttling")
 CRITICAL = "UpperThresholdCritical|Thresholds/UpperCritical/Reading"
+# A threshold, in Thermal and Power (UpperThresholdNonCritical) or in a Sensor (Thresholds/UpperCaution/Reading)
+THRESHOLD = re.compile(r"(?:(Upper|Lower)Threshold(NonCritical|Critical|Fatal)|Thresholds/(Upper|Lower)(Caution|Critical|Fatal)"
+                       r"/Reading)$")
 # Firmware of parts, one column per part model
 FW_PARTS = (("Drive", "Drive", "Model", r"Revision"),
             ("Controller", "StorageController", "Model", r"FirmwareVersion"),

@@ -52,6 +52,7 @@ services:
     environment: [BOOT_DELAY=90]  
     ports: ["127.0.0.1:2450:443", "127.0.0.1:2230:22"]
     volumes: ["bmc10-flash:/flash"]
+
 volumes:
   bmc1-flash:
   bmc2-flash:

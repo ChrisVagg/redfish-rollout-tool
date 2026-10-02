@@ -1,0 +1,52 @@
+# Monitoring for both sites, on this machine's network, every service listening on 127.0.0.1 only:
+#   exporter-lab   poller.py exporter on the lab BMCs, every 10 s                        127.0.0.1:9101
+#   exporter-prod  the same on the real fleet, every 5 min: read-only, one session per BMC  127.0.0.1:9102
+#                  (prod/inventory.yaml and prod/.env; without an inventory it reads nothing and stays up)
+#   pushgateway    where rollout.py run pushes each run's metrics (PUSHGATEWAY)          127.0.0.1:9091
+#   prometheus     scrapes them, keeps 15 days, evaluates rules.yml                     127.0.0.1:9090
+#   grafana        a Lab and a Prod folder: Fleet manager, Host and Pipeline; admin only,  127.0.0.1:3000
+#                  the account from grafana/.grafana.env
+# Host network: the exporters reach the lab BMCs on 127.0.0.1 and the fleet the way this machine does.
+name: redfish-observability
+x-exporter: &exporter
+  build: {context: .., dockerfile: observability/Dockerfile}
+  image: redfish/exporter
+  restart: unless-stopped
+  network_mode: host
+  volumes: ["..:/app:ro", "../schemas:/app/schemas"]  # the repo read-only; the DMTF schemas cache shared with it
+services:
+  exporter-lab:
+    <<: *exporter
+    command: [--listen, "127.0.0.1:9101", --interval, "10"]
+    environment: [SITE=lab, LAB_USERNAME=root, LAB_PASSWORD=0penBmc]  # OpenBMC's public default account
+  exporter-prod:
+    <<: *exporter
+    command: [--listen, "127.0.0.1:9102", --interval, "300"]
+    environment: [SITE=prod]
+    env_file: [{path: ../prod/.env, required: false}]
+  pushgateway:
+    image: prom/pushgateway:v1.11.3
+    restart: unless-stopped
+    network_mode: host
+    command: [--web.listen-address=127.0.0.1:9091]
+  prometheus:
+    image: prom/prometheus:v3.15.0
+    restart: unless-stopped
+    network_mode: host
+    command: [--config.file=/etc/prometheus/prometheus.yml, --storage.tsdb.path=/prometheus,
+              --web.listen-address=127.0.0.1:9090]
+    volumes: ["./prometheus.yml:/etc/prometheus/prometheus.yml:ro", "./rules.yml:/etc/prometheus/rules.yml:ro",
+              "prometheus:/prometheus"]
+  grafana:
+    image: grafana/grafana:13.2.3
+    restart: unless-stopped
+    network_mode: host
+    env_file:
+      - ./grafana/.grafana.env
+    volumes: ["./grafana/grafana.ini:/etc/grafana/grafana.ini:ro", 
+              "./grafana/provisioning:/etc/grafana/provisioning:ro",
+              "./grafana/dashboards:/etc/grafana/dashboards:ro", 
+              "grafana:/var/lib/grafana"]
+volumes:
+  prometheus:
+  grafana:

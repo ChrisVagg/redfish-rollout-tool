@@ -1,0 +1,7 @@
+# A folder per site, each with the same three dashboards fixed to it: Fleet manager, Host and Pipeline.
+# allowUiUpdates: the admin edits and saves them in the UI, into Grafana's volume; a changed JSON file here replaces
+# the saved version, so export a change worth keeping (Edit → Export → Save to file) over its file.
+apiVersion: 1
+providers:
+  - {name: lab, folder: Lab, folderUid: lab, type: file, allowUiUpdates: true, options: {path: /etc/grafana/dashboards/lab}}
+  - {name: prod, folder: Prod, folderUid: prod, type: file, allowUiUpdates: true, options: {path: /etc/grafana/dashboards/prod}}

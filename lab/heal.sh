@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
-# After investigate the error which produced in a test.
+# After investigate the error which produced in a manual test - QA.
 # Restart the lab BMCs whose boot went wrong, until every one reports its Manager Service Enabled. An emulated BMC boots slowly,
 # and now and then a service that writes the U-Boot environment runs before /dev/mtd/u-boot-env exists: systemd ends
 # degraded, and bmcweb reports the Manager Quiesced, health Critical. A fresh boot fixes it. make lab-up runs this.
 
 set -euo pipefail
 cd "$(dirname "$0")"
-lab="docker compose -f compose.yaml"
+lab="docker compose -f docker-compose.yaml"
+# The BMCs: the other services have no Redfish. None at all means Compose failed, not a healthy lab
+bmcs=$($lab ps --services | grep "^bmc") || { echo "No lab BMC is running: make lab-up" >&2; exit 1; }
 # The Manager's State once the boot has settled: /redfish/v1 answers while systemd is still starting services, and a
 # boot still going (Starting, or no answer yet) isn't a degraded one, so wait up to 5 min for it to end
 settled() {
@@ -21,7 +23,7 @@ settled() {
 # Round 4 only checks: every restart is verified
 for round in 1 2 3 4; do
   degraded=()
-  for service in $($lab ps --services); do
+  for service in $bmcs; do
     state=$(settled "$($lab port "$service" 443 | cut -d: -f2)")
     [ "$state" = Enabled ] || degraded+=("$service ($state)")
   done

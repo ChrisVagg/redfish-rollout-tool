@@ -45,7 +45,7 @@ import time
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
-from functools import lru_cache, partial
+from functools import lru_cache
 from itertools import zip_longest
 from pathlib import Path
 
@@ -60,25 +60,16 @@ from constants import (ACTION_ROW, ACTIONS_ROW, BASELINE, DOTTED, FAILED_STATES,
                        INVENTORY_FILE, LEFT_OUT_ROW, NEXT_STEP, PLAN_ROW, PREFLIGHT_ROW, PROPS, REPORT_SCHEMA,
                        RESET_PREFERENCE, ROLLOUT, ROLLOUT_DEFAULTS, ROOT, RUNNING_STATES, RUNS, SEMVER, SITE,
                        STEP_ROW, STYLE, VERSIONS_ROW, WAVE_ROW)
-from helpers import block, first_of, first_real, identity, label, norm, obj, of, output_options, show, text
-from poller import (firmware, host_baseline, image_state, inventory_groups, load_baseline, load_servers, open_jobs,
-                    software_ids)
+from helpers import (block, first_of, first_real, identity, label, link, norm, obj, of, output_options, reason, sample,
+                     show, text, uri_of)
+from poller import (allowable, entries, firmware, host_baseline, image_state, load_baseline, load_servers, open_jobs,
+                    software_ids, update_targets, update_targets_of, updatable, ways_in)
 from redfish import call, login, logout, send, tunnel
 
 log = logging.getLogger("redfish")
 
 
 # ---- Live read: what pre-flight needs from one BMC, about 10-30 GETs instead of the poller's full crawl ----
-
-# The URI of a link object {"@odata.id": ...}; None when it isn't one
-def uri_of(x) -> str | None:
-    return norm(obj(x).get("@odata.id") or "") or None
-
-
-# The URI a document links to under key, e.g. link(root, "Systems") -> "/redfish/v1/Systems"; None without one
-def link(doc, key) -> str | None:
-    return uri_of(doc.get(key))
-
 
 # GET a resource into found; for a collection also every member, following Members@odata.nextLink pages
 def grab(tunnel, uri, found) -> dict:
@@ -170,92 +161,12 @@ def direction(found, component, running, want, target) -> tuple[int | None, str]
     return None, "unknown"
 
 
-# The firmware inventory entries a component's update touches, so pre-flight can check them
-def entries(found, component) -> list[dict]:
-    """An inventory row's own entries. For System BIOS and Manager (BMC): the entries a manager lists in
-    Links.SoftwareImages, or whose RelatedItem points at the system's BIOS or at the manager, together with the other
-    images of the same component (same SoftwareId), such as a staged one that carries no links."""
-    groups = inventory_groups(found)
-    if component in groups:
-        return [d for _, d in groups[component]]
-    owners = {"System BIOS": {link(d, "Bios") for _, d in of(found, "ComputerSystem")},
-              "Manager (BMC)": {u for u, _ in of(found, "Manager")}}.get(component, set())
-    images = [i for _, m in of(found, "Manager") for i in obj(m.get("Links")).get("SoftwareImages") or []]
-    listed = set(map(uri_of, images)) if component == "Manager (BMC)" else set()
-    inventory = of(found, "SoftwareInventory")
-    linked = [u for u, d in inventory if u in listed or owners & set(map(uri_of, d.get("RelatedItem") or []))]
-    ids = {d.get("SoftwareId") for u, d in inventory if u in linked} - {None}
-    return [d for u, d in inventory if u in linked or d.get("SoftwareId") in ids]
-
-
-# How this BMC takes an image: multipart push, SimpleUpdate with its transfer protocols, the older HttpPushUri
-# A SimpleUpdate parameter's AllowableValues, from the action itself or its ActionInfo; None when the BMC lists none
-def allowable(found, action, name) -> list | None:
-    info = found.get(norm(action.get("@Redfish.ActionInfo") or "")) or {}
-    listed = [p.get("AllowableValues") for p in info.get("Parameters") or [] if p.get("Name") == name]
-    return action.get(f"{name}@Redfish.AllowableValues") or next(filter(None, listed), None)
-
-
-# How a component's image can reach the BMC: (push, pull), each "yes · …", "no: why" or "not verified: …". Push sends
-# the file to MultipartHttpPushUri; pull has the BMC fetch a URL with SimpleUpdate, whose Targets and TransferProtocol
-# must be in their AllowableValues when the BMC lists them. url: the catalog's image when it's a URL, to check its scheme
-def ways_in(found, component, url=None) -> tuple[str, str]:
-    update = first_of(found, "UpdateService")
-    targets = update_targets_of(found, component)
-    if not update or update.get("ServiceEnabled") is False:
-        return "no: no update service", "no: no update service"
-    push = (f"yes · {update['MultipartHttpPushUri']}" if update.get("MultipartHttpPushUri")
-            else "no: no MultipartHttpPushUri")
-    action = obj(obj(update.get("Actions")).get("#UpdateService.SimpleUpdate"))
-    if not action:
-        return push, "no: no SimpleUpdate action"
-    allowed_targets, protocols = allowable(found, action, "Targets"), allowable(found, action, "TransferProtocol")
-    outside = [t for t in targets if allowed_targets is not None and t not in allowed_targets]
-    scheme = url.split("://")[0].upper() if url and "://" in url else None
-    if outside:
-        return push, f"no: {', '.join(outside)} not in Targets@AllowableValues"
-    if scheme and protocols is not None and scheme not in protocols:
-        return push, f"no: {scheme} not in TransferProtocol@AllowableValues ({', '.join(protocols)})"
-    listed = (f"{', '.join(protocols)}" if protocols is not None else "protocols not listed") + \
-        (" · targets listed" if allowed_targets is not None else " · targets not listed")
-    return push, ("yes · " if allowed_targets is not None and protocols is not None else "not verified: ") + listed
-
-
 def update_methods(found, update) -> list[str]:
     action = obj(obj(update.get("Actions")).get("#UpdateService.SimpleUpdate"))
     protocols = allowable(found, action, "TransferProtocol")
     return [*(["multipart"] if update.get("MultipartHttpPushUri") else []),
             *([f"SimpleUpdate ({', '.join(protocols or ['protocols not listed'])})"] if action else []),
             *(["HttpPushUri"] if update.get("HttpPushUri") else [])]
-
-
-# What an update can target on this BMC: System BIOS, Manager (BMC) and every firmware inventory row
-def update_targets(found) -> set[str]:
-    """The firmware view's other rows (drives, controllers, NICs, PSUs read from their own resources) only report a
-    version: Redfish updates what the BMC lists in its firmware inventory."""
-    return {"System BIOS", "Manager (BMC)", *inventory_groups(found)}
-
-
-# Whether Redfish can update a component on this host, and why not: the Updateable column
-def updatable(found, component) -> str:
-    """Redfish has no reason field; the reasons are the schema's meaning of the properties. No: the component isn't in
-    the firmware inventory (its version comes from another resource), an entry of it is WriteProtected ("cannot be
-    altered or overwritten"), or its entries have Updateable false ("the service cannot update this software, it is
-    for reporting purposes only"). Not verified: no inventory entry is linked to it (System BIOS and Manager (BMC)
-    on BMCs without RelatedItem), or its entries don't report Updateable."""
-    if component not in update_targets(found):
-        return "no: not in the firmware inventory"
-    touched = entries(found, component)
-    flags = [d.get("Updateable") for d in touched]
-    if not touched:
-        return "not verified: no inventory entry linked"
-    if any(d.get("WriteProtected") is True for d in touched):
-        return "no: WriteProtected (cannot be overwritten)"
-    if True in flags:
-        return "yes"
-    if all(flag is False for flag in flags):
-        return "no: Updateable false (reporting only)"
-    return "not verified: Updateable not reported"
 
 
 # Whether a component has a second firmware image, an A/B bank, as far as standard Redfish reports it
@@ -606,7 +517,8 @@ def host_report(server, found, read_at, baselines, policy) -> list:
         else:
             why = "update it in-band, from the host OS" if c in outside else "-"
             back = "-" if c in outside else rollback_path(found, c, policy["images"], model, version)
-            rows.append((c, text(ids.get(c)), text(version), text(wanted.get(c)), "-", can[c], *ways(c), ab_bank(found, c),
+            rows.append((c, text(ids.get(c)), text(version), text(wanted.get(c)), "-", can[c], *ways(c),
+                         ab_bank(found, c),
                          back, "-", why))
     system, manager, update = (first_of(found, t) for t in ("ComputerSystem", "Manager", "UpdateService"))
     size = update.get("MaxImageSizeBytes")
@@ -753,13 +665,6 @@ def reset_type(found, kind, uri) -> str | None:
     return next((t for t in RESET_PREFERENCE.get(kind, ()) if allowed is None or t in allowed), None)
 
 
-# The targets of an update: the component's RelatedItem, else its inventory entries; [] lets the BMC decide
-def update_targets_of(found, component) -> list[str]:
-    touched = entries(found, component)
-    related = {u for d in touched for u in map(uri_of, d.get("RelatedItem") or []) if u}
-    return sorted(related or {u for u in map(uri_of, touched) if u})
-
-
 # How an image reaches the BMC: pushed to MultipartHttpPushUri when it's a file, or pulled by the BMC with SimpleUpdate
 # when it's a URL; {method, action, uri, protocol}, {} when neither can
 def handover(found, image) -> dict:
@@ -892,11 +797,18 @@ def before_state(found, running) -> dict:
 # Step 5: the checks after the reset, on a fresh live read; (passed, [(check, passed, detail)])
 def post_check(server, key, want, before) -> tuple[bool, list[dict], str]:
     """The version asked for now runs; every system and manager is OK, or no worse than before; no new job or task
-    failed or hangs. A BMC that can't be read fails them all."""
-    found, _ = read_host(server, tunnel(server))
-    if "error" in found.get(ROOT, {}):
-        return False, [{"check": "live read", "ok": False, "detail": found[ROOT]["error"]}], "-"
-    running = text(firmware(found).get(resolve(found, key), (None, ""))[0])
+    failed or hangs. A BMC that can't be read fails them all. A BMC answers before it is ready: until its software
+    manager fills the firmware inventory, the running version isn't reported, so that is read again, every 10 s for
+    up to 3 min, before it counts. A version that is reported and wrong fails at once."""
+    until = time.monotonic() + 180
+    while True:
+        found, _ = read_host(server, tunnel(server))
+        if "error" in found.get(ROOT, {}):
+            return False, [{"check": "live read", "ok": False, "detail": found[ROOT]["error"]}], "-"
+        running = text(firmware(found).get(resolve(found, key), (None, ""))[0])
+        if running != "-" or time.monotonic() > until:
+            break
+        time.sleep(10)
     now = {u: health(d) for kind in ("ComputerSystem", "Manager") for u, d in of(found, kind)}
     was = before["health"]
     jobs = [j for j in open_jobs(found) if j[0] not in before["jobs"]]
@@ -1110,7 +1022,13 @@ def run(args) -> list:
                          "are updated; production stays read-only.")
     RUNS.mkdir(exist_ok=True)
     path = RUNS / f"{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}.jsonl"
-    rec = partial(record, path)
+    pipeline = Path(args.plan).parent.name if args.plan else path.stem
+    group, pushing = f"site/{SITE.name}/pipeline/{pipeline}/stage/{args.stage}", {}
+
+    # lambda *event, **detail: record one event, then push the run's metrics as they stand
+    def rec(*event, **detail) -> None:
+        record(path, *event, **detail)
+        push_metrics(path, group, pushing)
     rec("-", "run", "start", component=args.component, waves={name: [s["host"] for s in h] for name, h in planned},
         plan=args.plan, stage=args.stage, halt_at=rollout["halt_at"], rollout=rollout, apply_time=args.apply_time,
         faults=policy["faults"])
@@ -1136,6 +1054,58 @@ def run(args) -> list:
             break
     rec("-", "run", "end", detail=halted or "every wave done")
     return [*plan_view, *render(pipeline_report(None, events_of([path]), path.stem, [path])), Text(f"Record: {path}")]
+
+
+# ---- Metrics: a run's report as Prometheus metrics, pushed while it runs when PUSHGATEWAY is set ----
+
+# The report as Prometheus text: hosts by wave and state, each host's versions and time, each step's duration, every
+# check after the flash (post-check, soak, a rollback's post-check), each gate's decision, and whether the run goes on
+def metrics(doc) -> str:
+    lines = []
+
+    # lambda name, value, **labels: add one sample
+    add = lambda name, value, **labels: lines.append(sample(name, value, **labels))
+
+    for w in doc["waves"]:
+        for state, n in w["totals"].items():
+            add("rollout_hosts", n, wave=w["name"], state=state)
+        g = w["gate"]
+        if g.get("tried") is not None:
+            add("rollout_gate_failed", g["failed"], wave=w["name"])
+            add("rollout_gate_tried", g["tried"], wave=w["name"])
+            add("rollout_gate_halted", int(g["result"] == "halted"), wave=w["name"])
+        for d in w["hosts"]:
+            add("rollout_host_info", 1, wave=w["name"], host=d["host"], state=d["state"], before=text(d["before"]),
+                   target=text(d["target"]), after=text(d["after"]))
+            if d["seconds"] is not None:
+                add("rollout_host_seconds", d["seconds"], wave=w["name"], host=d["host"])
+            for s in d["steps"]:
+                if s.get("seconds") is not None:
+                    add("rollout_step_seconds", s["seconds"], host=d["host"], step=s["step"])
+                if s["step"] in ("post-check", "soak", "rollback post-check"):
+                    for c in s.get("checks") or []:
+                        add("rollout_check_ok", int(c["ok"]), host=d["host"], step=s["step"], check=c["check"],
+                               detail=c["detail"])
+    add("rollout_running", int(doc["result"] == "running"))
+    return "\n".join(lines) + "\n"
+
+
+_push_lock = threading.Lock()
+
+
+# Push a run's metrics to the Pushgateway, if PUSHGATEWAY is set: best effort, a rollout never waits on its monitoring.
+# Each push replaces the run's group (pipeline, stage) with the report as the record stands now
+def push_metrics(path, group, state) -> None:
+    url = os.environ.get("PUSHGATEWAY")
+    if not url or state.get("off"):
+        return
+    with _push_lock:
+        try:
+            body = metrics(pipeline_report(None, events_of([path]), path.stem, [path]))
+            requests.put(f"{url.rstrip('/')}/metrics/job/rollout/{group}", data=body, timeout=2).raise_for_status()
+        except Exception as e: 
+            state["off"] = True
+            log.warning("metrics: %s; no more pushes this run", reason(str(e)))
 
 
 # ---- Report: one document per pipeline, from its plan and its run records; the views for people are drawn from it --
@@ -1202,7 +1172,7 @@ def outcome(host, wave, events, seen, live=False) -> dict:
     if state in ("blocked", "skipped"):
         why = "; ".join(pre.get("reasons") or seen.get("reasons") or [])
     after_next = NEXT_STEP.get(state)
-    if any(s["step"].endswith("update") and s.get("result") == "Exception" for s in steps):
+    if after_next and any(s["step"].endswith("update") and s.get("result") == "Exception" for s in steps):
         after_next += "; the BMC keeps the failed task until it restarts, and pre-flight blocks it till then"
     return {"host": host, "wave": wave, "state": state, "identity": pre.get("identity") or seen.get("identity"),
             "before": pre.get("running") or seen.get("running"), "target": pre.get("target") or seen.get("target"),

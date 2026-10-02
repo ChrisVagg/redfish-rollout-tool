@@ -69,6 +69,16 @@ def at(doc, keys) -> Any:
     return doc
 
 
+# The URI of a link object {"@odata.id": ...}; None when it isn't one
+def uri_of(x) -> str | None:
+    return norm(obj(x).get("@odata.id") or "") or None
+
+
+# The URI a document links to under key, e.g. link(root, "Systems") -> "/redfish/v1/Systems"; None without one
+def link(doc, key) -> str | None:
+    return uri_of(doc.get(key))
+
+
 # x when it is a JSON object, else {}: BMCs send null where an object belongs
 def obj(x) -> dict:
     return x if isinstance(x, dict) else {}
@@ -169,6 +179,13 @@ def connection(snap) -> str:
     if snap.get("stopped"):
         return "Stopped"
     return "Failed" if "error" in snap["resources"].get(ROOT, {}) else "Connected"
+
+
+# One Prometheus sample in the text format, label values escaped: metric{label="value",...} value
+def sample(metric, value, **labels) -> str:
+    # lambda v: a label value -> escaped for the text format
+    esc = lambda v: str(v).replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
+    return metric + ("{" + ",".join(f'{k}="{esc(v)}"' for k, v in labels.items()) + "}" if labels else "") + f" {value}"
 
 
 # ---- Tables ----
