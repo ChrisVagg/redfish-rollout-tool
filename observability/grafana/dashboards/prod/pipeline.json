@@ -39,7 +39,8 @@
    "options": {
     "mode": "markdown",
     "content": "**Production is read-only.** `rollout.py run --yes` refuses hosts not marked `writable: true`, and none in `prod/inventory.yaml` is, so no pipeline pushes here. `make prod-plan` shows what a rollout would do."
-   }
+   },
+   "transparent": true
   },
   {
    "type": "stat",
@@ -76,7 +77,8 @@
     },
     "textMode": "value_and_name",
     "colorMode": "none"
-   }
+   },
+   "transparent": true
   },
   {
    "type": "stat",
@@ -139,7 +141,8 @@
     },
     "textMode": "value_and_name",
     "colorMode": "background"
-   }
+   },
+   "transparent": true
   },
   {
    "type": "timeseries",
@@ -192,7 +195,8 @@
      "mode": "multi",
      "sort": "desc"
     }
-   }
+   },
+   "transparent": true
   },
   {
    "type": "state-timeline",
@@ -267,7 +271,8 @@
      "showLegend": false
     }
    },
-   "description": "From the site's exporter: each reset after a flash is a gap"
+   "description": "From the site's exporter: each reset after a flash is a gap",
+   "transparent": true
   },
   {
    "type": "table",
@@ -331,7 +336,8 @@
     "showHeader": true,
     "cellHeight": "sm",
     "sortBy": []
-   }
+   },
+   "transparent": true
   },
   {
    "type": "bargauge",
@@ -367,7 +373,8 @@
       "lastNotNull"
      ]
     }
-   }
+   },
+   "transparent": true
   },
   {
    "type": "table",
@@ -423,7 +430,8 @@
     "showHeader": true,
     "cellHeight": "sm",
     "sortBy": []
-   }
+   },
+   "transparent": true
   }
  ],
  "templating": {

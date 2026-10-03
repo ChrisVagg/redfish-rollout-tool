@@ -127,7 +127,8 @@
     "colorMode": "value",
     "graphMode": "none",
     "textMode": "value"
-   }
+   },
+   "transparent": true
   },
   {
    "type": "stat",
@@ -184,7 +185,8 @@
     "colorMode": "background",
     "graphMode": "none",
     "textMode": "value"
-   }
+   },
+   "transparent": true
   },
   {
    "type": "stat",
@@ -255,7 +257,8 @@
     "colorMode": "background",
     "graphMode": "none",
     "textMode": "value"
-   }
+   },
+   "transparent": true
   },
   {
    "type": "stat",
@@ -313,7 +316,8 @@
     "colorMode": "background",
     "graphMode": "none",
     "textMode": "value"
-   }
+   },
+   "transparent": true
   },
   {
    "type": "stat",
@@ -359,7 +363,8 @@
     "colorMode": "none",
     "graphMode": "none",
     "textMode": "value"
-   }
+   },
+   "transparent": true
   },
   {
    "type": "stat",
@@ -405,7 +410,8 @@
     "colorMode": "none",
     "graphMode": "none",
     "textMode": "value"
-   }
+   },
+   "transparent": true
   },
   {
    "type": "table",
@@ -766,7 +772,8 @@
     "showHeader": true,
     "cellHeight": "sm",
     "sortBy": []
-   }
+   },
+   "transparent": true
   },
   {
    "type": "state-timeline",
@@ -841,7 +848,8 @@
     "legend": {
      "showLegend": false
     }
-   }
+   },
+   "transparent": true
   },
   {
    "type": "table",
@@ -911,7 +919,8 @@
     "showHeader": true,
     "cellHeight": "sm",
     "sortBy": []
-   }
+   },
+   "transparent": true
   },
   {
    "type": "table",
@@ -1159,7 +1168,8 @@
     "showHeader": true,
     "cellHeight": "sm",
     "sortBy": []
-   }
+   },
+   "transparent": true
   },
   {
    "type": "table",
@@ -1339,7 +1349,8 @@
       "desc": true
      }
     ]
-   }
+   },
+   "transparent": true
   },
   {
    "type": "table",
@@ -1463,7 +1474,8 @@
     "showHeader": true,
     "cellHeight": "sm",
     "sortBy": []
-   }
+   },
+   "transparent": true
   },
   {
    "type": "table",
@@ -1534,7 +1546,8 @@
     "showHeader": true,
     "cellHeight": "sm",
     "sortBy": []
-   }
+   },
+   "transparent": true
   },
   {
    "type": "timeseries",
@@ -1594,7 +1607,8 @@
      "mode": "multi",
      "sort": "desc"
     }
-   }
+   },
+   "transparent": true
   },
   {
    "type": "timeseries",
@@ -1654,7 +1668,8 @@
      "mode": "multi",
      "sort": "desc"
     }
-   }
+   },
+   "transparent": true
   },
   {
    "type": "timeseries",
@@ -1714,7 +1729,8 @@
      "mode": "multi",
      "sort": "desc"
     }
-   }
+   },
+   "transparent": true
   }
  ]
 }
