@@ -7,7 +7,7 @@ is read-only; writes happen only in the lab. Four parts, each run with `make` ([
 |---|---|
 | **Poller** ([poller.py](poller.py)) | Polls the resources each BMC's Redfish service exposes: health, firmware, inventory and sensor readings, as views of a collect or, run without stopping, as metrics. Reads only. |
 | **Rollout** ([rollout.py](rollout.py), [pipeline.sh](pipeline.sh)) | The firmware updates: pre-flight, a canary, then waves, each after a gate, with a rollback when a host fails its post-check. |
-| **Lab** ([lab/](lab/)) | Ten emulated OpenBMC BMCs, each QEMU in its own Docker service: the only BMCs the rollout updates. |
+| **Lab** ([lab/](lab/)) | Ten emulated OpenBMC BMCs, each QEMU in its own Docker service: the only BMCs the rollout updates. Beside them, the site's image cache (nginx, HTTPS), which the rollout gets every firmware image from. |
 | **Observability** ([observability/](observability/docker-compose.yaml)) | Docker services: `exporter-lab` and `exporter-prod` (the poller, serving metrics), `pushgateway` (where the rollout pushes its metrics), `prometheus` and `grafana`. |
 
 ## How the rollout works
@@ -87,7 +87,8 @@ GRAFANA_ADMIN_PASSWORD=...
 ```sh
 make setup        # venv/ and requirements.txt
 make test         # the rollout's decisions on recorded Redfish data, no BMC needed (Test-driven development)
-make lab-up       # the lab: downloads QEMU and two OpenBMC builds (~230 MB), boots 10 BMCs (~7 min)
+make lab-up       # the lab: downloads QEMU and two OpenBMC builds (~230 MB), boots 10 BMCs (~7 min), starts
+                  # the image cache
 make monitor-up   # observability: exporters, Pushgateway, Prometheus, Grafana on http://127.0.0.1:3000
 make collect      # the poller: crawl every BMC into lab/snapshots/
 make health       # a view of that collect: health per host, then everything not OK
@@ -337,6 +338,16 @@ With the lab's 10 BMCs in 3 racks: canary 2441 (fw image), wave 1 of 3 (one per 
 ## Approach in production IT Equipment
 
 ![Production](docs/prod.svg)
+
+![The lab today, on the production system's layout](docs/production-system-lab.svg)
+
+What the lab implements, drawn where [the production system](#a-production-system---scaling-for-a-large-fleet) has
+each part; an empty place is a part it doesn't have yet. `lab/images.sh` downloads OpenBMC's builds, records their
+sha256 and approves the newer into `lab/images/`, the store. `make` is the API and CLI (`YES=1` approves), `pipeline.sh`
+and `rollout.py` the workflow engine, the YAML files the catalog and inventory, the run records the rollout state.
+`rollout.py run` is the site agent: it fetches each image from the nginx cache, checks it and pushes it to ten emulated
+BMCs over Redfish, then resets, post-checks and, on a failure, rolls back. Every run's metrics go through the
+Pushgateway to Prometheus and Grafana.
 
 Equipment running production services runs the same tools, the same pipeline and the same six steps with `SITE=prod`; only the inventory, the credentials and the policy change.
 

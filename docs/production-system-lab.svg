@@ -1,0 +1,122 @@
+<svg viewBox="0 0 900 628" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="The lab today, drawn on the production firmware-update system's layout: only what the lab implements is drawn, each part where the production system has it. Supply chain: lab/images.sh downloads the two newest GB200 NVL builds from OpenBMC's Jenkins, records each package's sha256, with no signature check, and approves the newer as is into lab/images/, the approved store. Control plane: the make targets are the API and CLI, YES=1 the approval; pipeline.sh and rollout.py are the workflow engine, reading the firmware catalog, baseline.yaml and images.yaml, and lab/inventory.yaml; the run records, runs/*.jsonl, are the rollout state, without host locks; the BMC logins are static, from a .env file; no Vault. Each site: rollout.py run is the site agent; it fetches each image from the image cache, nginx over HTTPS on port 8443 serving lab/images/, and pushes it to the BMCs, ten emulated in QEMU, with update, tasks and reset over Redfish. Observability: rollout.py pushes every run's metrics to the Pushgateway, Prometheus scrapes it and Grafana shows it; no logs. Numbered badges mark where each rollout stage happens: 0 ingest, 1 plan and pre-flight, 3 update, a push, then 4 reset, 5 post-checks and 6 roll back at the BMCs; 2, drain, needs a scheduler, which the lab doesn't have.">
+  <style>
+    .pl text { font-family: var(--mono, monospace); }
+    .pl .bg { fill: var(--bg-deep, #050708); }
+    .pl .box { fill: var(--surface, #0d1417); stroke: var(--line, #2a3538); }
+    .pl .name { fill: var(--fg, #e6f7fa); font-size: 12.5px; font-weight: 600; }
+    .pl .sub { fill: var(--dim, #6f8f97); font-size: 10px; }
+    .pl .band { fill: var(--dim, #6f8f97); font-size: 9.5px; letter-spacing: .14em; }
+    .pl .band.hi { fill: var(--teal, #00ffc8); }
+    .pl .lbl { fill: var(--dim, #6f8f97); font-size: 10px; }
+    .pl .cut { fill: none; stroke: var(--line, #2a3538); stroke-width: 1; stroke-dasharray: 5 5; }
+    /* a connection in its service's colour */
+    .pl .edge { fill: none; stroke-width: 1.2; stroke-dasharray: 5 4; }
+    .pl .elabel { fill: var(--fg, #e6f7fa); font-size: 10px; paint-order: stroke; stroke: var(--bg-deep, #050708); stroke-width: 4px; stroke-linejoin: round; }
+    .pl .badge circle { fill: var(--amber, #ffb454); }
+    .pl .badge text { fill: var(--bg-deep, #050708); font-size: 10px; font-weight: 700; }
+    .pl .g-img { stroke: #00ffc8; } .pl .bar.g-img { fill: #00ffc8; stroke: none; }
+    .pl .g-rf { stroke: #ffb454; } .pl .bar.g-rf { fill: #ffb454; stroke: none; }
+    .pl .g-wf { stroke: #6ea8ff; } .pl .bar.g-wf { fill: #6ea8ff; stroke: none; }
+    .pl .g-inv { stroke: #7cc977; } .pl .bar.g-inv { fill: #7cc977; stroke: none; }
+    .pl .g-obs { stroke: #ff5c8a; } .pl .bar.g-obs { fill: #ff5c8a; stroke: none; }
+    .pl .g-sec { stroke: #e5c04a; } .pl .bar.g-sec { fill: #e5c04a; stroke: none; }
+    /* motion: a connection's dashes run the way it points */
+    @keyframes pl-flow { to { stroke-dashoffset: -18; } }
+    .pl .edge { animation: pl-flow 1.2s linear infinite; }
+    @media (prefers-reduced-motion: reduce) { .pl .edge { animation: none; } }
+  </style>
+  <defs>
+    <marker id="pl-img" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path d="M0 0 8 4 0 8z" style="fill: #00ffc8"/></marker>
+    <marker id="pl-rf" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path d="M0 0 8 4 0 8z" style="fill: #ffb454"/></marker>
+    <marker id="pl-wf" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path d="M0 0 8 4 0 8z" style="fill: #6ea8ff"/></marker>
+    <marker id="pl-inv" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path d="M0 0 8 4 0 8z" style="fill: #7cc977"/></marker>
+    <marker id="pl-obs" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path d="M0 0 8 4 0 8z" style="fill: #ff5c8a"/></marker>
+    <marker id="pl-sec" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path d="M0 0 8 4 0 8z" style="fill: #e5c04a"/></marker>
+  </defs>
+  <g class="pl">
+    <rect class="bg" x="0" y="0" width="900" height="628" rx="12"/>
+    <!-- every box sits where production-system.svg has it; a part the lab doesn't have leaves its place empty -->
+    <text class="band hi" x="880" y="24" text-anchor="end">THE LAB TODAY</text>
+    <text class="band hi" x="20" y="24">SUPPLY CHAIN · BEFORE ANY ROLLOUT</text>
+    <rect class="cut" x="20" y="30" width="860" height="74" rx="10"/>
+    <rect class="box" x="40" y="44" width="190" height="46" rx="8"/><rect class="bar g-img" x="40" y="52" width="3" height="30" rx="1.5"/>
+    <text class="name" x="135" y="64" text-anchor="middle">Vendor downloads</text><text class="sub" x="135" y="80" text-anchor="middle">OpenBMC Jenkins · images.sh</text>
+    <rect class="box" x="250" y="44" width="190" height="46" rx="8"/><rect class="bar g-img" x="250" y="52" width="3" height="30" rx="1.5"/>
+    <text class="name" x="345" y="64" text-anchor="middle">Ingest</text><text class="sub" x="345" y="80" text-anchor="middle">sha256 · no signature check</text>
+    <rect class="box" x="670" y="44" width="190" height="46" rx="8"/><rect class="bar g-img" x="670" y="52" width="3" height="30" rx="1.5"/>
+    <text class="name" x="765" y="64" text-anchor="middle">Approved store</text><text class="sub" x="765" y="80" text-anchor="middle">lab/images/ on disk</text>
+    <path class="edge g-img" d="M230 67H246" marker-end="url(#pl-img)"/>
+    <path class="edge g-img" d="M440 67H666" marker-end="url(#pl-img)"/>
+    <text class="elabel" x="555" y="62" text-anchor="middle">approved as is</text>
+    <text class="band hi" x="20" y="124">CONTROL PLANE</text>
+    <rect class="cut" x="20" y="130" width="610" height="200" rx="10"/>
+    <rect class="box" x="40" y="140" width="170" height="46" rx="8"/><rect class="bar g-wf" x="40" y="148" width="3" height="30" rx="1.5"/>
+    <text class="name" x="125" y="160" text-anchor="middle">Rollout API + CLI</text><text class="sub" x="125" y="176" text-anchor="middle">make · YES=1 approves</text>
+    <rect class="box" x="40" y="206" width="170" height="46" rx="8"/><rect class="bar g-inv" x="40" y="214" width="3" height="30" rx="1.5"/>
+    <text class="name" x="125" y="226" text-anchor="middle">Firmware catalog</text><text class="sub" x="125" y="242" text-anchor="middle">baseline · images.yaml</text>
+    <rect class="box" x="40" y="266" width="170" height="46" rx="8"/><rect class="bar g-inv" x="40" y="274" width="3" height="30" rx="1.5"/>
+    <text class="name" x="125" y="286" text-anchor="middle">Inventory / CMDB</text><text class="sub" x="125" y="302" text-anchor="middle">lab/inventory.yaml</text>
+    <rect class="box" x="260" y="206" width="170" height="46" rx="8"/><rect class="bar g-wf" x="260" y="214" width="3" height="30" rx="1.5"/>
+    <text class="name" x="345" y="226" text-anchor="middle">Workflow engine</text><text class="sub" x="345" y="242" text-anchor="middle">pipeline.sh · rollout.py</text>
+    <rect class="box" x="450" y="206" width="170" height="46" rx="8"/><rect class="bar g-wf" x="450" y="214" width="3" height="30" rx="1.5"/>
+    <text class="name" x="535" y="226" text-anchor="middle">Rollout state DB</text><text class="sub" x="535" y="242" text-anchor="middle">runs/*.jsonl · no locks</text>
+    <rect class="box" x="450" y="266" width="170" height="46" rx="8"/><rect class="bar g-sec" x="450" y="274" width="3" height="30" rx="1.5"/>
+    <text class="name" x="535" y="286" text-anchor="middle">Secrets</text><text class="sub" x="535" y="302" text-anchor="middle">.env · no Vault</text>
+    <path class="edge g-wf" d="M210 163H235V218H256" marker-end="url(#pl-wf)"/>
+    <path class="edge g-inv" d="M210 229H256" marker-end="url(#pl-inv)"/>
+    <path class="edge g-inv" d="M210 289H235V240H256" marker-end="url(#pl-inv)"/>
+    <path class="edge g-wf" d="M434 229H446" marker-end="url(#pl-wf)" marker-start="url(#pl-wf)"/>
+    <text class="band hi" x="650" y="124">OBSERVABILITY</text>
+    <rect class="cut" x="650" y="130" width="230" height="170" rx="10"/>
+    <rect class="box" x="666" y="146" width="198" height="46" rx="8"/><rect class="bar g-obs" x="666" y="154" width="3" height="30" rx="1.5"/>
+    <text class="name" x="765" y="166" text-anchor="middle">Metrics, no logs</text><text class="sub" x="765" y="182" text-anchor="middle">Prometheus · Grafana</text>
+    <path class="edge g-obs" d="M430 214H440V163H662" marker-end="url(#pl-obs)"/>
+    <text class="band hi" x="20" y="356">EACH SITE</text>
+    <rect class="cut" x="20" y="362" width="860" height="170" rx="10"/>
+    <rect class="box" x="260" y="390" width="170" height="46" rx="8"/><rect class="bar g-wf" x="260" y="398" width="3" height="30" rx="1.5"/>
+    <text class="name" x="345" y="410" text-anchor="middle">Site agent</text><text class="sub" x="345" y="426" text-anchor="middle">rollout.py run</text>
+    <rect class="box" x="666" y="390" width="198" height="46" rx="8"/><rect class="bar g-img" x="666" y="398" width="3" height="30" rx="1.5"/>
+    <text class="name" x="765" y="410" text-anchor="middle">Image cache</text><text class="sub" x="765" y="426" text-anchor="middle">nginx · HTTPS :8443</text>
+    <rect class="box" x="450" y="470" width="170" height="46" rx="8"/><rect class="bar g-rf" x="450" y="478" width="3" height="30" rx="1.5"/>
+    <text class="name" x="535" y="490" text-anchor="middle">BMCs</text><text class="sub" x="535" y="506" text-anchor="middle">10 emulated in QEMU</text>
+    <path class="edge g-wf" d="M345 252V386" marker-end="url(#pl-wf)"/>
+    <text class="elabel" x="352" y="300" text-anchor="start">work per wave</text>
+    <path class="edge g-sec" d="M530 312V372H400V386" marker-end="url(#pl-sec)"/>
+    <text class="elabel" x="465" y="367" text-anchor="middle">static login</text>
+    <path class="edge g-img" d="M860 67H872V413H868" marker-end="url(#pl-img)"/>
+    <text class="elabel" x="866" y="381" text-anchor="end">serves lab/images/</text>
+    <path class="edge g-rf" d="M345 436V458H530V466" marker-end="url(#pl-rf)"/>
+    <text class="elabel" x="438" y="454" text-anchor="middle">Redfish: update · tasks · reset</text>
+    <path class="edge g-img" d="M666 428H434" marker-end="url(#pl-img)"/>
+    <text class="elabel" x="548" y="424" text-anchor="middle">file, to push it</text>
+    <path class="edge g-obs" d="M430 404H640V175H662" marker-end="url(#pl-obs)"/>
+    <text class="elabel" x="535" y="400" text-anchor="middle">run metrics · Pushgateway</text>
+    <!-- where each stage happens in the lab: the update is a push, then reset, post-check and rollback at the BMCs -->
+    <g class="badge"><title>Stage 0: Ingest</title><circle cx="430" cy="44" r="8"/><text x="430" y="47.5" text-anchor="middle">0</text></g>
+    <g class="badge"><title>Stage 1: Plan and pre-flight</title><circle cx="235" cy="192" r="8"/><text x="235" y="195.5" text-anchor="middle">1</text></g>
+    <g class="badge"><title>Stage 3: Update, a push</title><circle cx="640" cy="428" r="8"/><text x="640" y="431.5" text-anchor="middle">3</text></g>
+    <g class="badge"><title>Stage 4: Reset of the BMC</title><circle cx="470" cy="470" r="8"/><text x="470" y="473.5" text-anchor="middle">4</text></g>
+    <g class="badge"><title>Stage 5: Post-checks over Redfish</title><circle cx="490" cy="470" r="8"/><text x="490" y="473.5" text-anchor="middle">5</text></g>
+    <g class="badge"><title>Stage 6: Roll back</title><circle cx="510" cy="470" r="8"/><text x="510" y="473.5" text-anchor="middle">6</text></g>
+    <text class="band" x="20" y="560">CONNECTIONS</text>
+    <path class="edge g-img" d="M150 557H172"/><text class="lbl" x="180" y="560">Images</text>
+    <path class="edge g-rf" d="M335 557H357"/><text class="lbl" x="365" y="560">Redfish (BMC)</text>
+    <path class="edge g-wf" d="M520 557H542"/><text class="lbl" x="550" y="560">Workflow and state</text>
+    <path class="edge g-inv" d="M150 577H172"/><text class="lbl" x="180" y="580">Inventory and catalog</text>
+    <path class="edge g-obs" d="M335 577H357"/><text class="lbl" x="365" y="580">Observability</text>
+    <path class="edge g-sec" d="M520 577H542"/><text class="lbl" x="550" y="580">Secrets</text>
+    <text class="band" x="20" y="608">ROLLOUT STAGES</text>
+    <g class="badge"><title>Stage 0: Ingest</title><circle cx="158" cy="605" r="8"/><text x="158" y="608.5" text-anchor="middle">0</text></g>
+    <text class="lbl" x="172" y="608">Ingest</text>
+    <g class="badge"><title>Stage 1: Plan and pre-flight</title><circle cx="232" cy="605" r="8"/><text x="232" y="608.5" text-anchor="middle">1</text></g>
+    <text class="lbl" x="246" y="608">Plan and pre-flight</text>
+    <g class="badge"><title>Stage 3: Update</title><circle cx="384" cy="605" r="8"/><text x="384" y="608.5" text-anchor="middle">3</text></g>
+    <text class="lbl" x="398" y="608">Update</text>
+    <g class="badge"><title>Stage 4: Reset</title><circle cx="458" cy="605" r="8"/><text x="458" y="608.5" text-anchor="middle">4</text></g>
+    <text class="lbl" x="472" y="608">Reset</text>
+    <g class="badge"><title>Stage 5: Post-checks</title><circle cx="526" cy="605" r="8"/><text x="526" y="608.5" text-anchor="middle">5</text></g>
+    <text class="lbl" x="540" y="608">Post-checks</text>
+    <g class="badge"><title>Stage 6: Roll back</title><circle cx="630" cy="605" r="8"/><text x="630" y="608.5" text-anchor="middle">6</text></g>
+    <text class="lbl" x="644" y="608">Roll back</text>
+  </g>
+</svg>
