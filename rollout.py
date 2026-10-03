@@ -174,7 +174,7 @@ def ab_bank(found, component) -> str:
     """Yes: besides the running image (Active true, ImageState Active, or a manager's ActiveSoftwareImage), another
     image of the component is reported, inactive, staged or armed; a manager's SoftwareImages count as its images.
     Not reported: one image, several without saying which runs, or none linked. One reported image doesn't prove one
-    bank: a BMC may keep a second bank it doesn't expose (AMI shows it only in its Oem, see make prod-detail)."""
+    bank: a BMC may keep a second bank it doesn't expose (AMI shows it only in its Oem, see make detail SITE=prod)."""
     if component not in update_targets(found):
         return "-"
     touched = entries(found, component)
@@ -1254,7 +1254,7 @@ def pipeline_report(plan, events, name, records) -> dict:
         "waves": wave_docs, "left_out": left_out}
 
 
-# A task's progress as the record followed it: "19:47:25 Running 0% → 19:47:40 45% → 19:48:22 Completed 100%"
+# A task's progress
 def trail(progress) -> str:
     parts, last = [], None
     for p in progress:
@@ -1285,7 +1285,7 @@ def task_detail(task) -> list[str]:
     return lines + [f"  {sev} {mid}{f' ×{n}' if n > 1 else ''}: {message}" for sev, mid, message, n in runs]
 
 
-# One step's evidence as text: its checks with ✓ or ✗, how the image went over, the reset sent, why it rolled back
+# One step with detail per step.
 def step_detail(step) -> str:
     lines, kind = [f"fault injected · {step['fault']}"] if step.get("fault") else [], step["step"]
     if kind == "rollback":

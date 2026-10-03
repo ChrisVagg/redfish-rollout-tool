@@ -1,8 +1,14 @@
 # Redfish firmware rollout
 
-Firmware rollout for server BMCs over the standard [Redfish](https://www.dmtf.org/standards/redfish) API: a fleet
-poller, a pre-flighted rollout in canary and waves, and a lab of ten emulated OpenBMC BMCs where the rollout really
-updates firmware. Production is read-only; writes happen only in the lab.
+Firmware updates for server BMCs over the standard [Redfish](https://www.dmtf.org/standards/redfish) API. Production
+is read-only; writes happen only in the lab. Four parts, each run with `make` ([Quick start](#quick-start-the-lab)):
+
+| Part | What it does |
+|---|---|
+| **Poller** ([poller.py](poller.py)) | Polls the resources each BMC's Redfish service exposes: health, firmware, inventory and sensor readings, as views of a collect or, run without stopping, as metrics. Reads only. |
+| **Rollout** ([rollout.py](rollout.py), [pipeline.sh](pipeline.sh)) | The firmware updates: pre-flight, a canary, then waves, each after a gate, with a rollback when a host fails its post-check. |
+| **Lab** ([lab/](lab/)) | Ten emulated OpenBMC BMCs, each QEMU in its own Docker service: the only BMCs the rollout updates. |
+| **Observability** ([observability/](observability/docker-compose.yaml)) | Docker services: `exporter-lab` and `exporter-prod` (the poller, serving metrics), `pushgateway` (where the rollout pushes its metrics), `prometheus` and `grafana`. |
 
 ## How the rollout works
 
@@ -57,7 +63,7 @@ and run records.
 
 <details><summary>The terminal while it ran: every stage, and every step of every BMC as it happened</summary>
 
-![The terminal of make lab-pipeline-update](docs/runs/update-live.svg)
+![The terminal of make update](docs/runs/update-live.svg)
 
 </details>
 
@@ -69,22 +75,51 @@ starts. The other bad updates, one fault each, are under [Bad updates](#bad-upda
 
 ## Quick start: the lab
 
-Needs Linux x86-64, Docker with Compose, Python 3.10+ and `curl`.
+Needs Linux x86-64, Docker with Compose, Python 3.10+, `curl`, and an admin account for Grafana in
+`observability/grafana/.grafana.env`, git-ignored like `prod/.env`:
 
 ```sh
-make setup                 # venv/ and requirements.txt
-make lab-up                # downloads QEMU and two OpenBMC builds (~230 MB), boots 10 BMCs (~7 min)
-make monitor-up            # Prometheus, Grafana and an exporter per site: http://127.0.0.1:3000
-make lab-pipeline-plan     # dry run: plan, canary, waves; nothing is written
-make lab-pipeline-update   # the rollout: a canary of 1 BMC, then waves of 3 and 6
-make lab-pipeline-report   # the verdict, what needs a person, every host by wave (HOST=… for its steps)
-make lab-reset             # stop the BMCs and wipe their flash: they boot the older build again
+# observability/grafana/.grafana.env, read by docker compose
+GRAFANA_ADMIN_USERNAME=...
+GRAFANA_ADMIN_PASSWORD=...
 ```
 
-`make help` lists every target and the variables it takes. To roll the lab back, swap the commented line in
-`lab/baseline.yaml` and run `make lab-pipeline-update` again. Grafana at <http://127.0.0.1:3000>, no login needed,
-has a **Lab** and a **Prod** folder, each with the same three dashboards fixed to its site: **Fleet manager**, every
-BMC, **Host**, one BMC in full, and **Pipeline**, which follows a rollout live ([Monitoring](#monitoring)).
+```sh
+make setup        # venv/ and requirements.txt
+make lab-up       # the lab: downloads QEMU and two OpenBMC builds (~230 MB), boots 10 BMCs (~7 min)
+make monitor-up   # observability: exporters, Pushgateway, Prometheus, Grafana on http://127.0.0.1:3000
+make collect      # the poller: crawl every BMC into lab/snapshots/
+make health       # a view of that collect: health per host, then everything not OK
+make dry-run      # the rollout, nothing written: plan, canary, waves
+make update       # the rollout: a canary of 1 BMC, then waves of 3 and 6
+make report       # the verdict, what needs a person, every host by wave (HOST=… for its steps)
+make lab-reset    # stop the BMCs and wipe their flash: they boot the older build again
+```
+
+Every target runs on the lab; add `SITE=prod` for the real fleet, which is only ever read: `make update` and
+`make fault` refuse it. `make help` lists every target and the variables it takes. To roll the lab back, swap the
+commented line in `lab/baseline.yaml` and run `make update` again. Grafana at <http://127.0.0.1:3000>, admin login
+only, has a **Lab** and a **Prod** folder, each with the same three dashboards fixed to its site: **Fleet manager**,
+every BMC, **Host**, one BMC in full, and **Pipeline**, which follows a rollout live ([Observability](#observability)).
+
+## The poller
+
+[poller.py](poller.py) polls the resources each BMC's Redfish service exposes, from `/redfish/v1` down, and never
+writes. `make collect` crawls every BMC of the site into `<site>/snapshots/`; the views read the last collect without
+touching the BMCs:
+
+| Target | What it shows |
+|---|---|
+| `make health` | health counts per host, then everything not OK, jobs to check and failed requests |
+| `make firmware` | baseline compliance per host, then firmware per model against the baseline |
+| `make inventory` | one row per host: identity, CPUs, GPUs, memory, drives, NICs, PSUs |
+| `make telemetry` | every sensor of every host with its thresholds; the hottest and highest power per host |
+| `make capabilities` | what each hardware model can do: Redfish version, services, actions, update methods |
+| `make diff` | what changed since the previous collect |
+
+`make detail HOST=…` shows everything about one host, and `make views` writes every view into `<site>/reports/` as
+HTML, JSON and CSV. Standard Redfish properties only, read the same way on every vendor. Run without stopping, the
+same crawl is the exporters of [Observability](#observability), which serve each read as Prometheus metrics.
 
 ## The lab stack
 
@@ -126,8 +161,8 @@ its plan and its run records. It comes in two forms, drawn from the same data so
   seconds, states are fixed words; the text is only ever next to them.
 - **The report for people**, in the terminal and as `report.html`: the verdict first, then what needs a person
   (host, why, next step), the versions (a letter each, with hosts before and after), and every host by wave with
-  the wave's gate. `report.html` adds every host's steps with their evidence. `make lab-pipeline-report` shows the
-  latest pipeline's; `HOST=127.0.0.1:2443` shows one host's steps.
+  the wave's gate. `report.html` adds every host's steps with their evidence. `make report` shows the latest
+  pipeline's; `HOST=127.0.0.1:2443` shows one host's steps.
 
 <details><summary>One host's steps with their evidence: the canary of <code>unhealthy</code></summary>
 
@@ -135,16 +170,24 @@ its plan and its run records. It comes in two forms, drawn from the same data so
 
 </details>
 
-## Monitoring
+## Observability
 
-`make monitor-up` starts [observability/](observability/docker-compose.yaml), every service on 127.0.0.1 only:
+`make monitor-up` starts the Docker services of [observability/](observability/docker-compose.yaml), every one on
+127.0.0.1 only:
 
 | Service | What it does |
 |---|---|
 | `exporter-lab`, `exporter-prod` | `poller.py exporter`: crawls every BMC of its site, each on its own loop, and serves the latest read on `/metrics`: what the equipment is (`redfish_host_info`: the inventory's vendor, project and rack, the BMC's Manufacturer and Model), whether it answered (`redfish_up`) and how many of its GETs failed (`redfish_failed_requests`: what they would have read is missing from that read), every reading with its unit (`redfish_reading`), its thresholds (`redfish_reading_threshold`) and how far past them it is (`redfish_reading_crossed`: 0 within, 1 caution, 2 critical, 3 fatal, upper or lower), the health of every object with a `Status`, each fan and power supply too (`redfish_health`), each firmware component with its running version, whether Redfish can update it and how an image gets in, push or pull, the same checks as `rollout.py plan` (`redfish_firmware_info`), and the BMC's last reset, memory and free storage (`ManagerDiagnosticData`). Standard properties only, read as `collect` reads them. The lab every 10 s on `:9101`; prod every 5 min on `:9102`, read-only, with `prod/.env`'s accounts; without a `prod/inventory.yaml` (a fresh clone) it reads nothing and stays up. |
 | Pushgateway `:9091` | Where `rollout.py run` pushes its report as metrics after every recorded event (`PUSHGATEWAY`): hosts by wave and state, versions, every step's duration, every check after the flash, each gate. Best effort: if it is down, the rollout logs it once and goes on. |
 | Prometheus `:9090` | Scrapes both, labels each exporter's metrics with its `site`, keeps 15 days and evaluates [the alert rules](observability/rules.yml). |
-| Grafana `:3000` | A **Lab** and a **Prod** folder, the same three dashboards in each, fixed to its site. **Fleet manager**, every BMC: BMCs answering, worst health, readings past critical, a row per host with its equipment (vendor, manufacturer, model, project, rack) and failed GETs that opens its own dashboard, Redfish up over time (a firmware update shows as the reset's gap), firmware by hardware model and version (two versions of one component on one model is drift) and by host with Updateable, Push and Pull, the readings nearest their upper critical, everything not OK, the firing alerts, the BMCs' own memory and storage. **Host**, one BMC: what it is, its firmware inventory and what Redfish can update and how, the health of every component, worst first, then a row each for Chassis · Thermal, Chassis · Power, Systems and Managers (the BMC itself): a chart per kind of reading, in its unit, with min, max, mean and last in the legend, and a table of every reading's thresholds, whether it is past one and its share of the upper critical. **Pipeline**, per pipeline: hosts by state, each gate, versions before, target and after, the longest steps, failed checks, and its BMCs answering Redfish. |
+| Grafana `:3000` | A **Lab** and a **Prod** folder, the same three dashboards in each, fixed to its site. **Fleet manager**, every BMC: BMCs answering, worst health, readings past critical, a row per host with its equipment (vendor, manufacturer, model, project, rack) and failed GETs that opens its own dashboard, Redfish up over time (a firmware update shows as the reset's gap), firmware by hardware model and version (two versions of one component on one model is drift) and by host with Updateable, Push and Pull, the readings nearest their upper critical, everything not OK, the firing alerts, the BMCs' own memory and storage. **Host**, one BMC: what it is, its firmware inventory and what Redfish can update and how, the health of every component, worst first, then a row each for Chassis · Thermal, Chassis · Power, Systems and Managers (the BMC itself): a chart per kind of reading, in its unit, with min, max, mean and last in the legend and each reading's caution and critical thresholds as dashed lines (orange, red). **Pipeline**, per pipeline: hosts by state, each gate, versions before, target and after, the longest steps, failed checks, and its BMCs answering Redfish. |
+
+Grafana is admin only: no anonymous access, the one account from `observability/grafana/.grafana.env`, which
+[grafana.ini](observability/grafana/grafana.ini) reads. Grafana creates it on its first start only; after that, change
+its password in the UI. The admin can change and save anything in the UI, and it stays in Grafana's volume across
+`make monitor-down` and up, except the six dashboards: every Grafana start loads them again from
+[observability/grafana/dashboards/](observability/grafana/dashboards/). To keep a change to one, export it over its
+file (Export → Export as JSON), or save it as a copy.
 
 Alerts: `BMCDown` (no answer for 10 minutes, unless a rollout is updating the host: its reset takes the BMC away),
 `BMCLoginRefused`, `ReadingPastCritical` (upper or lower: a fan slowing down too), `HealthCritical`, `HealthWarning`, `RolloutHalted` and `HostNeedsAPerson`.
@@ -171,7 +214,7 @@ What the exporter does differently from a one-off `collect`, because it never st
 
 ## Bad updates
 
-`make lab-pipeline-fault SCENARIO=<name>` runs the real pipeline to the build the lab doesn't run, with faults
+`make fault SCENARIO=<name>` runs the real pipeline to the build the lab doesn't run, with faults
 injected where real ones would show (`rollout.py run --fault [HOST=]KIND`, lab only; [lab/scenario.sh](lab/scenario.sh)).
 Every scenario should stop the pipeline at a gate; the script checks how each host ended. The single-fault scenarios
 hit every host, so the canary fails and the waves never run:
@@ -223,7 +266,7 @@ hit every host, so the canary fails and the waves never run:
 The canary can't catch a fault that hits only some hosts; the halt after each wave is what stops it spreading. The
 fleet is left on two builds, and the report says which host is where.
 
-`make lab-pipeline-report` then shows the run: what needs a person, and each host's versions before and after.
+`make report` then shows the run: what needs a person, and each host's versions before and after.
 
 After `rejected`, the aborted task stays in that BMC's `TaskService`: bmcweb keeps tasks until the BMC restarts and
 only allows GET on them. Pre-flight then blocks the BMC (a failed task: a person has to look), so the next plan picks
@@ -253,7 +296,7 @@ With the lab's 10 BMCs in 3 racks: canary 2441 (fw image), wave 1 of 3 (one per 
 
 Equipment running production services runs the same tools, the same pipeline and the same six steps with `SITE=prod`; only the inventory, the credentials and the policy change.
 
-Production (**ASUS**, **Dell**, **HPE**, **Gigabyte**, **Supermicro**) is **read-only**: `make prod-collect`, the views (`make prod-health`, `prod-firmware`...), `make prod-plan`, and the prod exporter of `make monitor-up`, every 5 minutes. They read only, plus a Redfish session login and logout. The Supermicro has no row in `prod/baseline.yaml` yet, so the plan skips it as not in the baseline.
+Production (**ASUS**, **Dell**, **HPE**, **Gigabyte**, **Supermicro**) is **read-only**: `make collect SITE=prod`, the views (`make health SITE=prod`, `make firmware SITE=prod`...), `make plan SITE=prod`, `make dry-run SITE=prod`, and `exporter-prod`, every 5 minutes. `make update` and `make fault` refuse `SITE=prod`. They read only, plus a Redfish session login and logout. The Supermicro has no row in `prod/baseline.yaml` yet, so the plan skips it as not in the baseline.
 
 [prod/inventory.example.yaml](prod/inventory.example.yaml)
 
@@ -300,8 +343,9 @@ To run it:
   `SimpleUpdate` with the URL's protocol and target allowed pulls the image from it; a push-only BMC (like the lab's
   GB200 build) gets the file pushed to `MultipartHttpPushUri` by the machine running the rollout. The plan's Push and
   Pull columns show which, per resource, and pre-flight blocks a host whose method the BMC doesn't allow.
-- **Run**: with `prod/.env` exported, `SITE=prod ./pipeline.sh "Manager (BMC)"` is the dry run and `YES=1` updates.
-  It runs from an admin host on the BMC management network.
+- **Run**: `make dry-run SITE=prod` is the dry run. The update itself, once hosts are `writable`, is
+  `SITE=prod YES=1 ./pipeline.sh "Manager (BMC)"` with `prod/.env` exported, from an admin host on the BMC management
+  network: the Makefile never writes to production.
 
 ---
 ## Not built yet
@@ -341,15 +385,15 @@ How this repository maps onto it:
 |---|---|---|
 | Approved store, site cache | `images.yaml`: a file or URL per version, with its sha256, which pre-flight checks for a file | a site HTTPS cache: `rollout.py` already hands a URL over with `SimpleUpdate` where the BMC allows it, and pushes the file otherwise (the lab's BMCs are push-only) |
 | Firmware catalog | `baseline.yaml` and `images.yaml`, reviewed in git | the same |
-| Inventory / CMDB | `inventory.yaml`; the poller's snapshots are the observed versions, and `make prod-firmware` shows drift from the baseline | generate the inventory from Nautobot |
+| Inventory / CMDB | `inventory.yaml`; the poller's snapshots are the observed versions, and `make firmware SITE=prod` shows drift from the baseline | generate the inventory from Nautobot |
 | Rollout API and CLI | the `make` targets and `pipeline.sh`; `YES=1` is the approval | an approval between the canary and wave 1 |
 | Workflow engine | `pipeline.sh`'s stages and `rollout.py run`: waves, gates, soak | a service that resumes a stopped rollout |
 | Rollout state DB | `<site>/runs/*.jsonl`: every step's intent before it and result after it; `report.json` | PostgreSQL, with host locks and the gate as a query |
 | Engine store | none: a rerun plans again, and pre-flight skips the hosts already on the target | the engine's own |
 | Site agent | `rollout.py run` on an admin host on the management network | one per site |
 | Scheduler | the `--drain` and `--undrain` commands | the same |
-| Secrets | `prod/.env`, git-ignored | Vault, short-lived credentials |
-| Observability | the report: terminal, HTML and `report.json`; an exporter per site with every BMC's telemetry, health and firmware, the rollout's metrics pushed live, alert rules, and Grafana dashboards in a folder per site ([Monitoring](#monitoring)) | Alertmanager routing the alerts to PagerDuty; an exporter and a Pushgateway in each site; Redfish `EventService` subscriptions, so a fault arrives in seconds rather than at the next read |
+| Secrets | `prod/.env` and `observability/grafana/.grafana.env`, git-ignored | Vault, short-lived credentials |
+| Observability | the report: terminal, HTML and `report.json`; an exporter per site with every BMC's telemetry, health and firmware, the rollout's metrics pushed live, alert rules, and Grafana dashboards in a folder per site ([Observability](#observability)) | Alertmanager routing the alerts to PagerDuty; an exporter and a Pushgateway in each site; Redfish `EventService` subscriptions, so a fault arrives in seconds rather than at the next read |
 
 
 ## Layout
@@ -357,7 +401,7 @@ How this repository maps onto it:
 ```
 Makefile            every command: make help
 pipeline.sh         plan → canary → waves → report
-poller.py           collect, then the views: health, firmware, inventory, telemetry, capabilities, diff
+poller.py           collect, the views (health, firmware, inventory, telemetry, capabilities, diff) and the exporter
 redfish.py          the Redfish connection both tools share: session, token, GET, POST, PATCH
 rollout.py          plan, run, report
 test_rollout.py     checks of the wave plan: python test_rollout.py
@@ -367,7 +411,8 @@ schemas/            DMTF Redfish JSON Schemas for sensor units, downloaded on fi
 lab/                the emulated BMCs: Dockerfile, docker-compose.yaml, images.sh, heal.sh, scenario.sh, inventory.yaml,
                     rollout.yaml
 prod/               the real fleet: baseline.yaml, rollout.yaml; inventory.yaml and .env stay local
-observability/      Compose for the exporters, Pushgateway, Prometheus and Grafana; alert rules; a Lab and a Prod dashboard folder
+observability/      Compose for the exporters, Pushgateway, Prometheus and Grafana; alert rules; a Lab and a Prod dashboard folder;
+                    grafana/grafana.ini; grafana/.grafana.env, Grafana's admin account, stays local
 docs/               diagrams: the rollout, the lab, production today, a production system
 docs/runs/          reports of real lab runs: the update and every bad-update scenario
 ```

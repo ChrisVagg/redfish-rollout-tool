@@ -23,6 +23,11 @@
     .ps .g-obs { stroke: #ff5c8a; } .ps .bar.g-obs { fill: #ff5c8a; stroke: none; }
     .ps .g-sec { stroke: #e5c04a; } .ps .bar.g-sec { fill: #e5c04a; stroke: none; }
     .ps .g-hw { stroke: #6f8f97; } .ps .bar.g-hw { fill: #6f8f97; stroke: none; }
+    /* motion: a connection's dashes run the way it points; the hardware link stays still */
+    @keyframes ps-flow { to { stroke-dashoffset: -18; } }
+    .ps .edge { animation: ps-flow 1.2s linear infinite; }
+    .ps .edge.g-hw { animation: none; }
+    @media (prefers-reduced-motion: reduce) { .ps .edge { animation: none; } }
   </style>
   <defs>
     <marker id="ps-img" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path d="M0 0 8 4 0 8z" style="fill: #00ffc8"/></marker>

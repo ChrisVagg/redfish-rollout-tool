@@ -17,7 +17,7 @@
 #                 bad ones (2443 unhealthy, 2444 rejected). Wave 1 is strict, so any failure halts: wave 2 (6 BMCs)
 #                 never starts, and the fleet is left on two builds for a person to look at.
 #
-#   make lab-pipeline-fault SCENARIO=<name>
+#   make fault SCENARIO=<name>
 set -euo pipefail
 cd "$(dirname "$0")/.."
 export SITE=lab
@@ -35,7 +35,7 @@ declare -A faults=(
 scenario=${1:-none}
 [ -n "${expect[$scenario]:-}" ] || { sed -n '2,/^#   make/p' "$0" | cut -c3-; exit 2; }  # the scenarios above
 shift
-: "${LAB_USERNAME:?the lab login: run it through make lab-pipeline-fault}" "${LAB_PASSWORD:?}"
+: "${LAB_USERNAME:?the lab login: run it through make fault}" "${LAB_PASSWORD:?}"
 bmc=127.0.0.1:2441  # every lab BMC runs the same build between scenarios: this one tells which
 
 # What the lab runs now, and the catalog's other version: the target

@@ -6,10 +6,10 @@
 #   SITE=lab ./pipeline.sh COMPONENT [plan options]         every stage a dry run: the plan and what each host would get
 #   SITE=lab YES=1 ./pipeline.sh COMPONENT [plan options]   really update, on hosts marked writable: true only
 #
-# SITE is the fleet's folder, prod (the default) or lab. On the lab: make lab-pipeline-plan (the dry run) and make
-# lab-pipeline-update. The plan options (--allow-downgrade, --canary, --wave-pct...) go to the plan stage; the canary
-# and waves stages take everything from the plan it saved, plus RUN_ARGS (--reset-timeout, --fault...). Each
-# pipeline keeps its plan and HTML reports in <site>/runs/pipeline-<time>/.
+# SITE is the fleet's folder, prod (the default) or lab. On the lab: make dry-run and make update. The plan options
+# (--allow-downgrade, --canary, --wave-pct...) go to the plan stage; the canary and waves stages take everything from
+# the plan it saved, plus RUN_ARGS (--reset-timeout, --fault...). Each pipeline keeps its plan and HTML reports in
+# <site>/runs/pipeline-<time>/.
 set -uo pipefail
 cd "$(dirname "$0")"
 component=${1:?usage: [SITE=lab] [YES=1] ./pipeline.sh COMPONENT [plan options]}
@@ -57,5 +57,5 @@ if [ -f "$out/plan.json" ] && { [ "${#records[@]}" -gt 0 ] || [ "$status" -ne 0 
 fi
 printf '\nPipeline %s. Plan and reports: %s/\n' \
   "$([ "$status" -eq 0 ] && echo passed || echo 'stopped: a stage FAILED')" "$out"
-[ -z "$yes" ] && echo "Every stage was a dry run: nothing was changed. YES=1 (make lab-pipeline-update) to update."
+[ -z "$yes" ] && echo "Every stage was a dry run: nothing was changed. YES=1 (make update) to update."
 exit "$status"

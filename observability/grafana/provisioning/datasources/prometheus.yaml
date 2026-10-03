@@ -1,3 +1,5 @@
+# Prometheus as data source, add also push gateway service to export metrics
+# for prometheus to scrap
 apiVersion: 1
 datasources:
   - {name: Prometheus, uid: prometheus, type: prometheus, url: "http://127.0.0.1:9090", isDefault: true, editable: true}

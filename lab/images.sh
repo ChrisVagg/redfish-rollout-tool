@@ -49,7 +49,7 @@ tar -xOf "images/gb200nvl-$old.static.mtd.all.tar" image-bmc > bmc.mtd
 } > images.yaml
 cat > baseline.yaml <<EOF
 # Written by lab/images.sh: the lab's approved firmware. The emulated GB200 NVL reports no manufacturer or model, so its
-# model reads "- -". The lab boots build $old and this approves build $new, so make lab-pipeline-update updates it. To
+# model reads "- -". The lab boots build $old and this approves build $new, so make update updates it. To
 # roll the lab back and forth, swap which line is commented.
 "- -":
   "Manager (BMC)": "$(version "$new")"  # build $new
