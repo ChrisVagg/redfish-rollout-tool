@@ -3,7 +3,7 @@
 #   exporter-prod  the same on the real fleet, every 5 min: read-only, one session per BMC  127.0.0.1:9102
 #                  (prod/inventory.yaml and prod/.env; without an inventory it reads nothing and stays up)
 #   pushgateway    where rollout.py run pushes each run's metrics (PUSHGATEWAY)          127.0.0.1:9091
-#   prometheus     scrapes them, keeps 15 days, evaluates rules.yml                     127.0.0.1:9090
+#   prometheus     scrapes them, keeps 15 days                                          127.0.0.1:9090
 #   grafana        a Lab and a Prod folder: Fleet manager, Host and Pipeline; admin only,  127.0.0.1:3000
 #                  the account from grafana/.grafana.env
 # Host network: the exporters reach the lab BMCs on 127.0.0.1 and the fleet the way this machine does.
@@ -18,10 +18,10 @@ services:
   exporter-lab:
     <<: *exporter
     command: [--listen, "127.0.0.1:9101", --interval, "10"]
-    environment: [SITE=lab, LAB_USERNAME=root, LAB_PASSWORD=0penBmc]  # OpenBMC's public default account
+    environment: [SITE=lab, LAB_USERNAME=root, LAB_PASSWORD=0penBmc]  # default credentials
   exporter-prod:
     <<: *exporter
-    command: [--listen, "127.0.0.1:9102", --interval, "300"]
+    command: [--listen, "127.0.0.1:9102", --interval, "30"]
     environment: [SITE=prod]
     env_file: [{path: ../prod/.env, required: false}]
   pushgateway:
@@ -35,8 +35,7 @@ services:
     network_mode: host
     command: [--config.file=/etc/prometheus/prometheus.yml, --storage.tsdb.path=/prometheus,
               --web.listen-address=127.0.0.1:9090]
-    volumes: ["./prometheus.yml:/etc/prometheus/prometheus.yml:ro", "./rules.yml:/etc/prometheus/rules.yml:ro",
-              "prometheus:/prometheus"]
+    volumes: ["./prometheus.yml:/etc/prometheus/prometheus.yml:ro", "prometheus:/prometheus"]
   grafana:
     image: grafana/grafana:13.2.3
     restart: unless-stopped

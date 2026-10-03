@@ -4,6 +4,9 @@ __pycache__/
 .pytest_cache/
 venv/
 snapshots/
+# the agent's copies of the images it fetched from the image cache
+spool/
+lab/cache/tls.*
 reports/
 images/
 lab/qemu-system-arm

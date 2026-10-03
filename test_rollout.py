@@ -118,6 +118,33 @@ def test_preflight_image():
     assert verdict == "block" and "8 bytes, MaxImageSizeBytes 4" in reason, reason
 
 
+# With a site cache, pre-flight fetches the image into the agent's copy, which it pushes, and checks it against the
+# catalog: an image the cache doesn't have, or bytes that don't match, block. The cache is a real HTTP server
+def test_image_cache():
+    import functools
+    import http.server
+    import threading
+
+    class Cache(http.server.SimpleHTTPRequestHandler):
+        def log_message(self, *args) -> None:
+            pass
+    store, spool, sha = Path(tempfile.mkdtemp()), Path(tempfile.mkdtemp()), hashlib.sha256(b"firmware").hexdigest()
+    (store / "bmc").mkdir()
+    (store / "bmc" / "1755.tar").write_bytes(b"firmware")
+    (store / "bmc" / "tampered.tar").write_bytes(b"tampered")
+    cache = http.server.ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(Cache, directory=str(store)))
+    threading.Thread(target=cache.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{cache.server_port}"
+    with patch.object(rollout, "IMAGE_CACHE", url), patch.object(rollout, "SPOOL", spool):
+        assert rollout.image_problems("bmc/1755.tar", sha) == ()
+        assert (spool / "bmc" / "1755.tar").read_bytes() == b"firmware"
+        assert rollout.image_problems("bmc/gone.tar", sha)[0].startswith("bmc/gone.tar: not fetched from the image")
+        assert rollout.image_problems("bmc/tampered.tar", sha) == (
+            "bmc/tampered.tar: sha256 doesn't match images.yaml",)
+        assert not (spool / "bmc" / "tampered.tar").exists()  # deleted: the next run fetches it again
+    cache.shutdown()
+
+
 # No way back, one bank and no image of the running version, blocks unless --accept-no-rollback
 def test_preflight_rollback():
     no_way_back = catalog(**{TARGET: image("1755.tar")})

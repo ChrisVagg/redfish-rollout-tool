@@ -16,7 +16,8 @@ FIRMWARE   = $(or $(COMPONENT),Manager (BMC))
 
 ifeq ($(SITE),lab)
   # OpenBMC's public default account; the rollout pushes its metrics to the Pushgateway
-  ENV       := SITE=lab LAB_USERNAME=root LAB_PASSWORD=0penBmc PUSHGATEWAY=http://127.0.0.1:9091
+  ENV       := SITE=lab LAB_USERNAME=root LAB_PASSWORD=0penBmc PUSHGATEWAY=http://127.0.0.1:9091 \
+               IMAGE_CACHE=https://127.0.0.1:8443
   # pre-flight can't put OpenBMC versions in order, so the lab allows either direction
   PLAN_ARGS := --allow-downgrade
 else ifeq ($(SITE),prod)
@@ -36,7 +37,7 @@ Setup
   make test                the rollout's decisions on recorded Redfish data, in under a second, no BMC needed
   make mutations           break each safety rule of rollout.py, in a copy: each break must fail a test
 
-Lab: 10 emulated OpenBMC BMCs, QEMU in Docker, on 127.0.0.1:2441-2450
+Lab: 10 emulated OpenBMC BMCs, QEMU in Docker, on 127.0.0.1:2441-2450, and their HTTPS image cache on :8443
   make lab-up              download QEMU and two OpenBMC builds, boot the BMCs (about 7 min)
   make lab-down            stop them; each keeps its flash
   make lab-reset           stop them and wipe their flash: they boot the older build again
@@ -94,7 +95,7 @@ mutations:
 	$(PY) mutations.py
 
 # ---- Lab ----
-lab-up: lab/qemu-system-arm lab/bmc.mtd lab/images.yaml lab/baseline.yaml
+lab-up: lab/qemu-system-arm lab/bmc.mtd lab/images.yaml lab/baseline.yaml lab/cache/tls.crt
 	$(LAB) up --detach --build --wait
 	./lab/heal.sh
 
@@ -108,6 +109,11 @@ lab-reset:
 lab/qemu-system-arm:
 	curl -sfL -o $@ https://jenkins.openbmc.org/job/latest-qemu-x86/lastSuccessfulBuild/artifact/qemu/build/qemu-system-arm
 	chmod +x $@
+
+# The image cache's self-signed certificate, for 127.0.0.1; rollout.py trusts it from lab/cache/tls.crt
+lab/cache/tls.crt:
+	openssl req -x509 -newkey rsa:2048 -nodes -days 3650 -subj /CN=127.0.0.1 -addext subjectAltName=IP:127.0.0.1 \
+	  -keyout lab/cache/tls.key -out $@ 2>/dev/null
 
 # Firmware GB200 NVL - nvidia firmware on top of openBMC -> bmcweb - redfish service
 lab/bmc.mtd lab/images.yaml lab/baseline.yaml &:

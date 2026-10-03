@@ -56,10 +56,10 @@ from rich.rule import Rule
 from rich.table import Column, Table
 from rich.text import Text
 
-from constants import (ACTION_ROW, ACTIONS_ROW, APPLY_TIME, BASELINE, DOTTED, FAILED_STATES, FAULTS, HOST_ROW, IMAGES,
-                       INVENTORY_FILE, LEFT_OUT_ROW, NEXT_STEP, PLAN_ROW, PREFLIGHT_ROW, PROPS, REPORT_SCHEMA,
-                       RESET_PREFERENCE, ROLLOUT, ROLLOUT_DEFAULTS, ROOT, RUNNING_STATES, RUNS, SITE, STEP_ROW,
-                       STYLE, TASK_TIMEOUT, VERSIONS_ROW, WAVE_ROW)
+from constants import (ACTION_ROW, ACTIONS_ROW, APPLY_TIME, BASELINE, CACHE_CA, DOTTED, FAILED_STATES, FAULTS,
+                       HOST_ROW, IMAGE_CACHE, IMAGES, INVENTORY_FILE, LEFT_OUT_ROW, NEXT_STEP, PLAN_ROW, PREFLIGHT_ROW,
+                       PROPS, REPORT_SCHEMA, RESET_PREFERENCE, ROLLOUT, ROLLOUT_DEFAULTS, ROOT, RUNNING_STATES, RUNS,
+                       SITE, SPOOL, STEP_ROW, STYLE, TASK_TIMEOUT, VERSIONS_ROW, WAVE_ROW)
 from helpers import (block, first_of, first_real, identity, label, link, norm, obj, of, output_options, reason, sample,
                      show, text, uri_of)
 from poller import (allowable, entries, firmware, host_baseline, image_state, load_baseline, load_servers, open_jobs,
@@ -207,18 +207,42 @@ def image_for(images, found, model, component, version) -> dict | None:
     return (catalog.get(component) or catalog.get(f"SoftwareId:{sid}") or {}).get(version)
 
 
-# The path of an image file, relative to images.yaml; None for a URL
+# Where the agent keeps an image to check and push: its copy from the site's cache, else the file next to images.yaml;
+# None for a URL, which the BMC pulls
 def image_path(file) -> Path | None:
-    return None if "://" in file else IMAGES.parent / file
+    return None if "://" in file else (SPOOL if IMAGE_CACHE else IMAGES.parent) / file
+
+
+# Download an image from the site's cache to where image_path keeps it; None, or why it couldn't
+def fetch(file, path) -> str | None:
+    url = f"{IMAGE_CACHE.rstrip('/')}/{file}"
+    part = path.with_name(path.name + ".part")  # renamed only once complete, so a broken download is never used
+    path.parent.mkdir(parents=True, exist_ok=True)
+    verify = str(CACHE_CA) if CACHE_CA.is_file() else True
+    try:
+        with requests.get(url, stream=True, timeout=(5, 300), verify=verify) as r:
+            r.raise_for_status()
+            with open(part, "wb") as f:
+                for chunk in r.iter_content(1 << 20):
+                    f.write(chunk)
+    except (requests.RequestException, OSError) as e:
+        part.unlink(missing_ok=True)
+        return f"not fetched from the image cache: {reason(str(e))}"
+    part.replace(path)
+    return None
 
 
 # What is wrong with an image: no such file, no sha256, a sha256 that doesn't match; () when nothing
 @lru_cache(maxsize=None)
 def image_problems(file, sha256) -> tuple[str, ...]:
-    """A URL can't be checked from here: the BMC pulls it when the update runs, and that step verifies it."""
+    """A URL can't be checked from here: the BMC pulls it when the update runs, and that step verifies it. With a site
+    cache, the image is fetched first, once; a copy whose sha256 doesn't match is deleted, so the next run fetches it
+    again."""
     path = image_path(file)
     if path is None:
         return ()
+    if IMAGE_CACHE and not path.is_file() and (error := fetch(file, path)):
+        return (f"{file}: {error}",)
     if not path.is_file():
         return (f"{file}: no such file",)
     if not sha256:
@@ -228,7 +252,11 @@ def image_problems(file, sha256) -> tuple[str, ...]:
         # lambda: the next MiB of the file, b"" at its end
         for chunk in iter(lambda: f.read(1 << 20), b""):
             digest.update(chunk)
-    return () if digest.hexdigest() == sha256.lower() else (f"{file}: sha256 doesn't match {IMAGES.name}",)
+    if digest.hexdigest() == sha256.lower():
+        return ()
+    if IMAGE_CACHE:
+        path.unlink()
+    return (f"{file}: sha256 doesn't match {IMAGES.name}",)
 
 
 # How a component could go back to the version it runs now, after an update: the Rollback column

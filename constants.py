@@ -33,6 +33,11 @@ SITE = Path(__file__).parent / os.environ.get("SITE", "prod")
 INVENTORY_FILE = SITE / "inventory.yaml"  # the BMCs and how to reach them
 BASELINE = SITE / "baseline.yaml"  # the approved firmware version per model and component
 IMAGES = SITE / "images.yaml"  # the firmware image files kept per model, component and version
+# The site's HTTPS image cache, which serves images.yaml's files under the same paths: the agent fetches each image it
+# needs into SPOOL, checks its sha256, and pushes it from there. Without one, the files are next to images.yaml
+IMAGE_CACHE = os.environ.get("IMAGE_CACHE")
+SPOOL = SITE / "spool"
+CACHE_CA = SITE / "cache" / "tls.crt"  # the cache's certificate when it is self-signed, as the lab's
 RUNS = SITE / "runs"  # the record of each rollout run: runs/<run id>.jsonl, one line per event
 ROLLOUT = SITE / "rollout.yaml"  # how firmware rolls out on the site: canary, waves, gates
 # The rollout policy when the site has none, each value overridable in <site>/rollout.yaml or by an option:

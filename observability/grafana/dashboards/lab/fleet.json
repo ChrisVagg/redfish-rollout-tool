@@ -1478,83 +1478,11 @@
    "transparent": true
   },
   {
-   "type": "table",
-   "title": "Firing alerts",
-   "gridPos": {
-    "x": 0,
-    "y": 48,
-    "w": 24,
-    "h": 7
-   },
-   "datasource": {
-    "type": "prometheus",
-    "uid": "prometheus"
-   },
-   "id": 13,
-   "targets": [
-    {
-     "datasource": {
-      "type": "prometheus",
-      "uid": "prometheus"
-     },
-     "expr": "ALERTS{alertstate=\"firing\",site=\"$site\",host=~\"$host\"}",
-     "legendFormat": "",
-     "refId": "A",
-     "instant": true,
-     "range": false,
-     "format": "table"
-    }
-   ],
-   "description": "Prometheus' alerts (observability/rules.yml) firing now",
-   "transformations": [
-    {
-     "id": "organize",
-     "options": {
-      "excludeByName": {
-       "Time": true,
-       "__name__": true,
-       "job": true,
-       "instance": true,
-       "site": true,
-       "pipeline": true,
-       "Value": true,
-       "alertstate": true
-      },
-      "renameByName": {
-       "alertname": "Alert",
-       "severity": "Severity",
-       "host": "Host",
-       "sensor": "Sensor",
-       "name": "Name",
-       "resource": "Resource"
-      },
-      "indexByName": {
-       "alertname": 0,
-       "severity": 1,
-       "host": 2,
-       "sensor": 3,
-       "name": 4
-      }
-     }
-    }
-   ],
-   "fieldConfig": {
-    "defaults": {},
-    "overrides": []
-   },
-   "options": {
-    "showHeader": true,
-    "cellHeight": "sm",
-    "sortBy": []
-   },
-   "transparent": true
-  },
-  {
    "type": "timeseries",
    "title": "BMC memory available",
    "gridPos": {
     "x": 0,
-    "y": 55,
+    "y": 48,
     "w": 8,
     "h": 9
    },
@@ -1615,7 +1543,7 @@
    "title": "BMC free storage",
    "gridPos": {
     "x": 8,
-    "y": 55,
+    "y": 48,
     "w": 8,
     "h": 9
    },
@@ -1676,7 +1604,7 @@
    "title": "Crawl time",
    "gridPos": {
     "x": 16,
-    "y": 55,
+    "y": 48,
     "w": 8,
     "h": 9
    },
