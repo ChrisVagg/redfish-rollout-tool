@@ -33,6 +33,8 @@ Every target runs on the lab unless SITE=prod: the real fleet in prod/, which is
 
 Setup
   make setup               create venv/ and install requirements.txt
+  make test                the rollout's decisions on recorded Redfish data, in under a second, no BMC needed
+  make mutations           break each safety rule of rollout.py, in a copy: each break must fail a test
 
 Lab: 10 emulated OpenBMC BMCs, QEMU in Docker, on 127.0.0.1:2441-2450
   make lab-up              download QEMU and two OpenBMC builds, boot the BMCs (about 7 min)
@@ -53,7 +55,7 @@ Poller: reads every BMC's Redfish resources, never writes
 Rollout: firmware updates, a canary first, then waves, each after a gate
   make plan                pre-flight, read-only: per host, what it can update and how (COMPONENT for its waves)
   make dry-run             the whole pipeline, nothing written: plan, canary, waves, report
-  make update              the real update: the lab only
+  make update              the real update, once make test passes: the lab only
   make report              the latest pipeline's report: the verdict, then every host (HOST=... for its steps)
   make watch               follow a running update from a second terminal
   make fault SCENARIO=...  a bad update on the lab: silent-fail, unhealthy, rejected, bad-checksum, no-return, hybrid
@@ -73,7 +75,7 @@ export HELP
 
 .DEFAULT_GOAL := help
 .DELETE_ON_ERROR:
-.PHONY: help setup lab-up lab-down lab-reset collect $(VIEWS) detail views plan dry-run update report watch fault \
+.PHONY: help setup test mutations lab-up lab-down lab-reset collect $(VIEWS) detail views plan dry-run update report watch fault \
         monitor-up monitor-logs monitor-down
 
 help:
@@ -82,6 +84,14 @@ help:
 setup:
 	python3 -m venv venv
 	$(PY) -m pip install -r requirements.txt
+
+# the gate: every change, and before any real update
+test:
+	$(PY) test_rollout.py
+
+# the audit, before changing a safety rule: it finds each rule by its line, so it can't be the gate
+mutations:
+	$(PY) mutations.py
 
 # ---- Lab ----
 lab-up: lab/qemu-system-arm lab/bmc.mtd lab/images.yaml lab/baseline.yaml
@@ -129,7 +139,7 @@ plan:
 dry-run:
 	$(ENV) YES= ./pipeline.sh "$(FIRMWARE)" $(PLAN_ARGS) $(ARGS)
 
-update:
+update: test
 	$(LAB_ONLY)
 	$(ENV) YES=1 ./pipeline.sh "$(FIRMWARE)" $(PLAN_ARGS) $(ARGS)
 
@@ -148,6 +158,7 @@ fault:
 monitor-up:
 	@[ -f observability/grafana/.grafana.env ] || { echo "First create observability/grafana/.grafana.env with" \
 	  "GRAFANA_ADMIN_USERNAME=... and GRAFANA_ADMIN_PASSWORD=...: Grafana's admin account (README, Quick start)"; exit 1; }
+	python3 observability/grafana/prod_dashboards.py
 	$(MONITOR) up --detach --build --wait
 
 monitor-logs:

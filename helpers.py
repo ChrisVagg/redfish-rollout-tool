@@ -234,7 +234,7 @@ def previous(host) -> dict:
 def load() -> list[dict]:
     snaps = [json.loads(p.read_text()) for p in sorted(SNAPSHOTS.glob("*.json"))]
     if not snaps:
-        sys.exit(f"no snapshots of {SITE.name} yet: run make {SITE.name}-collect first")
+        sys.exit(f"no snapshots of {SITE.name} yet: run make collect SITE={SITE.name} first")
     return snaps
 
 
@@ -244,18 +244,15 @@ def reachable() -> list[dict]:
     return list(filter(lambda s: connection(s) == "Connected", load()))
 
 
-# fn(snapshot) for every host; a host whose data breaks fn is logged and left out
+# fn(snapshot) for every host; a host whose data breaks fn is logged and left out: BMC payloads are untrusted
 def per_host(fn, snaps) -> list:
-    return [r for snap in snaps for r in attempt(fn, snap)]
-
-
-# [fn(snap)], or [] with the traceback logged: BMC payloads are untrusted
-def attempt(fn, snap) -> list:
-    try:
-        return [fn(snap)]
-    except Exception:
-        log.exception("%s: left out", snap["host"])
-        return []
+    rows = []
+    for snap in snaps:
+        try:
+            rows.append(fn(snap))
+        except Exception:
+            log.exception("%s: left out", snap["host"])
+    return rows
 
 
 # ---- Output files: every command returns what it shows; main prints it and export writes the files ----

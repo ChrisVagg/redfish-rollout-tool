@@ -56,10 +56,10 @@ from rich.rule import Rule
 from rich.table import Column, Table
 from rich.text import Text
 
-from constants import (ACTION_ROW, ACTIONS_ROW, BASELINE, DOTTED, FAILED_STATES, FAULTS, HOST_ROW, IMAGES,
+from constants import (ACTION_ROW, ACTIONS_ROW, APPLY_TIME, BASELINE, DOTTED, FAILED_STATES, FAULTS, HOST_ROW, IMAGES,
                        INVENTORY_FILE, LEFT_OUT_ROW, NEXT_STEP, PLAN_ROW, PREFLIGHT_ROW, PROPS, REPORT_SCHEMA,
-                       RESET_PREFERENCE, ROLLOUT, ROLLOUT_DEFAULTS, ROOT, RUNNING_STATES, RUNS, SEMVER, SITE,
-                       STEP_ROW, STYLE, VERSIONS_ROW, WAVE_ROW)
+                       RESET_PREFERENCE, ROLLOUT, ROLLOUT_DEFAULTS, ROOT, RUNNING_STATES, RUNS, SITE, STEP_ROW,
+                       STYLE, TASK_TIMEOUT, VERSIONS_ROW, WAVE_ROW)
 from helpers import (block, first_of, first_real, identity, label, link, norm, obj, of, output_options, reason, sample,
                      show, text, uri_of)
 from poller import (allowable, entries, firmware, host_baseline, image_state, load_baseline, load_servers, open_jobs,
@@ -130,35 +130,22 @@ def read_host(server, tunnel) -> tuple[dict, float]:
 
 # ---- Pre-flight: one host, one component ----
 
-# A version as something sortable under a VersionScheme; None when the version doesn't follow it
+# A version as something sortable: dot-separated integers, 2.86.86.86, under DotIntegerNotation or no VersionScheme.
+# None otherwise: an order nobody can tell, as for SemVer or OEM versions, which no BMC of the fleet reports
 def version_key(version, scheme) -> tuple | None:
-    """SemVer (Semantic Versioning 2.0): major.minor.patch; a pre-release (-rc.1) sorts before its release, its
-    identifiers compare as numbers when numeric and as text otherwise; build metadata (+b7) is ignored.
-    DotIntegerNotation, and no scheme at all: dot-separated integers, 2.86.86.86. OEM: None, a vendor's own format."""
-    if scheme == "SemVer":
-        m = SEMVER.fullmatch(version)
-        if not m:
-            return None
-        pre = tuple((0, int(x), "") if x.isdigit() else (1, 0, x) for x in (m[4] or "").split(".") if x)
-        return tuple(map(int, m.groups()[:3])), (0, pre) if pre else (1,)
     if scheme in (None, "DotIntegerNotation") and DOTTED.fullmatch(version):
         return tuple(map(int, version.split(".")))
     return None
 
 
-# Which way going from the running version to want is: (1 up, -1 down, 0 the same, None unknown; how it was told)
-def direction(found, component, running, want, target) -> tuple[int | None, str]:
-    """By the VersionScheme the component's entries report, dotted integers without one. When the versions can't be
-    ordered, by release date: the running image's ReleaseDate against the target image's release_date in images.yaml."""
+# Which way going from the running version to want is, by the VersionScheme the component's entries report:
+# (1 up, -1 down, 0 the same, None unknown; how it was told)
+def direction(found, component, running, want) -> tuple[int | None, str]:
     scheme = next(filter(None, (d.get("VersionScheme") for d in entries(found, component))), None)
     a, b = version_key(running, scheme), version_key(want, scheme)
-    if a is not None and b is not None:
-        return (b > a) - (b < a), scheme or "dotted integers"
-    ran = next(filter(None, (d.get("ReleaseDate") for d in running_images(found, component))), "")[:10]
-    new = str(obj(target).get("release_date") or "")[:10]
-    if ran and new:
-        return (new > ran) - (new < ran), "release date"
-    return None, "unknown"
+    if a is None or b is None:
+        return None, "unknown"
+    return (b > a) - (b < a), scheme or "dotted integers"
 
 
 def update_methods(found, update) -> list[str]:
@@ -195,12 +182,6 @@ def marked_running(found, touched) -> list[dict]:
     return [d for d in touched if d.get("Active") is True or d.get("ImageState") == "Active" or uri_of(d) in active]
 
 
-# The images of a component that run now: those marked running, else its only image; [] when the BMC doesn't say
-def running_images(found, component) -> list[dict]:
-    touched = entries(found, component)
-    return marked_running(found, touched) or (touched if len(touched) == 1 else [])
-
-
 # The row name a component key means on this host: SoftwareId:<id> becomes the row whose entries carry that id
 def resolve(found, key) -> str:
     ids = {f"SoftwareId:{sid}": name for name, sid in software_ids(found).items()}
@@ -209,7 +190,7 @@ def resolve(found, key) -> str:
 
 # ---- Images: the files an update installs and a rollback reinstalls, kept in images.yaml ----
 
-# {model: {component: {version: {"file", "sha256", "release_date"}}}} from images.yaml, all text; {} without it
+# {model: {component: {version: {"file", "sha256"}}}} from images.yaml, all text; {} without it
 def load_images(path=IMAGES) -> dict:
     """A component is a row name or SoftwareId:<id>, as in the baseline. file is a path relative to the site folder
     for a multipart push, or a URL a BMC pulls with SimpleUpdate."""
@@ -334,7 +315,7 @@ def check(found, baselines, key, policy=None) -> dict:
         result["notes"].append(note)
         return verdict()
     target = image_for(policy["images"], found, model, component, want)
-    order, basis = direction(found, component, text(running), want, target)
+    order, basis = direction(found, component, text(running), want)
     if not test("needs the update", text(running) != want and order != 0,
                 f"{running} → {want}" if text(running) != want else "already on the baseline version", defer=True):
         return verdict()
@@ -342,7 +323,7 @@ def check(found, baselines, key, policy=None) -> dict:
     allowed = policy["allow_downgrade"]
     result["direction"] = "unknown" if order is None else f"{'up' if order > 0 else 'down'} ({basis})"
     if order is None:
-        test("direction", allowed, "unknown: no VersionScheme, not dotted integers, no release dates to compare; " +
+        test("direction", allowed, "unknown: not dotted integers, so their order can't be told; " +
              ("allowed by --allow-downgrade" if allowed else "--allow-downgrade if intended"))
     else:
         test("direction", order > 0 or allowed, f"{'up' if order > 0 else 'down'} by {basis}" + (
@@ -410,7 +391,7 @@ def check(found, baselines, key, policy=None) -> dict:
 
 # The site's rollout policy (<site>/rollout.yaml over the defaults), each value overridden by its option when given
 def load_rollout(args) -> dict:
-    path = Path(getattr(args, "rollout", None) or ROLLOUT)
+    path = ROLLOUT
     written = (yaml.safe_load(path.read_text()) or {}) if path.is_file() else {}
     unknown = set(written) - set(ROLLOUT_DEFAULTS)
     if unknown:
@@ -466,11 +447,6 @@ def waves(servers, models, policy) -> list[tuple[str, list[dict]]]:
     return [(name, hosts) for name, hosts in named if hosts]
 
 
-# Rollout order: the BMC first (it performs the other updates), the BIOS next, then the other update targets
-def rollout_order(component, target) -> tuple[int, str]:
-    return {"Manager (BMC)": 0, "System BIOS": 1}.get(component, 2 if target else 3), component
-
-
 # The health of a system or manager as reported: HealthRollup, else Health
 def health(d) -> str:
     status = obj(d.get("Status"))
@@ -499,8 +475,10 @@ def host_report(server, found, read_at, baselines, policy) -> list:
     model, ids = " ".join(identity(found)), software_ids(found)
     wanted, running = host_baseline(baselines.get(model) or {}, ids), firmware(found)
     can = {c: updatable(found, c) for c in {*update_targets(found), *wanted}}
-    # lambda c: a component -> its rollout rank; one Redfish can't update ranks last
-    components = sorted(can, key=lambda c: rollout_order(c, not can[c].startswith("no:")))
+    # lambda c: a component -> its rollout rank: the BMC first (it performs the other updates), the BIOS next, then
+    # the other update targets; one Redfish can't update last
+    order = {"Manager (BMC)": 0, "System BIOS": 1}
+    components = sorted(can, key=lambda c: (order.get(c, 3 if can[c].startswith("no:") else 2), c))
     outside = [c for c in components if c in wanted and c not in update_targets(found)]  # baselined, not updatable
     results = {c: check(found, baselines, c, policy) for c in components if c in wanted and c not in outside}
     rows = []
@@ -794,12 +772,11 @@ def before_state(found, running) -> dict:
             "health": {u: health(d) for kind in ("ComputerSystem", "Manager") for u, d in of(found, kind)}}
 
 
-# Step 5: the checks after the reset, on a fresh live read; (passed, [(check, passed, detail)])
+# Step 5: the checks after the reset, on a fresh live read; (passed, [(check, passed, detail)], the version running)
 def post_check(server, key, want, before) -> tuple[bool, list[dict], str]:
-    """The version asked for now runs; every system and manager is OK, or no worse than before; no new job or task
-    failed or hangs. A BMC that can't be read fails them all. A BMC answers before it is ready: until its software
-    manager fills the firmware inventory, the running version isn't reported, so that is read again, every 10 s for
-    up to 3 min, before it counts. A version that is reported and wrong fails at once."""
+    """A BMC that can't be read fails them all. A BMC answers before it is ready: until its software manager fills the
+    firmware inventory, the running version isn't reported, so that is read again, every 10 s for up to 3 min, before
+    it counts. A version that is reported and wrong fails at once."""
     until = time.monotonic() + 180
     while True:
         found, _ = read_host(server, tunnel(server))
@@ -809,6 +786,13 @@ def post_check(server, key, want, before) -> tuple[bool, list[dict], str]:
         if running != "-" or time.monotonic() > until:
             break
         time.sleep(10)
+    return after_checks(found, key, want, before)
+
+
+# The post-check on one read: the version asked for now runs; every system and manager is OK, or no worse than
+# before; no new job or task failed or hangs
+def after_checks(found, key, want, before) -> tuple[bool, list[dict], str]:
+    running = text(firmware(found).get(resolve(found, key), (None, ""))[0])
     now = {u: health(d) for kind in ("ComputerSystem", "Manager") for u, d in of(found, kind)}
     was = before["health"]
     jobs = [j for j in open_jobs(found) if j[0] not in before["jobs"]]
@@ -977,6 +961,16 @@ def soak(done, key, wait, rec) -> list[dict]:
     return soured
 
 
+# The gate after a wave: any failure halts the canary, a strict wave, or a wave with a host that failed its soak; a
+# later wave halts when more than halt_at of the hosts tried so far failed. states: every host so far, every wave
+def gate(wave, states, soured, rollout) -> dict:
+    strict = wave == "canary" or wave in {f"wave {n}" for n in range(1, rollout["strict_waves"] + 1)}
+    tried = [s for s in states if s not in ("skipped", "blocked")]
+    failed = [s for s in tried if s in FAILED_STATES]
+    halted = bool(failed) and (strict or soured > 0 or len(failed) / len(tried) > rollout["halt_at"])
+    return {"halted": halted, "failed": len(failed), "tried": len(tried), "strict": strict}
+
+
 # Run: step 1, then steps 2 to 6 wave by wave; without --yes, the dry run
 def run(args) -> list:
     """With --plan the saved plan decides the component, files, options, rollout policy and waves, and --stage runs the
@@ -1000,8 +994,8 @@ def run(args) -> list:
         rollout = {**saved["rollout"], **({"halt_at": args.halt_at} if args.halt_at is not None else {})}
         by_host = {s["host"]: s for s in servers}
         planned = [(name, [by_host[h] for h in hosts if h in by_host]) for name, hosts in stage.items()]
-    policy.update(faults=dict(args.fault or []), apply_time=args.apply_time, drain=args.drain, undrain=args.undrain,
-                  task_timeout=args.task_timeout, reset_timeout=args.reset_timeout)
+    policy.update(faults=dict(args.fault or []), apply_time=APPLY_TIME, drain=args.drain, undrain=args.undrain,
+                  task_timeout=TASK_TIMEOUT, reset_timeout=args.reset_timeout)
     counts = Counter(r["verdict"] for r in results)
     faults = f"\nFaults injected: {', '.join(f'{h}={k}' for h, k in args.fault)}" if args.fault else ""
     caption = (f"{len(servers)} hosts read live from {step['read_at']} · {counts['go']} go · {counts['skip']} "
@@ -1030,9 +1024,8 @@ def run(args) -> list:
         record(path, *event, **detail)
         push_metrics(path, group, pushing)
     rec("-", "run", "start", component=args.component, waves={name: [s["host"] for s in h] for name, h in planned},
-        plan=args.plan, stage=args.stage, halt_at=rollout["halt_at"], rollout=rollout, apply_time=args.apply_time,
+        plan=args.plan, stage=args.stage, halt_at=rollout["halt_at"], rollout=rollout, apply_time=APPLY_TIME,
         faults=policy["faults"])
-    strict = {"canary", *(f"wave {n}" for n in range(1, rollout["strict_waves"] + 1))}
     last = list(saved["waves"])[-1] if saved else planned[-1][0]
     outcomes, halted = [], None
     for name, hosts in planned:
@@ -1043,13 +1036,11 @@ def run(args) -> list:
         if rollout["soak"] and name != last and not any(o["state"] in FAILED_STATES for o in done):
             soured = soak(done, args.component, rollout["soak"], rec)
         outcomes += [(name, o) for o in done]
-        tried = [o for _, o in outcomes if o["state"] not in ("skipped", "blocked")]
-        failed = [o for o in tried if o["state"] in FAILED_STATES]
-        halt = bool(failed) and (name in strict or bool(soured) or len(failed) / len(tried) > rollout["halt_at"])
-        rec("-", "gate", "halted" if halt else "passed", wave=name, failed=len(failed), tried=len(tried),
-            limit=rollout["halt_at"], strict=name in strict, soak_failed=len(soured))
-        if halt:
-            halted = f"halted after {'the ' * (name == 'canary')}{name}: {len(failed)} of {len(tried)} hosts failed"
+        g = gate(name, [o["state"] for _, o in outcomes], len(soured), rollout)
+        rec("-", "gate", "halted" if g["halted"] else "passed", wave=name, failed=g["failed"], tried=g["tried"],
+            limit=rollout["halt_at"], strict=g["strict"], soak_failed=len(soured))
+        if g["halted"]:
+            halted = f"halted after {'the ' * (name == 'canary')}{name}: {g['failed']} of {g['tried']} hosts failed"
             args.exit_code = 1
             break
     rec("-", "run", "end", detail=halted or "every wave done")
@@ -1425,7 +1416,6 @@ def main() -> None:
     c.add_argument("--baseline", default=BASELINE, help="the approved versions [<site>/baseline.yaml]")
     c.add_argument("--images", default=IMAGES, help="the image catalog [<site>/images.yaml]")
     c.add_argument("--hosts", nargs="+", metavar="HOST", help="only these hosts of the inventory")
-    c.add_argument("--rollout", metavar="FILE", help="the rollout policy [<site>/rollout.yaml]")
     c.add_argument("--canary", dest="canary_per_model", type=int, help="canary hosts per hardware model [policy]")
     c.add_argument("--waves", type=lambda v: [float(w) for w in v.split(",")], metavar="PCT,…",
                    help="cumulative %% of the other hosts done after each wave, e.g. 5,25,100 [policy]")
@@ -1446,15 +1436,12 @@ def main() -> None:
     r.add_argument("--stage", default="all", choices=("all", "canary", "waves"),
                    help="with --plan: the canary, the waves after it, or all [all]")
     r.add_argument("--yes", action="store_true", help="really update the hosts that pass (only writable ones)")
-    r.add_argument("--apply-time", default="OnReset", choices=("OnReset", "Immediate"),
-                   help="OnReset: the image waits for step 4's reset [OnReset]")
     r.add_argument("--drain", help="command that empties a host, e.g. 'scontrol update NodeName={node} State=DRAIN "
                                    "Reason=firmware'; it runs only when the reset touches the host")
     r.add_argument("--undrain", help="command that gives a host back, e.g. 'scontrol update NodeName={node} "
                                      "State=RESUME'")
     r.add_argument("--halt-at", type=float, help="after the strict waves, stop when more than this share failed "
                                                  "[policy]")
-    r.add_argument("--task-timeout", type=int, default=1800, help="seconds for an update task [1800]")
     r.add_argument("--reset-timeout", type=int, default=900, help="seconds for a reset to come back [900]")
     r.add_argument("--fault", action="append", type=fault_spec, metavar="[HOST=]KIND",
                    help="lab testing: inject a fault into a host's update (every host's without HOST=); may repeat. "

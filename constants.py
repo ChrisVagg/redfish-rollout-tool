@@ -45,6 +45,8 @@ ROLLOUT = SITE / "rollout.yaml"  # how firmware rolls out on the site: canary, w
 #   soak              seconds to wait after a wave, then re-check its hosts, before the next one (0: none)
 ROLLOUT_DEFAULTS = {"canary_per_model": 1, "waves": [5, 25, 100], "max_per_rack": 1, "strict_waves": 1,
                     "halt_at": 0.02, "max_parallel": 50, "soak": 1800}
+APPLY_TIME = "OnReset"  # @Redfish.OperationApplyTime of every update: the image waits for step 4's reset
+TASK_TIMEOUT = 1800  # seconds an update task may run
 SNAPSHOTS = SITE / "snapshots"  # the latest crawl of each host, read by the views
 PREVIOUS = SNAPSHOTS / "previous"  # the crawl before it, for the diff view
 DMTF = "https://redfish.dmtf.org/schemas/v1/"
@@ -103,8 +105,6 @@ HOST_ROW = ("Component", "SoftwareId", "Running", "Baseline", "Direction", "Upda
 RUNNING_STATES = {"New", "Starting", "Running", "Suspended", "Pending", "Stopping", "Service", "Continue", "Validating",
                   "Cancelling"}
 DOTTED = re.compile(r"\d+(?:\.\d+)*")  # DotIntegerNotation, 2.86.86.86: also how versions without a scheme compare
-# SemVer (Semantic Versioning 2.0): major.minor.patch, then an optional pre-release (-rc.1) and build metadata (+b7)
-SEMVER = re.compile(r"(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?")
 ACTIONS_ROW = ("Wave", "Host", "Component", "Change", "Drain", "Update", "Reset", "Rollback")
 VERSIONS_ROW = ("", "Version", "Role", "Planned hosts on it", "Package in the catalog")
 # The report, for people: what needs a person, each wave's hosts, the hosts left out of the plan, a host's steps

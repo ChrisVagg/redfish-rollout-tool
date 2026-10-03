@@ -86,6 +86,7 @@ GRAFANA_ADMIN_PASSWORD=...
 
 ```sh
 make setup        # venv/ and requirements.txt
+make test         # the rollout's decisions on recorded Redfish data, no BMC needed (Test-driven development)
 make lab-up       # the lab: downloads QEMU and two OpenBMC builds (~230 MB), boots 10 BMCs (~7 min)
 make monitor-up   # observability: exporters, Pushgateway, Prometheus, Grafana on http://127.0.0.1:3000
 make collect      # the poller: crawl every BMC into lab/snapshots/
@@ -187,7 +188,9 @@ Grafana is admin only: no anonymous access, the one account from `observability/
 its password in the UI. The admin can change and save anything in the UI, and it stays in Grafana's volume across
 `make monitor-down` and up, except the six dashboards: every Grafana start loads them again from
 [observability/grafana/dashboards/](observability/grafana/dashboards/). To keep a change to one, export it over its
-file (Export → Export as JSON), or save it as a copy.
+lab file (Export → Export as JSON), or save it as a copy. Only the lab dashboards are kept in git: `make monitor-up`
+makes the prod ones from them ([prod_dashboards.py](observability/grafana/prod_dashboards.py): the same panels fixed
+to site prod, and a read-only note on the pipeline), so a change is made once and both folders get it.
 
 Alerts: `BMCDown` (no answer for 10 minutes, unless a rollout is updating the host: its reset takes the BMC away),
 `BMCLoginRefused`, `ReadingPastCritical` (upper or lower: a fan slowing down too), `HealthCritical`, `HealthWarning`, `RolloutHalted` and `HostNeedsAPerson`.
@@ -271,6 +274,41 @@ fleet is left on two builds, and the report says which host is where.
 After `rejected`, the aborted task stays in that BMC's `TaskService`: bmcweb keeps tasks until the BMC restarts and
 only allows GET on them. Pre-flight then blocks the BMC (a failed task: a person has to look), so the next plan picks
 another canary. `docker compose -f lab/docker-compose.yaml restart bmc1` clears it, as a BMC reset would.
+
+## Test-driven development
+
+`make test` runs [test_rollout.py](test_rollout.py) in under a second, with no BMC. It tests the decisions that keep a
+bad image from spreading, on real Redfish data: the lab BMC as a collect saved it
+([fixtures/openbmc-gb200.json](fixtures/openbmc-gb200.json)), with one fact changed per case.
+
+| What decides | The cases |
+|---|---|
+| Pre-flight (`check`) | go; a skip when already on the baseline or nothing is approved for the model; a downgrade, or an order nobody can tell, blocked unless `--allow-downgrade` (dotted integers compare as numbers: 2.9 to 2.10 is up); a missing image, a sha256 that doesn't match, an image over `MaxImageSizeBytes`; no way back unless `--accept-no-rollback`; an unreachable BMC, `Updateable` false, a Critical manager or a failed task blocked, a running task skipped |
+| Post-check (`after_checks`) | the target runs; health no worse than before; no new failed task. A task that says `Completed` while the old firmware still runs fails it |
+| Rollback (`run_host`) | a failure before the reset: the old firmware still runs, nothing to roll back; after it: the version that ran before is reinstalled, not the target; a failed rollback, or none possible: `needs_attention` |
+| The gate (`gate`) | any failure halts the canary and the strict waves; a later wave halts over `halt_at`, exactly `halt_at` passes; a host that failed its soak halts any wave; blocked and skipped hosts were never tried |
+| The plan, update methods, metrics, the exporter | waves per model and rack; push or pull against what the BMC allows; metrics mid-run; one series per sensor |
+
+Only the network is replaced, in `run_host`: the read and the update, which need a BMC. Everything that decides runs as
+it does in a rollout.
+
+A test is worth something only if it fails when the code is wrong. The gate and the post-check's decision were written
+test first: the tests failed (there was no `gate` or `after_checks`), then the code moved out of `run` and
+`post_check` until they passed. For the code that came before its tests, [mutations.py](mutations.py) (`make mutations`)
+breaks one rule of `rollout.py` at a time the way a careless edit would: a downgrade let through,
+versions compared as text, a sha256 mismatch ignored, the rollback installing the target, the gate halting at exactly
+`halt_at`, and 13 more. For each break, the test that guards the rule must fail: 18 of 18 do. Its first run found a
+gap: the strict-wave case had enough failures to halt anyway, so it passed with wave 1 not strict; the case now has 1
+failure in 11 hosts.
+
+The two run at different times. `make test` is the gate: it runs on every change, and `make update` runs it first, so
+no real update starts on broken decision logic (the gate is local: no CI runners). `make mutations` takes a few seconds
+and runs before a change to a safety rule: it finds each rule by its line, so a rule rewritten there must be rewritten
+in its list too, and that would make a poor gate.
+
+The unit tests stop at the network. Beyond it, `make fault SCENARIO=…` runs the real pipeline on the lab's BMCs with
+real faults ([Bad updates](#bad-updates)): the push, the task, the reset, the wait. A change starts the same way: a
+test that fails, then the code that makes it pass.
 
 ## Rollout policy
 
@@ -404,7 +442,9 @@ pipeline.sh         plan → canary → waves → report
 poller.py           collect, the views (health, firmware, inventory, telemetry, capabilities, diff) and the exporter
 redfish.py          the Redfish connection both tools share: session, token, GET, POST, PATCH
 rollout.py          plan, run, report
-test_rollout.py     checks of the wave plan: python test_rollout.py
+test_rollout.py     the rollout's decisions on recorded Redfish data: make test
+mutations.py        breaks rollout.py one rule at a time; each break must fail a test: make mutations
+fixtures/           the lab BMC as a collect saved it, which the tests read
 constants.py        what to crawl, table columns, rollout constants
 helpers.py          shared helpers
 schemas/            DMTF Redfish JSON Schemas for sensor units, downloaded on first use (git-ignored)
@@ -412,7 +452,8 @@ lab/                the emulated BMCs: Dockerfile, docker-compose.yaml, images.s
                     rollout.yaml
 prod/               the real fleet: baseline.yaml, rollout.yaml; inventory.yaml and .env stay local
 observability/      Compose for the exporters, Pushgateway, Prometheus and Grafana; alert rules; a Lab and a Prod dashboard folder;
-                    grafana/grafana.ini; grafana/.grafana.env, Grafana's admin account, stays local
+                    grafana/grafana.ini; grafana/.grafana.env, Grafana's admin account, stays local;
+                    grafana/prod_dashboards.py makes the prod dashboards from the lab ones
 docs/               diagrams: the rollout, the lab, production today, a production system
 docs/runs/          reports of real lab runs: the update and every bad-update scenario
 ```

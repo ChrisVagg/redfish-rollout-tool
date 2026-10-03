@@ -17,3 +17,5 @@ todo
 # local screenshots, taken through a see-through terminal: the README uses docs/runs/
 docs/lab-images/
 schemas/
+# made from the lab dashboards by make monitor-up
+observability/grafana/dashboards/prod/
