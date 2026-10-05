@@ -11,6 +11,8 @@ reports/
 images/
 lab/qemu-system-arm
 lab/bmc.mtd
+# the downloads promote-fw-images.sh hasn't promoted yet
+lab/staging/
 lab/images.yaml
 lab/baseline.yaml
 lab/scenario/

@@ -4,6 +4,7 @@ itself is replaced, so what is tested is what the rollout decides, from real Red
 import copy
 import hashlib
 import json
+import os
 import tempfile
 from collections import Counter
 from pathlib import Path
@@ -145,6 +146,31 @@ def test_image_cache():
     cache.shutdown()
 
 
+# The ingest gate, lab/promote-fw-images.sh: a package signed with any key but the pinned one, or not signed at all, is
+# refused before it reaches the store, here a fake docker that records a call. A package that passes needs OpenBMC's
+# private key, which stays out of the repository
+def test_signature_gate():
+    import subprocess
+    run = lambda *cmd, **kw: subprocess.run([str(c) for c in cmd], capture_output=True, text=True, **kw)
+    d = Path(tempfile.mkdtemp())
+    run("openssl", "genpkey", "-algorithm", "RSA", "-pkeyopt", "rsa_keygen_bits:2048", "-out", d / "other.key")
+    (d / "MANIFEST").write_text("version=2.0\n")
+    (d / "image-bmc").write_bytes(b"firmware")
+    for f in ("MANIFEST", "image-bmc"):
+        run("openssl", "dgst", "-sha256", "-sign", d / "other.key", "-out", d / f"{f}.sig", d / f)
+    run("tar", "-cf", d / "other-key.tar", "-C", d, "MANIFEST", "MANIFEST.sig", "image-bmc", "image-bmc.sig")
+    run("tar", "-cf", d / "unsigned.tar", "-C", d, "MANIFEST", "image-bmc")
+    (d / "docker").write_text('#!/bin/sh\ntouch "$0.called"\nexit 1\n')
+    (d / "docker").chmod(0o755)
+    env = {**os.environ, "PATH": f"{d}:{os.environ['PATH']}"}
+    gate = lambda package: run("lab/promote-fw-images.sh", package, cwd=Path(__file__).parent, env=env)
+    refused = gate(d / "other-key.tar")
+    assert refused.returncode == 1 and "doesn't verify with openbmc-dev.pub" in refused.stderr, refused.stderr
+    refused = gate(d / "unsigned.tar")
+    assert refused.returncode == 1 and "not signed" in refused.stderr, refused.stderr
+    assert not (d / "docker.called").exists(), "a refused package reached the store"
+
+
 # No way back, one bank and no image of the running version, blocks unless --accept-no-rollback
 def test_preflight_rollback():
     no_way_back = catalog(**{TARGET: image("1755.tar")})
@@ -153,7 +179,7 @@ def test_preflight_rollback():
     assert preflight(images=no_way_back, accept_no_rollback=True) == ("go", "")
 
 
-# The BMC itself: unreachable, a component Redfish can't update, not healthy (heal.sh's degraded boot), or a task
+# The BMC itself: unreachable, a component Redfish can't update, not healthy (a degraded boot), or a task
 # that failed blocks; a task still running is a skip, for a later wave
 def test_preflight_host():
     assert preflight({"/redfish/v1": {"error": "timed out"}}) == ("block", "no live read: timed out")

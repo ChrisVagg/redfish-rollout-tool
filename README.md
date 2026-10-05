@@ -7,7 +7,7 @@ is read-only; writes happen only in the lab. Four parts, each run with `make` ([
 |---|---|
 | **Poller** ([poller.py](poller.py)) | Polls the resources each BMC's Redfish service exposes: health, firmware, inventory and sensor readings, as views of a collect or, run without stopping, as metrics. Reads only. |
 | **Rollout** ([rollout.py](rollout.py), [pipeline.sh](pipeline.sh)) | The firmware updates: pre-flight, a canary, then waves, each after a gate, with a rollback when a host fails its post-check. |
-| **Lab** ([lab/](lab/)) | Ten emulated OpenBMC BMCs, each QEMU in its own Docker service: the only BMCs the rollout updates. Beside them, the site's image cache (nginx, HTTPS), which the rollout gets every firmware image from. |
+| **Lab** ([lab/](lab/)) | Ten emulated OpenBMC BMCs, each QEMU in its own Docker service: the only BMCs the rollout updates. Beside them, the image store (SeaweedFS), which takes only packages whose signatures verify, and the site's image cache in front of it (nginx, HTTPS), which the rollout gets every firmware image from. |
 | **Observability** ([observability/](observability/docker-compose.yaml)) | Docker services: `exporter-lab` and `exporter-prod` (the poller, serving metrics), `pushgateway` (where the rollout pushes its metrics), `prometheus` and `grafana`. |
 
 ## How the rollout works
@@ -88,15 +88,15 @@ GRAFANA_ADMIN_PASSWORD=...
 ```sh
 make setup        # venv/ and requirements.txt
 make test         # the rollout's decisions on recorded Redfish data, no BMC needed (Test-driven development)
-make lab-up       # the lab: downloads QEMU and two OpenBMC builds (~230 MB), boots 10 BMCs (~7 min), starts
-                  # the image cache
+make lab-up       # the lab: starts the image store, ingests OpenBMC's two newest builds into it (download,
+                  # signatures checked, upload), downloads QEMU (~230 MB in all), boots 10 BMCs (~10 min)
 make monitor-up   # observability: exporters, Pushgateway, Prometheus, Grafana on http://127.0.0.1:3000
 make collect      # the poller: crawl every BMC into lab/snapshots/
 make health       # a view of that collect: health per host, then everything not OK
 make dry-run      # the rollout, nothing written: plan, canary, waves
 make update       # the rollout: a canary of 1 BMC, then waves of 3 and 6
 make report       # the verdict, what needs a person, every host by wave (HOST=… for its steps)
-make lab-reset    # stop the BMCs and wipe their flash: they boot the older build again
+make lab-reset    # stop the BMCs and wipe their flash: they boot the older build again; the store keeps its images
 ```
 
 Every target runs on the lab; add `SITE=prod` for the real fleet, which is only ever read: `make update` and
@@ -137,23 +137,53 @@ Each lab BMC is four layers in one Docker container ([lab/](lab/)):
 | OpenBMC | The GB200 NVL build (`gb200nvl-obmc`) from OpenBMC's Jenkins: Linux, D-Bus and the phosphor services, booted from a 64 MiB flash image. |
 | bmcweb | Redfish on the BMC's port 443. QEMU forwards it to the container, and Compose publishes it on `127.0.0.1:2441-2450` (SSH on `2221-2230`). Login `root` / `0penBmc`, OpenBMC's public default. |
 
-`make lab-up` runs [lab/images.sh](lab/images.sh), which fetches the two newest GB200 NVL builds (Jenkins keeps only
-the last three, so no build can be pinned). The lab boots the older one and `lab/baseline.yaml` approves the newer, so
-the first rollout is a real update. Both update packages go into `lab/images.yaml` with their sha256.
+**The firmware's way through the lab**, the top lane of the drawing:
 
-Ten emulated BMCs booting at once starve each other of CPU, so they boot in two batches (`bmc6` to `bmc10` 90 s later).
-Even so, a service now and then runs before `/dev/mtd/u-boot-env` exists: systemd ends degraded, and bmcweb reports
-the Manager `Quiesced`, health `Critical`. `make lab-up` then restarts that BMC ([lab/heal.sh](lab/heal.sh)); pre-flight
-would block it, as it would a real one.
+1. **OpenBMC builds a package.** Each Jenkins build of the GB200 NVL machine leaves one update package, a `.tar` with
+   `image-bmc` (the whole 64 MiB flash), `MANIFEST` (its version), `publickey`, and an RSA-SHA256 signature for each.
+2. **[lab/download-fw-images.sh](lab/download-fw-images.sh) downloads the two newest** into `lab/staging/` (Jenkins
+   keeps only the last three, so no build can be pinned). It does nothing else.
+3. **[lab/promote-fw-images.sh](lab/promote-fw-images.sh) promotes them**: it checks each package's signatures, uploads
+   it into the store and deletes the download, so the store keeps the only copy. From the verified packages it writes
+   the catalog, `lab/images.yaml` (each package's path in the store and its sha256), `lab/baseline.yaml`, which
+   approves the newer build, so the first rollout is a real update, and `lab/bmc.mtd`, the older build's `image-bmc`.
+4. **The first boot.** The BMC image carries `bmc.mtd`; each container copies it once into its own flash volume, and
+   QEMU boots the BMC from that flash. The lab starts on the older build, and an update survives a restart.
+5. **`make lab-up` runs it all in order**: the store first, both scripts when the catalog is missing, a check that
+   the store holds every package the catalog names, then the BMCs, in batches.
+6. **The rollout fetches and pushes.** Pre-flight downloads the package it needs from the cache into `lab/spool/`, the
+   agent's own copy, and checks its sha256 against the catalog, before a byte of it reaches a BMC; the update pushes
+   the whole package to the BMC's `MultipartHttpPushUri`.
+7. **The BMC applies it.** OpenBMC's software manager on the BMC takes the package and applies `image-bmc` to the flash
+   when the BMC resets, the rollout's reset step; QEMU then boots the new version. `make lab-reset` deletes only the
+   BMCs' flash volumes, so they boot the older build again while the store keeps its packages, as a fleet reset never
+   touches the approved store. `make lab-clean` deletes everything the lab made, store included, so the next
+   `make lab-up` starts again from OpenBMC's newest builds.
 
-Beside the BMCs, Compose runs the site's **image cache**: nginx serving `lab/images/` read-only over HTTPS on
-`127.0.0.1:8443`, with a self-signed certificate `make lab-up` makes ([lab/cache/](lab/cache/nginx.conf)); nothing
-outside `/images/` is served. The rollout gets every image from it, as a site agent does in production: pre-flight
+Ten emulated BMCs booting at once starve each other of CPU, so Compose boots them in batches of four, each once the
+batch before is healthy; the first batch is the canary and wave 1. A BMC is healthy once its Manager reports `Enabled`.
+Now and then a slow boot still runs a service before `/dev/mtd/u-boot-env` exists: systemd ends degraded, and bmcweb
+reports the Manager `Quiesced`, health `Critical`. The health check then stops QEMU, and Docker's restart policy boots
+the BMC again ([lab/Dockerfile](lab/Dockerfile)); pre-flight would block it, as it would a real one.
+
+Beside the BMCs, Compose runs the **image store** and the site's **image cache** in front of it, as production has
+them. [lab/promote-fw-images.sh](lab/promote-fw-images.sh) is the ingest gate: it checks the RSA-SHA256 signature of every signed file in each package (its MANIFEST, its key and its image)
+against the key pinned in the repository, [lab/openbmc-dev.pub](lab/openbmc-dev.pub), never against the key the package
+carries, which anyone could replace together with the image. A package that fails never reaches the store. The pinned key
+is OpenBMC's development key, whose private half is in OpenBMC's public source tree, so in the lab the check proves a
+package is unchanged since its build, not who built it; in production the pinned key is the vendor's.
+
+The store is SeaweedFS, an object store standing in for the production store (MinIO no longer publishes its images):
+`promote-fw-images.sh` uploads the packages into its bucket `firmware`, which keeps the only copy and allows anonymous reads
+only, so the lab holds no store credentials ([lab/store/](lab/store/access.json)). The cache is nginx over HTTPS on `127.0.0.1:8443`, with a self-signed certificate `make lab-up` makes
+([lab/cache/](lab/cache/nginx.conf)): it fetches a package from the store once, keeps it and serves it from then on
+(its `X-Cache-Status` header says `MISS` or `HIT`); nothing outside `/images/` is served. The rollout gets every
+image from the cache, as a site agent does in production: pre-flight
 downloads it into `lab/spool/` and checks it against the sha256 in `lab/images.yaml` (a copy that doesn't match is
 deleted, to be fetched again), and the update pushes that copy. These BMCs can't pull an image themselves (their
 UpdateService has no `SimpleUpdate`), so the lab runs the push half; pull, a URL handed to the BMC, is covered by
-pre-flight's checks and the tests. The images are files on disk, the store's and the agent's copies; no database holds
-them, only the catalog's path and sha256 for each.
+pre-flight's checks and the tests. The images are files: in the store's bucket, in the cache and in the agent's copy;
+no database holds them, only the catalog's path and sha256 for each.
 
 **How an update runs on the lab's BMCs.** End to end, with no staging: these BMCs report `SoftwareInventory` v1_1_0,
 without `Staged` or `Active` (v1_12_0), and their UpdateService has no `Activate` action, so an image can't be queued
@@ -375,6 +405,7 @@ bad image from spreading, on real Redfish data: the lab BMC as a collect saved i
 | Post-check (`after_checks`) | the target runs; health no worse than before; no new failed task. A task that says `Completed` while the old firmware still runs fails it |
 | Rollback (`run_host`) | a failure before the reset: the old firmware still runs, nothing to roll back; after it: the version that ran before is reinstalled, not the target; a failed rollback, or none possible: `needs_attention` |
 | The gate (`gate`) | any failure halts the canary and the strict waves; a later wave halts over `halt_at`, exactly `halt_at` passes; a host that failed its soak halts any wave; blocked and skipped hosts were never tried |
+| The ingest gate (`lab/promote-fw-images.sh`) | a package signed with any key but the pinned one, or not signed at all, is refused |
 | The image cache (`image_problems`) | an image fetched from a real HTTP server into the agent's copy and checked; one the cache doesn't have, or bytes that don't match, block, and the bad copy is deleted |
 | The plan, update methods, metrics, the exporter | waves per model and rack; push or pull against what the BMC allows; metrics mid-run; one series per sensor |
 
@@ -425,12 +456,15 @@ With the lab's 10 BMCs in 3 racks: canary 2441 (fw image), wave 1 of 3 (one per 
 ![The lab today, on the production system's layout](docs/production-system-lab.svg)
 
 What the lab implements, drawn where [the production system](#a-production-system---scaling-for-a-large-fleet) has
-each part; an empty place is a part it doesn't have yet. `lab/images.sh` downloads OpenBMC's builds, records their
-sha256 and approves the newer into `lab/images/`, the store. `make` is the API and CLI (`YES=1` approves), `pipeline.sh`
+each part; an empty place is a part it doesn't have yet. `lab/download-fw-images.sh` downloads OpenBMC's builds;
+`lab/promote-fw-images.sh` checks their signatures, uploads them into the store, a SeaweedFS bucket that keeps the only
+copy, records their sha256 and approves the newer. `make` is the API and CLI (`YES=1` approves), `pipeline.sh`
 and `rollout.py` the workflow engine, the YAML files the catalog and inventory, the run records the rollout state.
 `rollout.py run` is the site agent: it fetches each image from the nginx cache, checks it and pushes it to ten emulated
-BMCs over Redfish, then resets, post-checks and, on a failure, rolls back. Every run's metrics go through the
-Pushgateway, and exporter-lab reads every BMC every 10 s, for Prometheus and Grafana.
+BMCs over Redfish, then resets, post-checks and, on a failure, rolls back. It pushes every run's metrics to the
+Pushgateway (`PUT /metrics/job/rollout`); exporter-lab reads every BMC over Redfish every 10 s. Prometheus scrapes
+`/metrics` from both, the Pushgateway every 5 s and exporter-lab every 10 s, and Grafana has Prometheus as its data
+source.
 
 Equipment running production services runs the same tools, the same pipeline and the same six steps with `SITE=prod`; only the inventory, the credentials and the policy change.
 
@@ -499,7 +533,7 @@ To run it:
 At fleet scale the rollout becomes a distributed system. The figure is the target, in four parts:
 
 - **Supply chain**: a vendor image is downloaded, its checksum and signature checked, tested on lab hosts of every
-  model, then promoted into an approved store (S3, MinIO or Artifactory).
+  model, then promoted into an approved store (S3 or Artifactory).
 - **Control plane**: an operator requests a rollout through an API and CLI, and approves the canary. A workflow engine
   (Temporal, or Argo) reads the firmware catalog (the **baseline** per model) and the inventory (NetBox or Nautobot), pre-flights,
   plans the canary and waves, and applies the gates. A rollout state database (PostgreSQL) holds each host's state and
@@ -555,7 +589,7 @@ How this repository maps onto it:
 
 | In the system | In this repository today | Next |
 |---|---|---|
-| Approved store, site cache | the lab's image cache, nginx over HTTPS on `lab/images/`: `rollout.py` fetches each image into `lab/spool/`, checks its sha256 against `images.yaml` and pushes it. A URL in `images.yaml` is handed to `SimpleUpdate` where the BMC allows it | the approved store as object storage (S3, MinIO or Artifactory), and each site's cache an nginx caching proxy in front of it |
+| Approved store, site cache | the lab's store, a SeaweedFS bucket that takes only packages whose signatures verify, and nginx over HTTPS caching it: `rollout.py` fetches each image into `lab/spool/`, checks its sha256 against `images.yaml` and pushes it. A URL in `images.yaml` is handed to `SimpleUpdate` where the BMC allows it | the approved store on S3 or Artifactory, and the same nginx cache in each site |
 | Firmware catalog | `baseline.yaml` and `images.yaml`, reviewed in git | the same |
 | Inventory / CMDB | `inventory.yaml`; the poller's snapshots are the observed versions, and `make firmware SITE=prod` shows drift from the baseline | generate the inventory from NetBox or Nautobot |
 | Rollout API and CLI | the `make` targets and `pipeline.sh`; `YES=1` is the approval | an approval between the canary and wave 1 |
@@ -582,8 +616,9 @@ fixtures/           the lab BMC as a collect saved it, which the tests read
 constants.py        what to crawl, table columns, rollout constants
 helpers.py          shared helpers
 schemas/            DMTF Redfish JSON Schemas for sensor units, downloaded on first use (git-ignored)
-lab/                the emulated BMCs: Dockerfile, docker-compose.yaml, images.sh, heal.sh, scenario.sh, inventory.yaml,
-                    rollout.yaml; cache/, the image cache's nginx config
+lab/                the emulated BMCs: Dockerfile, docker-compose.yaml, scenario.sh, inventory.yaml, rollout.yaml;
+                    download-fw-images.sh and promote-fw-images.sh, the ingest, with openbmc-dev.pub, the gate's
+                    pinned key; store/, the image store's read-only access; cache/, the image cache's nginx config
 prod/               the real fleet: baseline.yaml, rollout.yaml; inventory.yaml and .env stay local
 observability/      Compose for the exporters, Pushgateway, Prometheus and Grafana; a Lab and a Prod dashboard folder;
                     grafana/grafana.ini; grafana/.grafana.env, Grafana's admin account, stays local;

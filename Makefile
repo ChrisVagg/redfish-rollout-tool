@@ -38,9 +38,11 @@ Setup
   make mutations           break each safety rule of rollout.py, in a copy: each break must fail a test
 
 Lab: 10 emulated OpenBMC BMCs, QEMU in Docker, on 127.0.0.1:2441-2450, and their HTTPS image cache on :8443
-  make lab-up              download QEMU and two OpenBMC builds, boot the BMCs (about 7 min)
+  make lab-up              start the image store, ingest OpenBMC's two newest builds into it (download, check
+                           their signatures, upload), boot the BMCs (about 10 min)
   make lab-down            stop them; each keeps its flash
-  make lab-reset           stop them and wipe their flash: they boot the older build again
+  make lab-reset           stop them and wipe their flash: they boot the older build again; the store keeps its images
+  make lab-clean           delete everything the lab made, store included: lab-up then starts from the newest builds
 
 Poller: reads every BMC's Redfish resources, never writes
   make collect             crawl every BMC into <site>/snapshots/, which the views read
@@ -76,7 +78,7 @@ export HELP
 
 .DEFAULT_GOAL := help
 .DELETE_ON_ERROR:
-.PHONY: help setup test mutations lab-up lab-down lab-reset collect $(VIEWS) detail views plan dry-run update report watch fault \
+.PHONY: help setup test mutations lab-up lab-down lab-reset lab-clean collect $(VIEWS) detail views plan dry-run update report watch fault \
         monitor-up monitor-logs monitor-down
 
 help:
@@ -95,15 +97,29 @@ mutations:
 	$(PY) mutations.py
 
 # ---- Lab ----
-lab-up: lab/qemu-system-arm lab/bmc.mtd lab/images.yaml lab/baseline.yaml lab/cache/tls.crt
+# The store first, then the ingest into it: download-fw-images.sh downloads, promote-fw-images.sh checks and uploads. Then
+# every package the catalog names must be in the store, before the BMCs boot from the older build's bmc.mtd
+lab-up: lab/qemu-system-arm lab/cache/tls.crt
+	$(LAB) up --detach --wait store
+	[ -f lab/images.yaml ] && [ -f lab/baseline.yaml ] && [ -f lab/bmc.mtd ] || \
+	  { ./lab/download-fw-images.sh && ./lab/promote-fw-images.sh lab/staging/*.tar; }
+	@for f in $$(sed -n 's/.*{file: "\([^"]*\)".*/\1/p' lab/images.yaml); do \
+	  $(LAB) exec -T store wget -q --spider "http://127.0.0.1:8888/buckets/firmware/$$f" || \
+	  { echo "The store lost $$f, its volume deleted: make lab-clean lab-up ingests the newest builds again"; exit 1; }; \
+	done
 	$(LAB) up --detach --build --wait
-	./lab/heal.sh
 
 lab-down:
 	$(LAB) down
 
+# The BMCs' flash volumes only: the store keeps its images, as a fleet reset never touches the approved store
 lab-reset:
+	$(LAB) down
+	docker volume ls -q --filter name=redfish-lab_bmc | xargs -r docker volume rm
+
+lab-clean:
 	$(LAB) down --volumes
+	rm -rf lab/images.yaml lab/baseline.yaml lab/bmc.mtd lab/spool lab/staging
 
 # OpenBMC's prebuilt QEMU, which emulates the GB200 NVL's BMC (an AST2600)
 lab/qemu-system-arm:
@@ -114,10 +130,6 @@ lab/qemu-system-arm:
 lab/cache/tls.crt:
 	openssl req -x509 -newkey rsa:2048 -nodes -days 3650 -subj /CN=127.0.0.1 -addext subjectAltName=IP:127.0.0.1 \
 	  -keyout lab/cache/tls.key -out $@ 2>/dev/null
-
-# Firmware GB200 NVL - nvidia firmware on top of openBMC -> bmcweb - redfish service
-lab/bmc.mtd lab/images.yaml lab/baseline.yaml &:
-	./lab/images.sh
 
 # ---- Poller ----
 collect:

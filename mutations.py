@@ -52,6 +52,9 @@ if __name__ == "__main__":
         for f in HERE.glob("*.py"):
             shutil.copy(f, copy)
         shutil.copytree(HERE / "fixtures", Path(copy) / "fixtures")
+        (Path(copy) / "lab").mkdir()
+        for f in ("promote-fw-images.sh", "openbmc-dev.pub"):  # the ingest gate's test runs it
+            shutil.copy2(HERE / "lab" / f, Path(copy) / "lab")
         for what, line, broken, test in BREAKS:
             if original.count(line) != 1:
                 sys.exit(f"rollout.py changed: the line {what!r} breaks is there {original.count(line)} times, not "
