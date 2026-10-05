@@ -1,0 +1,132 @@
+<svg viewBox="0 0 900 660" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="One firmware update as Redfish resources, in production and in the lab, row by row. rollout.py, the site agent, takes every image from the site's cache and checks its sha256. It hands the image to the UpdateService: in production by a push to MultipartHttpPushUri or a pull with SimpleUpdate, with an OperationApplyTime; in the lab by a multipart push only, OnReset, as bmcweb offers no SimpleUpdate and no Activate. The UpdateService answers 202 Accepted with a Task: in production the Task follows the transfer and the image's checks with TaskState, PercentComplete and Messages; in the lab Task 0 goes from Running at 0 percent to Completed at 100 percent in 5 seconds, with the messages TaskStarted and TaskCompletedOK. In production a scheduled apply becomes a Job in the JobService, Scheduled to Completed with its own messages; no BMC of this fleet exposes one, and iDRAC 8 keeps its update jobs as Oem DellJob resources. The lab has no JobService: the Task carries every message. In production the new image waits in the SoftwareInventory as Staged while the running one is Active, an A/B bank being a way back without a reflash; the lab's SoftwareInventory v1_1_0 reports one image with no Staged or Active, so the rollback reinstalls the version before. Activation is an Activate action or a reset, Manager.Reset or ComputerSystem.Reset, the host drained first when it restarts; in the lab it is the rollout's own reset step, Manager.Reset GracefulRestart, and the host keeps running. In both, the post-check reads the BMC again: the target version runs, health is no worse, no new Task or Job failed, otherwise the rollout rolls back.">
+  <style>
+    .rfu text { font-family: var(--mono, monospace); }
+    .rfu .bg { fill: var(--bg-deep, #050708); }
+    .rfu .box { fill: var(--surface, #0d1417); stroke: var(--line, #2a3538); }
+    .rfu .name { fill: var(--fg, #e6f7fa); font-size: 13px; font-weight: 600; }
+    .rfu .sub { fill: var(--dim, #6f8f97); font-size: 10px; }
+    .rfu .band { fill: var(--dim, #6f8f97); font-size: 9.5px; letter-spacing: .14em; }
+    .rfu .lbl { fill: var(--teal, #00ffc8); font-size: 10px; }
+    .rfu .hi { fill: var(--teal, #00ffc8); }
+    .rfu .wire { fill: none; stroke: var(--teal, #00ffc8); stroke-width: 1.4; }
+    /* a resource the lab doesn't have */
+    .rfu .none .box { fill: none; stroke-dasharray: 4 4; }
+    .rfu .none .name { fill: var(--dim, #6f8f97); }
+    /* motion: dashes run the way the update goes */
+    @keyframes rfu-flow { to { stroke-dashoffset: -32; } }
+    .rfu .flow { stroke-dasharray: 5 11; animation: rfu-flow 1.6s linear infinite; }
+    @media (prefers-reduced-motion: reduce) { .rfu .flow { animation: none; stroke-dasharray: none; } }
+  </style>
+  <defs>
+    <marker id="rfu-teal" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto">
+      <path d="M0 0 8 4 0 8z" style="fill: var(--teal, #00ffc8)"/>
+    </marker>
+  </defs>
+  <g class="rfu">
+    <rect class="bg" x="0" y="0" width="900" height="660" rx="12"/>
+    <text class="band hi" x="20" y="24">THE UPDATE AS REDFISH RESOURCES · PRODUCTION AND THE LAB</text>
+
+    <text class="name hi" x="305" y="50" text-anchor="middle">Production · the standard's flow</text>
+    <text class="sub" x="305" y="64" text-anchor="middle">what the rollout handles, as each BMC offers it</text>
+    <text class="name hi" x="695" y="50" text-anchor="middle">Lab · OpenBMC GB200 NVL, bmcweb</text>
+    <text class="sub" x="695" y="64" text-anchor="middle">what the ten emulated BMCs offer</text>
+
+    <!-- the steps, one row each -->
+    <text class="band" x="20" y="100">REQUEST</text>
+    <text class="band" x="20" y="180">ACCEPT</text>
+    <text class="band" x="20" y="270">FOLLOW</text>
+    <text class="band" x="20" y="360">SCHEDULE</text>
+    <text class="band" x="20" y="450">STAGE</text>
+    <text class="band" x="20" y="540">ACTIVATE</text>
+    <text class="band" x="20" y="624">CHECK</text>
+
+    <!-- the site agent, the same in both -->
+    <rect class="box" x="120" y="76" width="760" height="40" rx="8"/>
+    <text class="name" x="500" y="93" text-anchor="middle">rollout.py, the site agent</text>
+    <text class="sub" x="500" y="107" text-anchor="middle">every image from the site's cache, its sha256 checked before it goes out</text>
+
+    <!-- production -->
+    <path class="wire flow" d="M305 116V146" marker-end="url(#rfu-teal)"/>
+    <text class="lbl" x="297" y="136" text-anchor="end">POST, push or pull</text>
+    <text class="lbl" x="313" y="136">@Redfish.OperationApplyTime</text>
+    <rect class="box" x="120" y="150" width="370" height="52" rx="8"/>
+    <text class="name" x="305" y="170" text-anchor="middle">UpdateService</text>
+    <text class="sub" x="305" y="185" text-anchor="middle">MultipartHttpPushUri · SimpleUpdate</text>
+    <text class="sub" x="305" y="197" text-anchor="middle">OperationApplyTimeSupport · Activate</text>
+
+    <path class="wire flow" d="M305 202V236" marker-end="url(#rfu-teal)"/>
+    <text class="lbl" x="313" y="223">202 Accepted · the task monitor</text>
+    <rect class="box" x="120" y="240" width="370" height="52" rx="8"/>
+    <text class="name" x="305" y="260" text-anchor="middle">Task · TaskService</text>
+    <text class="sub" x="305" y="275" text-anchor="middle">TaskState · PercentComplete · Messages</text>
+    <text class="sub" x="305" y="287" text-anchor="middle">the transfer and the image's own checks</text>
+
+    <path class="wire flow" d="M305 292V326" marker-end="url(#rfu-teal)"/>
+    <text class="lbl" x="313" y="313">a scheduled apply becomes a Job</text>
+    <rect class="box" x="120" y="330" width="370" height="52" rx="8"/>
+    <text class="name" x="305" y="350" text-anchor="middle">Job · JobService</text>
+    <text class="sub" x="305" y="365" text-anchor="middle">JobState: Scheduled → Completed, its Messages</text>
+    <text class="sub" x="305" y="377" text-anchor="middle">this fleet: none; iDRAC 8's jobs are Oem</text>
+
+    <path class="wire flow" d="M305 382V416" marker-end="url(#rfu-teal)"/>
+    <text class="lbl" x="313" y="403">the image waits, Staged</text>
+    <rect class="box" x="120" y="420" width="370" height="52" rx="8"/>
+    <text class="name" x="305" y="440" text-anchor="middle">SoftwareInventory</text>
+    <text class="sub" x="305" y="455" text-anchor="middle">the new image Staged, the running one Active</text>
+    <text class="sub" x="305" y="467" text-anchor="middle">an A/B bank: a way back without a reflash</text>
+
+    <path class="wire flow" d="M305 472V506" marker-end="url(#rfu-teal)"/>
+    <text class="lbl" x="313" y="493">Activate, or a reset</text>
+    <rect class="box" x="120" y="510" width="370" height="52" rx="8"/>
+    <text class="name" x="305" y="530" text-anchor="middle">Manager · ComputerSystem</text>
+    <text class="sub" x="305" y="545" text-anchor="middle">#Manager.Reset or #ComputerSystem.Reset</text>
+    <text class="sub" x="305" y="557" text-anchor="middle">the host drained first when it restarts</text>
+
+    <path class="wire flow" d="M305 562V596" marker-end="url(#rfu-teal)"/>
+    <text class="lbl" x="313" y="583">back: read it again</text>
+
+    <!-- the lab -->
+    <path class="wire flow" d="M695 116V146" marker-end="url(#rfu-teal)"/>
+    <text class="lbl" x="687" y="136" text-anchor="end">POST multipart</text>
+    <text class="lbl" x="703" y="136">OnReset · push only</text>
+    <rect class="box" x="510" y="150" width="370" height="52" rx="8"/>
+    <text class="name" x="695" y="170" text-anchor="middle">UpdateService · bmcweb</text>
+    <text class="sub" x="695" y="185" text-anchor="middle">MultipartHttpPushUri only</text>
+    <text class="sub" x="695" y="197" text-anchor="middle">no SimpleUpdate, no Activate</text>
+
+    <path class="wire flow" d="M695 202V236" marker-end="url(#rfu-teal)"/>
+    <text class="lbl" x="703" y="223">202 Accepted · Task 0</text>
+    <rect class="box" x="510" y="240" width="370" height="52" rx="8"/>
+    <text class="name" x="695" y="260" text-anchor="middle">Task 0 · TaskService</text>
+    <text class="sub" x="695" y="275" text-anchor="middle">Running 0 % → Completed 100 %, in 5 s</text>
+    <text class="sub" x="695" y="287" text-anchor="middle">TaskStarted · TaskCompletedOK</text>
+
+    <path class="wire flow" d="M530 292V416" marker-end="url(#rfu-teal)"/>
+    <text class="lbl" x="538" y="313">Completed: the image is written</text>
+    <g class="none">
+      <rect class="box" x="550" y="330" width="330" height="52" rx="8"/>
+      <text class="name" x="715" y="352" text-anchor="middle">No JobService</text>
+      <text class="sub" x="715" y="368" text-anchor="middle">the Task carries every message</text>
+    </g>
+
+    <rect class="box" x="510" y="420" width="370" height="52" rx="8"/>
+    <text class="name" x="695" y="440" text-anchor="middle">SoftwareInventory v1_1_0</text>
+    <text class="sub" x="695" y="455" text-anchor="middle">one image: no Staged, no Active</text>
+    <text class="sub" x="695" y="467" text-anchor="middle">rollback: reinstall the version before</text>
+
+    <path class="wire flow" d="M695 472V506" marker-end="url(#rfu-teal)"/>
+    <text class="lbl" x="703" y="493">the rollout's reset step</text>
+    <rect class="box" x="510" y="510" width="370" height="52" rx="8"/>
+    <text class="name" x="695" y="530" text-anchor="middle">Manager</text>
+    <text class="sub" x="695" y="545" text-anchor="middle">#Manager.Reset · GracefulRestart</text>
+    <text class="sub" x="695" y="557" text-anchor="middle">the host keeps running: no drain</text>
+
+    <path class="wire flow" d="M695 562V596" marker-end="url(#rfu-teal)"/>
+    <text class="lbl" x="703" y="583">back in about 4.5 min</text>
+
+    <!-- the post-check, the same in both -->
+    <rect class="box" x="120" y="600" width="760" height="40" rx="8"/>
+    <text class="name" x="500" y="616" text-anchor="middle">Post-check, both: read the BMC again</text>
+    <text class="sub" x="500" y="631" text-anchor="middle">the target Version runs · health no worse · no new failed Task or Job · otherwise roll back</text>
+  </g>
+</svg>

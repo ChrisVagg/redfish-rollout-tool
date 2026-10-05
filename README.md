@@ -38,10 +38,11 @@ Every host, in the canary and in each wave, goes through six steps; the hosts of
    `Task` of its `TaskService`; every change of `TaskState`, `PercentComplete` and `Messages` is recorded, and the
    report shows the task, its messages and its progress under the step.
 4. **reset**: `Manager.Reset` or `ComputerSystem.Reset`, graceful first, then wait until it answers again.
-5. **post-check**: the target version runs, health is OK and no new job failed or stale.
-6. **rollback**. When the post-check failed, roll back first: reinstall the version from before, reset, check
-   again. A host that can't be rolled back stays drained and needs attention from a person in site(`needs_attention`).
-7. **undrain**. If the post-check pass undrain the nodes - hosts.
+5. **post-check**: the target version runs, health is no worse than before, and no new job or task failed or hangs.
+   When it fails, roll back: reinstall the version from before, reset, check again. A host that can't be rolled back
+   stays drained for a person (`needs_attention`).
+6. **undrain**: the host goes back to the scheduler after an update, a rollback, or a failure before the reset; only a
+   host left for a person stays drained.
 
 Pre-flight gives each host **go**, **skip** (nothing to do, or busy: try a later wave) or **block** (a person has to
 look), with every reason. It blocks a downgrade or a version order it can't tell (unless `--allow-downgrade`), a
@@ -164,6 +165,13 @@ flash and reboot inside the task: the task's `Completed` is recorded before the 
 the reset and times the return. bmcweb drops its tasks when it reboots, so with `Immediate` the task's end could not be
 observed.
 
+These BMCs have no JobService, so the Task carries every message of the update. A BMC that schedules the apply tracks it
+as a Job, which pre-flight and the post-check read as they read a Task; no BMC of this fleet exposes one, as iDRAC 8
+keeps its update jobs as Oem `DellJob` resources, which a standard-only tool doesn't read. The same update, resource by
+resource, in production and in the lab:
+
+![One update as Redfish resources, row by row: production on the left, the lab on the right](docs/update-flow.svg)
+
 ## Reports
 
 Every pipeline that changed something, or stopped, leaves one report in `<site>/runs/pipeline-<time>/`, built from
@@ -198,7 +206,7 @@ its plan and its run records. It comes in two forms, drawn from the same data so
 
 | Service | What it does |
 |---|---|
-| `exporter-lab`, `exporter-prod` | `poller.py exporter`: crawls every BMC of its site, each on its own loop, and serves the latest read on `/metrics`: what the equipment is (`redfish_host_info`: the inventory's vendor, project and rack, the BMC's Manufacturer and Model), whether it answered (`redfish_up`) and how many of its GETs failed (`redfish_failed_requests`: what they would have read is missing from that read), every reading with its unit (`redfish_reading`), its thresholds (`redfish_reading_threshold`) and how far past them it is (`redfish_reading_crossed`: 0 within, 1 caution, 2 critical, 3 fatal, upper or lower), the health of every object with a `Status`, each fan and power supply too (`redfish_health`), each firmware component with its running version, whether Redfish can update it and how an image gets in, push or pull, the same checks as `rollout.py plan` (`redfish_firmware_info`), and the BMC's last reset, memory and free storage (`ManagerDiagnosticData`). Standard properties only, read as `collect` reads them. The lab every 10 s on `:9101`; prod every 5 min on `:9102`, read-only, with `prod/.env`'s accounts; without a `prod/inventory.yaml` (a fresh clone) it reads nothing and stays up. |
+| `exporter-lab`, `exporter-prod` | `poller.py exporter`: crawls every BMC of its site, each on its own loop, and serves the latest read on `/metrics`: what the equipment is (`redfish_host_info`: the inventory's vendor, project and rack, the BMC's Manufacturer and Model), whether it answered (`redfish_up`) and how many of its GETs failed (`redfish_failed_requests`: what they would have read is missing from that read), every reading with its unit (`redfish_reading`), its thresholds (`redfish_reading_threshold`) and how far past them it is (`redfish_reading_crossed`: 0 within, 1 caution, 2 critical, 3 fatal, upper or lower), the health of every object with a `Status`, each fan and power supply too (`redfish_health`), each firmware component with its running version, whether Redfish can update it and how an image gets in, push or pull, the same checks as `rollout.py plan` (`redfish_firmware_info`), the BMC's last reset (`LastResetTime`), and its memory and free storage (`ManagerDiagnosticData`). Standard properties only, read as `collect` reads them. The lab every 10 s on `:9101`; prod every 5 min on `:9102`, read-only, with `prod/.env`'s accounts; without a `prod/inventory.yaml` (a fresh clone) it reads nothing and stays up. |
 | Pushgateway `:9091` | Where `rollout.py run` pushes its report as metrics after every recorded event (`PUSHGATEWAY`): hosts by wave and state, versions, every step's duration, every check after the flash, each gate. Best effort: if it is down, the rollout logs it once and goes on. |
 | Prometheus `:9090` | Scrapes both, labels each exporter's metrics with its `site`, keeps 15 days. |
 | Grafana `:3000` | A **Lab** and a **Prod** folder, the same three dashboards in each, fixed to its site. **Fleet manager**, every BMC: BMCs answering, worst health, readings past critical, a row per host with its equipment (vendor, manufacturer, model, project, rack) and failed GETs that opens its own dashboard, Redfish up over time (a firmware update shows as the reset's gap), firmware by hardware model and version (two versions of one component on one model is drift) and by host with Updateable, Push and Pull, the readings nearest their upper critical, everything not OK, the BMCs' own memory and storage. **Host**, one BMC: what it is, its firmware inventory and what Redfish can update and how, the health of every component, worst first, then a row each for Chassis · Thermal, Chassis · Power, Systems and Managers (the BMC itself): a chart per kind of reading, in its unit, with min, max, mean and last in the legend and each reading's caution and critical thresholds as dashed lines (orange, red). **Pipeline**, per pipeline: hosts by state, each gate, versions before, target and after, the longest steps, failed checks, and its BMCs answering Redfish. |
@@ -266,9 +274,10 @@ canary failed its post-check (the `unhealthy` fault), was rolled back, and the g
 ![Lab · Pipeline: the canary rolled back, the pipeline halted](docs/grafana/lab/pipeline-rollback.png)
 
 ### The production fleet in Grafana
- The fleet manager shows which BMCs answer, their health, equipment and firmware, and how each component can be updated. 
-The host dashboard shows host in full: its firmware, the health of every component, and every reading
-against its thresholds.
+
+The Prod folder over two days of the real fleet, read-only. The fleet manager shows which BMCs answer, their health,
+equipment and firmware, and how each component can be updated; the host dashboard shows one host in full: its
+firmware, the health of every component, and every reading against its thresholds.
 
 #### Fleet manager
 
@@ -307,7 +316,7 @@ hit every host, so the canary fails and the waves never run:
 | `unhealthy` | The new firmware flashes and boots, then fails the post-check (`--fault unhealthy`, where a health regression would show) | a real rollback: reflash the version before, check again | `rolled_back` |
 | `rejected` | The BMC refuses the image (the payload is cut to 8 MiB on its way): its task ends in `Exception` | no reset, the old firmware still runs: nothing to roll back | `failed` |
 | `bad-checksum` | The file doesn't match the catalog's sha256 | pre-flight blocks every host; the plan stage fails | `blocked` |
-| `no-return` | The BMC isn't back within the reset timeout (45 s; a boot takes ~3 min) | the rollback reinstalls the version before, but its reset times out too: nothing verified, left for a person | `needs_attention` |
+| `no-return` | The BMC isn't back within the reset timeout (45 s; a reset takes about 4.5 min) | the rollback reinstalls the version before, but its reset times out too: nothing verified, left for a person | `needs_attention` |
 
 <details><summary>The report of <code>silent-fail</code></summary>
 
@@ -366,6 +375,7 @@ bad image from spreading, on real Redfish data: the lab BMC as a collect saved i
 | Post-check (`after_checks`) | the target runs; health no worse than before; no new failed task. A task that says `Completed` while the old firmware still runs fails it |
 | Rollback (`run_host`) | a failure before the reset: the old firmware still runs, nothing to roll back; after it: the version that ran before is reinstalled, not the target; a failed rollback, or none possible: `needs_attention` |
 | The gate (`gate`) | any failure halts the canary and the strict waves; a later wave halts over `halt_at`, exactly `halt_at` passes; a host that failed its soak halts any wave; blocked and skipped hosts were never tried |
+| The image cache (`image_problems`) | an image fetched from a real HTTP server into the agent's copy and checked; one the cache doesn't have, or bytes that don't match, block, and the bad copy is deleted |
 | The plan, update methods, metrics, the exporter | waves per model and rack; push or pull against what the BMC allows; metrics mid-run; one series per sensor |
 
 Only the network is replaced, in `run_host`: the read and the update, which need a BMC. Everything that decides runs as
@@ -376,7 +386,8 @@ test first: the tests failed (there was no `gate` or `after_checks`), then the c
 `post_check` until they passed. For the code that came before its tests, [mutations.py](mutations.py) (`make mutations`)
 breaks one rule of `rollout.py` at a time the way a careless edit would: a downgrade let through,
 versions compared as text, a sha256 mismatch ignored, the rollback installing the target, the gate halting at exactly
-`halt_at`, and 13 more. For each break, the test that guards the rule must fail: 18 of 18 do. Its first run found a
+`halt_at`, an image never fetched from the cache, and 14 more. For each break, the test that guards the rule must
+fail: 20 of 20 do. Its first run found a
 gap: the strict-wave case had enough failures to halt anyway, so it passed with wave 1 not strict; the case now has 1
 failure in 11 hosts.
 
@@ -419,7 +430,7 @@ sha256 and approves the newer into `lab/images/`, the store. `make` is the API a
 and `rollout.py` the workflow engine, the YAML files the catalog and inventory, the run records the rollout state.
 `rollout.py run` is the site agent: it fetches each image from the nginx cache, checks it and pushes it to ten emulated
 BMCs over Redfish, then resets, post-checks and, on a failure, rolls back. Every run's metrics go through the
-Pushgateway to Prometheus and Grafana.
+Pushgateway, and exporter-lab reads every BMC every 10 s, for Prometheus and Grafana.
 
 Equipment running production services runs the same tools, the same pipeline and the same six steps with `SITE=prod`; only the inventory, the credentials and the policy change.
 
@@ -488,7 +499,7 @@ To run it:
 At fleet scale the rollout becomes a distributed system. The figure is the target, in four parts:
 
 - **Supply chain**: a vendor image is downloaded, its checksum and signature checked, tested on lab hosts of every
-  model, then promoted into an approved store (Artifactory or S3).
+  model, then promoted into an approved store (S3, MinIO or Artifactory).
 - **Control plane**: an operator requests a rollout through an API and CLI, and approves the canary. A workflow engine
   (Temporal, or Argo) reads the firmware catalog (the **baseline** per model) and the inventory (NetBox or Nautobot), pre-flights,
   plans the canary and waves, and applies the gates. A rollout state database (PostgreSQL) holds each host's state and
@@ -502,7 +513,7 @@ At fleet scale the rollout becomes a distributed system. The figure is the targe
   it, and for a push-only BMC the agent reads it from the cache and pushes it. The poller isn't the agent: it runs
   beside it as the site's exporter, read-only, on its own ReadOnly account, so a bug in it can never write.
 - **Observability**: the agents and the engine send events and metrics (Prometheus, Grafana); a halt or a quarantined
-  host pages someone.
+  host pages someone through Alertmanager.
 
 The numbered badges are the rollout's steps where they happen: 0 is ingest, before any rollout; 1 to 6 are the steps
 every host goes through, as in [the rollout](#how-the-rollout-works). The BMC stays the only truth about what runs:
@@ -563,7 +574,7 @@ How this repository maps onto it:
 Makefile            every command: make help
 pipeline.sh         plan → canary → waves → report
 poller.py           collect, the views (health, firmware, inventory, telemetry, capabilities, diff) and the exporter
-redfish.py          the Redfish connection both tools share: session, token, GET, POST, PATCH
+redfish.py          the Redfish connection both tools share: session, token, GET, POST, DELETE
 rollout.py          plan, run, report
 test_rollout.py     the rollout's decisions on recorded Redfish data: make test
 mutations.py        breaks rollout.py one rule at a time; each break must fail a test: make mutations
@@ -577,6 +588,7 @@ prod/               the real fleet: baseline.yaml, rollout.yaml; inventory.yaml 
 observability/      Compose for the exporters, Pushgateway, Prometheus and Grafana; a Lab and a Prod dashboard folder;
                     grafana/grafana.ini; grafana/.grafana.env, Grafana's admin account, stays local;
                     grafana/prod_dashboards.py makes the prod dashboards from the lab ones
-docs/               diagrams: the rollout, the lab, production today, a production system
+docs/               diagrams: the rollout, the lab, production today, a production system, the lab on its layout,
+                    one update as resources
 docs/runs/          reports of real lab runs: the update and every bad-update scenario
 ```

@@ -6,4 +6,4 @@ max_per_rack: 2       # hosts of one rack in the same wave, at most; the rest wa
 strict_waves: 1       # the first waves after the canary that, like it, halt on any failure
 halt_at: 0.1          # later waves: halt when more than this share of the hosts tried failed
 max_parallel: 10      # updates running at once in a wave
-soak: 2             # seconds to wait after a wave, then check its hosts again, before the next wave
+soak: 60            # seconds to wait after a wave, then check its hosts again, before the next wave

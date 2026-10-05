@@ -1,6 +1,6 @@
 # How firmware rolls out on production: rollout.py plan and run read it, their options override it for one run, and
-canary_per_model: 1   # first update in canary host.
-waves: [5, 25, 100]   # after the canary -> waves: the % of total hosts (using ramp) 
+canary_per_model: 1   # hosts of each hardware model that go first; hosts marked canary: true first
+waves: [5, 25, 100]   # after the canary: the cumulative % of the other hosts done after each wave
 max_per_rack: 1       # hosts of one rack in the same wave, at most: a rack never loses more than one node to a wave
 strict_waves: 1       # the first waves after the canary, halt on first error
 halt_at: 0.02         # later waves: halt when more than this share of the hosts tried failed
