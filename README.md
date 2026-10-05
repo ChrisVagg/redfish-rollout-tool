@@ -154,6 +154,16 @@ UpdateService has no `SimpleUpdate`), so the lab runs the push half; pull, a URL
 pre-flight's checks and the tests. The images are files on disk, the store's and the agent's copies; no database holds
 them, only the catalog's path and sha256 for each.
 
+**How an update runs on the lab's BMCs.** End to end, with no staging: these BMCs report `SoftwareInventory` v1_1_0,
+without `Staged` or `Active` (v1_12_0), and their UpdateService has no `Activate` action, so an image can't be queued
+for a later activation. The rollout pushes the image to `MultipartHttpPushUri` with `@Redfish.OperationApplyTime:
+OnReset` (about a minute for 64 MiB), follows the Task the BMC creates (Running → Completed, 100 %, in 5 s, the BMC
+still up), then activates the image with its own reset step, `Manager.Reset` `GracefulRestart` (the BMC is back in
+about 4.5 minutes), and the post-check confirms the new version runs. `OnReset` rather than `Immediate`, which would
+flash and reboot inside the task: the task's `Completed` is recorded before the BMC goes away, and the rollout chooses
+the reset and times the return. bmcweb drops its tasks when it reboots, so with `Immediate` the task's end could not be
+observed.
+
 ## Reports
 
 Every pipeline that changed something, or stopped, leaves one report in `<site>/runs/pipeline-<time>/`, built from
