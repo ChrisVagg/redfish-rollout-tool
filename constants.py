@@ -49,7 +49,8 @@ ROLLOUT = SITE / "rollout.yaml"  # how firmware rolls out on the site: canary, w
 #   max_parallel      updates running at once in a wave (0: the whole wave)
 #   soak              seconds to wait after a wave, then re-check its hosts, before the next one (0: none)
 ROLLOUT_DEFAULTS = {"canary_per_model": 1, "waves": [5, 25, 100], "max_per_rack": 1, "strict_waves": 1,
-                    "halt_at": 0.02, "max_parallel": 50, "soak": 1800}
+                    "halt_at": 0.02, "max_parallel": 50, "soak": 1800, "drain": None, "undrain": None}
+SCHEDULER_TIMEOUT = 24 * 3600  # seconds a drain may take to empty a host, or an undrain to finish, before it fails
 APPLY_TIME = "OnReset"  # @Redfish.OperationApplyTime of every update: the image waits for step 4's reset
 TASK_TIMEOUT = 1800  # seconds an update task may run
 SNAPSHOTS = SITE / "snapshots"  # the latest crawl of each host, read by the views

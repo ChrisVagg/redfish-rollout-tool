@@ -43,6 +43,17 @@ BREAKS = [  # (what a careless edit does, the line as it is, the line broken, th
     ("soak failure ignored", "strict or soured > 0 or", "strict or", "test_gate"),
     ("wave 1 not strict", 'range(1, rollout["strict_waves"] + 1)', 'range(1, rollout["strict_waves"])', "test_gate"),
     ("blocked hosts counted as tried", 'if s not in ("skipped", "blocked")]', 'if s != "skipped"]', "test_gate"),
+    ("an A/B bank counted as a way back", '    if image and not image_problems(',
+     '    if ab_bank(found, component).startswith("yes") or image and not image_problems(', "test_preflight_rollback"),
+    ("no drain for a host reset", 'test("drain", policy["drain"],', 'test("drain", True,', "test_drain"),
+    ("undrain failure ignored", "if not ok:  # the firmware may be fine, but the host isn't back in service",
+     "if False:", "test_drain"),
+    ("a gone manager passes", "                if u not in now),", "                if False),", "test_post_check"),
+    ("canary ignores the rack limit", 'key=lambda s: (full(s), s.get("canary") is not True)',
+     'key=lambda s: (False, s.get("canary") is not True)', "test_canary_racks"),
+    ("changed plan inputs ignored", "if sha256_of(f) != sha]", "if False]", "test_frozen_plan"),
+    ("another BMC updated", 'if planned and r["verdict"] == "go" and r.get("identity") != planned:', "if False:",
+     "test_frozen_plan"),
 ]
 
 if __name__ == "__main__":
@@ -53,8 +64,7 @@ if __name__ == "__main__":
             shutil.copy(f, copy)
         shutil.copytree(HERE / "fixtures", Path(copy) / "fixtures")
         (Path(copy) / "lab").mkdir()
-        for f in ("promote-fw-images.sh", "openbmc-dev.pub"):  # the ingest gate's test runs it
-            shutil.copy2(HERE / "lab" / f, Path(copy) / "lab")
+        shutil.copy2(HERE / "lab" / "promote-fw-images.sh", Path(copy) / "lab")  # the ingest gate's test runs it
         for what, line, broken, test in BREAKS:
             if original.count(line) != 1:
                 sys.exit(f"rollout.py changed: the line {what!r} breaks is there {original.count(line)} times, not "

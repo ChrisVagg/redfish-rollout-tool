@@ -40,6 +40,16 @@ def test_fleet():
     assert sorted(s["host"] for _, hosts in plan for s in hosts) == sorted(s["host"] for s in servers)
 
 
+# Canaries keep to the rack limit too: two models marked canary in one rack, at most one per rack, so the second
+# model's canary is its host in another rack
+def test_canary_racks():
+    servers = [{"host": "a1", "rack": "r1", "canary": True}, {"host": "b1", "rack": "r1", "canary": True},
+               {"host": "a2", "rack": "r2"}, {"host": "b2", "rack": "r2"}]
+    models = {"a1": "A", "a2": "A", "b1": "B", "b2": "B"}
+    plan = waves(servers, models, {"canary_per_model": 1, "waves": [100.0], "max_per_rack": 1})
+    assert sorted(s["host"] for s in plan[0][1]) == ["a1", "b2"]
+
+
 # ---- Pre-flight, the post-check, the rollback and the gate, on the lab BMC ----
 
 # The lab BMC as a collect read it: OpenBMC's GB200 NVL build 1754, healthy, no task open
@@ -146,37 +156,72 @@ def test_image_cache():
     cache.shutdown()
 
 
-# The ingest gate, lab/promote-fw-images.sh: a package signed with any key but the pinned one, or not signed at all, is
-# refused before it reaches the store, here a fake docker that records a call. A package that passes needs OpenBMC's
-# private key, which stays out of the repository
+# The ingest gate, lab/promote-fw-images.sh, run in a copy of lab/ that pins a key made here, its store a fake docker
+# that records each upload. A package signed with that key passes, is uploaded and written into the catalog; one
+# without its image's signature, with a changed image, without a required file, signed with another key, or not signed
+# at all, is refused before the upload
 def test_signature_gate():
+    import shutil
     import subprocess
     run = lambda *cmd, **kw: subprocess.run([str(c) for c in cmd], capture_output=True, text=True, **kw)
     d = Path(tempfile.mkdtemp())
-    run("openssl", "genpkey", "-algorithm", "RSA", "-pkeyopt", "rsa_keygen_bits:2048", "-out", d / "other.key")
-    (d / "MANIFEST").write_text("version=2.0\n")
-    (d / "image-bmc").write_bytes(b"firmware")
-    for f in ("MANIFEST", "image-bmc"):
-        run("openssl", "dgst", "-sha256", "-sign", d / "other.key", "-out", d / f"{f}.sig", d / f)
-    run("tar", "-cf", d / "other-key.tar", "-C", d, "MANIFEST", "MANIFEST.sig", "image-bmc", "image-bmc.sig")
-    run("tar", "-cf", d / "unsigned.tar", "-C", d, "MANIFEST", "image-bmc")
-    (d / "docker").write_text('#!/bin/sh\ntouch "$0.called"\nexit 1\n')
+    (d / "lab").mkdir()
+    shutil.copy2(Path(__file__).parent / "lab" / "promote-fw-images.sh", d / "lab")
+    for k in ("pinned", "other"):
+        run("openssl", "genpkey", "-algorithm", "RSA", "-pkeyopt", "rsa_keygen_bits:1024", "-out", d / f"{k}.key")
+    run("openssl", "pkey", "-in", d / "pinned.key", "-pubout", "-out", d / "lab" / "openbmc-dev.pub")
+    (d / "docker").write_text('#!/bin/sh\ncat > /dev/null\necho "$@" >> "$0.uploads"\n')
     (d / "docker").chmod(0o755)
     env = {**os.environ, "PATH": f"{d}:{os.environ['PATH']}"}
-    gate = lambda package: run("lab/promote-fw-images.sh", package, cwd=Path(__file__).parent, env=env)
-    refused = gate(d / "other-key.tar")
-    assert refused.returncode == 1 and "doesn't verify with openbmc-dev.pub" in refused.stderr, refused.stderr
-    refused = gate(d / "unsigned.tar")
-    assert refused.returncode == 1 and "not signed" in refused.stderr, refused.stderr
-    assert not (d / "docker.called").exists(), "a refused package reached the store"
+    uploads = d / "docker.uploads"
+
+    # lambda build, key, signed, changed=b"", drop=(): an OpenBMC package of the build in d/: its files, the signed
+    # ones signed with key, the image changed after its signing, the files in drop left out
+    def package(build, key="pinned", signed=("MANIFEST", "publickey", "image-bmc"), changed=b"", drop=()) -> Path:
+        files = {"MANIFEST": f"version=2.{build}\n".encode(), "publickey": b"key", "image-bmc": b"firmware"}
+        work = Path(tempfile.mkdtemp())
+        for name, data in files.items():
+            (work / name).write_bytes(data)
+            if name in signed:
+                run("openssl", "dgst", "-sha256", "-sign", d / f"{key}.key", "-out", work / f"{name}.sig", work / name)
+        (work / "image-bmc").write_bytes(b"firmware" + changed)
+        names = [n for n in (*files, *(f"{f}.sig" for f in signed)) if n not in drop]
+        tar = d / f"gb200nvl-{build}.static.mtd.all.tar"
+        run("tar", "-cf", tar, "-C", work, *names)
+        return tar
+    gate = lambda tar: run(d / "lab" / "promote-fw-images.sh", tar, env=env)
+    refusals = [  # (package, what the gate says)
+        (package(1, signed=("MANIFEST", "publickey")), "image-bmc or its signature image-bmc.sig is missing"),
+        (package(2, changed=b"!"), "image-bmc: its signature doesn't verify with openbmc-dev.pub"),
+        (package(3, drop=("image-bmc",)), "image-bmc or its signature image-bmc.sig is missing"),
+        (package(4, key="other"), "its signature doesn't verify with openbmc-dev.pub"),
+        (package(5, signed=()), "MANIFEST or its signature MANIFEST.sig is missing"),
+    ]
+    for tar, says in refusals:
+        refused = gate(tar)
+        assert refused.returncode == 1 and says in refused.stderr, (tar.name, refused.stderr)
+    assert not uploads.exists(), "a refused package reached the store"
+    passed = gate(package(6))
+    assert passed.returncode == 0, passed.stderr
+    assert "gb200nvl-6.static.mtd.all.tar" in uploads.read_text()
+    assert '"2.6": {file: "images/gb200nvl-6.static.mtd.all.tar"' in (d / "lab" / "images.yaml").read_text()
+    assert (d / "lab" / "bmc.mtd").read_bytes() == b"firmware"
+    assert not (d / "gb200nvl-6.static.mtd.all.tar").exists()  # the store keeps the only copy
 
 
-# No way back, one bank and no image of the running version, blocks unless --accept-no-rollback
+# No way back, no image of the running version to reinstall, blocks unless --accept-no-rollback
 def test_preflight_rollback():
     no_way_back = catalog(**{TARGET: image("1755.tar")})
     verdict, reason = preflight(images=no_way_back)
     assert verdict == "block" and "--accept-no-rollback to update anyway" in reason, reason
     assert preflight(images=no_way_back, accept_no_rollback=True) == ("go", "")
+    # An A/B bank the BMC reports, with a way to switch to it, isn't a way back: the rollout can't switch banks
+    found = lab()
+    found[MGR].setdefault("Links", {})["SoftwareImages"] = [{"@odata.id": FW}]
+    with patch.object(rollout, "ab_bank", lambda found, component: "yes: Inactive 1.0"):
+        verdict, reason = preflight(found, images=no_way_back)
+        assert verdict == "block" and "an A/B bank is reported, but switching banks isn't built" in reason, reason
+        assert preflight(found) == ("go", "")  # with the image to reinstall, the bank doesn't matter
 
 
 # The BMC itself: unreachable, a component Redfish can't update, not healthy (a degraded boot), or a task
@@ -208,6 +253,11 @@ def test_post_check():
     found[MGR]["Status"]["Health"] = "Warning"
     assert rollout.after_checks(found, BMC, TARGET, before)[0] is False
     assert rollout.after_checks(found, BMC, TARGET, rollout.before_state(found, RUNNING))[0] is True
+    # A manager that is gone since the update fails it
+    found = running(lab(), TARGET)
+    del found[MGR]
+    passed, checks, _ = rollout.after_checks(found, BMC, TARGET, before)
+    assert not passed and f"{MGR}: gone, before OK" in [c["detail"] for c in checks if not c["ok"]], checks
     # A task that failed since the update fails it; one already open before the update doesn't
     found = running(lab(), TARGET)
     found[TASK] = task("Exception", "Critical")
@@ -247,6 +297,43 @@ def test_run_host():
     state, installed, _ = run_host((False, True, "post-check failed"), images=catalog(**{TARGET: image("1755.tar")}),
                                    accept_no_rollback=True)
     assert (state, installed) == ("needs_attention", [("", "1755.tar", TARGET)])
+
+
+# A reset that restarts the host needs the scheduler: pre-flight blocks without a drain in rollout.yaml. A drain that
+# fails, or runs past its timeout, fails the host before any update; an undrain that fails leaves it for a person, as
+# the host isn't back in service
+def test_drain():
+    host_reset = lambda found, component: ("ComputerSystem", "/redfish/v1/Systems/system")
+    with patch.object(rollout, "activation", host_reset):
+        verdict, reason = preflight()
+        assert verdict == "block" and "restarts the host, and rollout.yaml sets no drain" in reason, reason
+        assert preflight(drain="true") == ("go", "")
+        state, installed, steps = run_host((True, True, "post-check passed"), drain="false")
+        assert (state, installed, ("drain", "failed") in steps) == ("failed", [], True)
+        state, _, steps = run_host((True, True, "post-check passed"), drain="true", undrain="false")
+        assert (state, ("undrain", "failed") in steps) == ("needs_attention", True)
+        assert run_host((True, True, "post-check passed"), drain="true", undrain="true")[0] == "updated"
+    with patch.object(rollout, "SCHEDULER_TIMEOUT", 0.2):
+        ok, output = rollout.scheduler("sleep 5", {"host": "h"})
+        assert not ok and "timed out" in output, output
+
+
+# A run does what its plan approved: an input file changed or gone since the plan stops it, and a host whose BMC
+# isn't the one the plan read (another identity at its address) is blocked, not updated
+def test_frozen_plan():
+    d = Path(tempfile.mkdtemp())
+    for name in ("baseline.yaml", "images.yaml"):
+        (d / name).write_text("approved\n")
+    saved = {"inputs": {str(d / n): rollout.sha256_of(d / n) for n in ("baseline.yaml", "images.yaml")}}
+    assert rollout.changed_inputs(saved) == []
+    (d / "baseline.yaml").write_text("changed\n")
+    (d / "images.yaml").unlink()
+    assert rollout.changed_inputs(saved) == [str(d / "baseline.yaml"), str(d / "images.yaml")]
+    approved = rollout.identity_of(lab())
+    assert run_host((True, True, "post-check passed"), identities={"127.0.0.1:2441": approved})[0] == "updated"
+    state, installed, _ = run_host((True, True, "post-check passed"),
+                                   identities={"127.0.0.1:2441": {**approved, "service_uuid": "another BMC"}})
+    assert (state, installed) == ("blocked", [])
 
 
 # The gate after each wave, the lab's policy: the canary and wave 1 strict, later waves halt over 10% failed.

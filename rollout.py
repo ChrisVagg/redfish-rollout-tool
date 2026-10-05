@@ -22,7 +22,9 @@ unless --allow-downgrade, and a component without a rollback path unless --accep
                     evidence, --host one host's; --save FILE writes it all as JSON (rollout-report/1) for services.
 
 In a pipeline: plan --save plan.json, then run --plan plan.json --stage canary, then --stage waves. The saved plan
-decides the component, files, options and waves; each stage exits 1 when its gate fails, so the next one doesn't run.
+decides the component, files, options, policy and waves; a stage refuses to start when a file changed since the plan,
+and blocks a host whose BMC isn't the one the plan read. Each stage exits 1 when its gate fails, so the next one
+doesn't run.
   run COMPONENT     Steps 2 to 6 on the hosts that pass, wave by wave; each host is read and pre-flighted again right
                     before it is touched. Without --yes a dry run: what each host would get. With --yes only hosts
                     marked writable: true in the inventory are updated (the lab); every step is recorded, its intent
@@ -59,7 +61,7 @@ from rich.text import Text
 from constants import (ACTION_ROW, ACTIONS_ROW, APPLY_TIME, BASELINE, CACHE_CA, DOTTED, FAILED_STATES, FAULTS,
                        HOST_ROW, IMAGE_CACHE, IMAGES, INVENTORY_FILE, LEFT_OUT_ROW, NEXT_STEP, PLAN_ROW, PREFLIGHT_ROW,
                        PROPS, REPORT_SCHEMA, RESET_PREFERENCE, ROLLOUT, ROLLOUT_DEFAULTS, ROOT, RUNNING_STATES, RUNS,
-                       SITE, SPOOL, STEP_ROW, STYLE, TASK_TIMEOUT, VERSIONS_ROW, WAVE_ROW)
+                       SCHEDULER_TIMEOUT, SITE, SPOOL, STEP_ROW, STYLE, TASK_TIMEOUT, VERSIONS_ROW, WAVE_ROW)
 from helpers import (block, first_of, first_real, identity, label, link, norm, obj, of, output_options, reason, sample,
                      show, text, uri_of)
 from poller import (allowable, entries, firmware, host_baseline, image_state, load_baseline, load_servers, open_jobs,
@@ -235,9 +237,10 @@ def fetch(file, path) -> str | None:
 # What is wrong with an image: no such file, no sha256, a sha256 that doesn't match; () when nothing
 @lru_cache(maxsize=None)
 def image_problems(file, sha256) -> tuple[str, ...]:
-    """A URL can't be checked from here: the BMC pulls it when the update runs, and that step verifies it. With a site
-    cache, the image is fetched first, once; a copy whose sha256 doesn't match is deleted, so the next run fetches it
-    again."""
+    """A URL isn't checked here: the BMC fetches it itself, so nothing compares what it gets with the catalog's sha256;
+    only the URL pointing at the store's approved copy, which never changes, and the BMC's own checks guard it. With a
+    site cache, the image is fetched first, once; a copy whose sha256 doesn't match is deleted, so the next run fetches
+    it again."""
     path = image_path(file)
     if path is None:
         return ()
@@ -247,30 +250,34 @@ def image_problems(file, sha256) -> tuple[str, ...]:
         return (f"{file}: no such file",)
     if not sha256:
         return (f"{file}: no sha256 in {IMAGES.name}",)
-    digest = hashlib.sha256()
-    with open(path, "rb") as f:
-        # lambda: the next MiB of the file, b"" at its end
-        for chunk in iter(lambda: f.read(1 << 20), b""):
-            digest.update(chunk)
-    if digest.hexdigest() == sha256.lower():
+    if sha256_of(path) == sha256.lower():
         return ()
     if IMAGE_CACHE:
         path.unlink()
     return (f"{file}: sha256 doesn't match {IMAGES.name}",)
 
 
-# How a component could go back to the version it runs now, after an update: the Rollback column
+# A file's sha256, None when there is no such file
+def sha256_of(path) -> str | None:
+    if not Path(path).is_file():
+        return None
+    digest = hashlib.sha256()
+    with open(path, "rb") as f:
+        # lambda: the next MiB of the file, b"" at its end
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+# The plan's input files that changed since it was approved, or are gone: its run refuses to start on any
+def changed_inputs(saved) -> list[str]:
+    return [f for f, sha in saved.get("inputs", {}).items() if sha256_of(f) != sha]
+
+
+# How a component goes back to the version it runs now, after an update: the Rollback column. Only a way the rollout
+# carries out counts: an A/B bank the BMC reports isn't one, as switching banks isn't built
 def rollback_path(found, component, images, model, running) -> str:
-    """bank: another image of it is reported (A/B) and the standard gives a way to switch to it: the manager's
-    ActiveSoftwareImage for Manager (BMC), an Activate action on its entries or on the update service. reinstall:
-    images.yaml has a usable image of the running version. none: neither."""
-    touched = entries(found, component)
-    switch = (component == "Manager (BMC)" and any(obj(m.get("Links")).get("SoftwareImages")
-                                                   for _, m in of(found, "Manager"))
-              or any("#SoftwareInventory.Activate" in obj(d.get("Actions")) for d in touched)
-              or "#UpdateService.Activate" in obj(first_of(found, "UpdateService").get("Actions")))
-    if ab_bank(found, component).startswith("yes") and switch:
-        return "bank: switch back to the other image"
+    """reinstall: images.yaml has a usable image of the running version. none: it hasn't."""
     image = image_for(images, found, model, component, text(running))
     if image and not image_problems(image.get("file", ""), image.get("sha256", "")):
         return f"reinstall {text(running)} from {image.get('file')}"
@@ -304,12 +311,12 @@ def identity_of(found) -> dict:
 
 # Pre-flight for one host: whether the update can be done, and every check made to decide it
 def check(found, baselines, key, policy=None) -> dict:
-    """key is a row name or SoftwareId:<id>. policy: allow_downgrade, accept_no_rollback, images (images.yaml).
+    """key is a row name or SoftwareId:<id>. policy: allow_downgrade, accept_no_rollback, images (images.yaml), drain.
     Returns verdict (go, skip or block), checks (every check made, in order, as {check, ok, detail}), reasons (the
     failed ones), notes, and the table's values. Nothing to do (not in the baseline, already on it) is a skip and stops
     there. Otherwise every check runs: work still running, or an image already staged, is a skip (try a later wave);
     anything that could harm the host or can't be verified is a block. A block wins over a skip."""
-    policy = {"allow_downgrade": False, "accept_no_rollback": False, "images": {}, **(policy or {})}
+    policy = {"allow_downgrade": False, "accept_no_rollback": False, "images": {}, "drain": None, **(policy or {})}
     result = {"model": "-", "component": key, "updateable": "-", "ab": "-", "rollback": "-", "running": None,
               "want": None, "direction": "-", "methods": "-", "notes": [], "checks": []}
     blocks, skips = [], []
@@ -377,14 +384,20 @@ def check(found, baselines, key, policy=None) -> dict:
         test("image sha256", not problems, "; ".join(problems) or f"{file}: sha256 matches the catalog")
         path = image_path(file)
         if path is None:
-            result["notes"].append(f"image {file} is a URL: checked when the update pulls it")
+            result["notes"].append(f"image {file} is a URL: the BMC fetches it itself, so its sha256 isn't checked")
         elif path.is_file() and isinstance(limit, int):
             test("image size", path.stat().st_size <= limit,
                  f"{path.stat().st_size} bytes, MaxImageSizeBytes {limit}")
+    bank = "an A/B bank is reported, but switching banks isn't built, and " if result["ab"].startswith("yes") else ""
     test("rollback path", result["rollback"] != "none" or policy["accept_no_rollback"],
-         result["rollback"] if result["rollback"] != "none" else f"no rollback: no backup image reported and no image "
-         f"of {text(running)} in {IMAGES.name}" + ("; accepted by --accept-no-rollback" if policy["accept_no_rollback"]
-                                                    else "; --accept-no-rollback to update anyway"))
+         result["rollback"] if result["rollback"] != "none" else f"no rollback: {bank}no image of {text(running)} in "
+         f"{IMAGES.name}" + ("; accepted by --accept-no-rollback" if policy["accept_no_rollback"]
+                             else "; --accept-no-rollback to update anyway"))
+
+    kind = activation(found, component)[0]
+    if kind in ("ComputerSystem", "Chassis"):
+        test("drain", policy["drain"], f"the {kind} reset restarts the host: drained first by {policy['drain']}"
+             if policy["drain"] else f"the {kind} reset restarts the host, and {ROLLOUT.name} sets no drain")
 
     methods = update_methods(found, update)
     result["methods"] = ", ".join(methods) or "-"
@@ -446,22 +459,27 @@ def rollout_text(policy) -> str:
 # say, the hosts spread over the racks in turn and never more than max_per_rack of one rack in a wave
 def waves(servers, models, policy) -> list[tuple[str, list[dict]]]:
     """servers: the hosts that pass pre-flight; models: {host: its hardware model}. Hosts marked canary: true in the
-    inventory are the canary of their model first. A wave the rack limit keeps short leaves its hosts to the next."""
+    inventory are the canary of their model first. The canary keeps to the rack limit too, unless every host of a model
+    is in a full rack. A wave the rack limit keeps short leaves its hosts to the next."""
     # lambda s: a host -> its rack, else its project: waves spread across them
     rack = lambda s: s.get("rack") or s.get("project") or "-"
     racks = {}
     for s in servers:
         racks.setdefault(rack(s), []).append(s)
     order = [s for turn in zip_longest(*racks.values()) for s in turn if s]  # one of each rack in turn
-    canary = []
+    canary, cap = [], policy["max_per_rack"]
+    # lambda s: a host -> True when its rack already has max_per_rack canaries
+    full = lambda s: bool(cap) and sum(rack(c) == rack(s) for c in canary) >= cap
     for model in dict.fromkeys(models[s["host"]] for s in order):
-        # lambda s: a host of the model -> False for one marked canary: true, so those sort first
-        mine = sorted((s for s in order if models[s["host"]] == model), key=lambda s: s.get("canary") is not True)
-        canary += mine[:policy["canary_per_model"]]
+        mine = [s for s in order if models[s["host"]] == model]
+        for _ in range(min(policy["canary_per_model"], len(mine))):
+            # a rack with room first, then a host marked canary: true; a full rack only when the model has no other
+            canary.append(min((s for s in mine if s not in canary),
+                              key=lambda s: (full(s), s.get("canary") is not True)))
     queue = [s for s in order if s not in canary]
     marks = [math.ceil(len(queue) * w / 100) for w in policy["waves"]]
     sizes = [b - a for a, b in zip([0, *marks], marks) if b > a] or [len(queue)]
-    named, cap = [("canary", canary)], policy["max_per_rack"]
+    named = [("canary", canary)]
     while queue:
         size, wave, per_rack, left = sizes[min(len(named) - 1, len(sizes) - 1)], [], Counter(), []
         for s in queue:
@@ -565,15 +583,14 @@ def prepare(args) -> dict:
     servers = [s for s in load_servers(args.inventory) if not args.hosts or s["host"] in args.hosts]
     if not servers:
         raise SystemExit(f"no host of {args.inventory} matches --hosts {' '.join(args.hosts)}")
-    baselines = load_baseline(args.baseline)
+    baselines, rollout = load_baseline(args.baseline), load_rollout(args)
     policy = {"allow_downgrade": args.allow_downgrade, "accept_no_rollback": args.accept_no_rollback,
-              "images": load_images(args.images)}
+              "images": load_images(args.images), "drain": rollout["drain"]}
     tunnels = [tunnel(s) for s in servers]  # fails on missing credentials before any request
     with ThreadPoolExecutor(len(servers)) as pool:
         reads = list(pool.map(read_host, servers, tunnels))
     results = [check(found, baselines, args.component, policy) for found, _ in reads] if args.component else None
     passing = [s for s, r in zip(servers, results or []) if r["verdict"] == "go"]
-    rollout = load_rollout(args)
     planned = waves(passing, {s["host"]: r["model"] for s, r in zip(servers, results or [])}, rollout)
     return {"servers": servers, "reads": reads, "results": results, "planned": planned, "baselines": baselines,
             "policy": policy, "rollout": rollout,
@@ -582,12 +599,15 @@ def prepare(args) -> dict:
 
 # Save the plan for a pipeline's later stages: what to update, from which files, with which options, in which waves
 def save_plan(args, servers, results, planned, rollout) -> None:
-    """run --plan takes all of it from here, so the stages run what was planned; each host's verdict is kept for the
-    record."""
+    """run --plan takes all of it from here, so the stages run what was planned: the files' sha256, so a run refuses
+    files changed since, and each host's verdict with its identity, so a run blocks a host that isn't the one
+    approved."""
     Path(args.save).write_text(json.dumps({
         "created": datetime.now(timezone.utc).isoformat(timespec="seconds"), "component": args.component,
         "inventory": os.path.relpath(args.inventory), "baseline": os.path.relpath(args.baseline),
         "images": os.path.relpath(args.images),
+        "inputs": {os.path.relpath(f): sha256_of(f) for f in (args.inventory, args.baseline, args.images,
+                                                               rollout["file"]) if f},
         "allow_downgrade": args.allow_downgrade, "accept_no_rollback": args.accept_no_rollback, "rollout": rollout,
         "waves": {name: [s["host"] for s in hosts] for name, hosts in planned},
         "verdicts": {s["host"]: {"verdict": r["verdict"], "running": r["running"], "target": r["want"],
@@ -818,7 +838,8 @@ def post_check(server, key, want, before) -> tuple[bool, list[dict], str]:
 
 
 # The post-check on one read: the version asked for now runs; every system and manager is OK, or no worse than
-# before; no new job or task failed or hangs
+# before (one that reported no health before and still doesn't passes; one that is gone fails); no new job or task
+# failed or hangs
 def after_checks(found, key, want, before) -> tuple[bool, list[dict], str]:
     running = text(firmware(found).get(resolve(found, key), (None, ""))[0])
     now = {u: health(d) for kind in ("ComputerSystem", "Manager") for u, d in of(found, kind)}
@@ -827,6 +848,8 @@ def after_checks(found, key, want, before) -> tuple[bool, list[dict], str]:
     checks = [{"check": "running version", "ok": running == want, "detail": f"{running}, target {want}"},
               *({"check": "health", "ok": h == "OK" or h == was.get(u), "detail": f"{u}: {h}, before {was.get(u, '-')}"}
                 for u, h in now.items()),
+              *({"check": "health", "ok": False, "detail": f"{u}: gone, before {h}"} for u, h in was.items()
+                if u not in now),
               {"check": "new jobs and tasks", "ok": not jobs,
                "detail": ", ".join(f"{j[1]}: {j[2]}" for j in jobs) or "none"}]
     return all(c["ok"] for c in checks), checks, running
@@ -873,13 +896,14 @@ def apply(server, found, key, image, want, before, policy, rec, phase) -> tuple[
 
 # Step 2 and the undrain of step 6: take a host out of the scheduler or give it back; (ok, output)
 def scheduler(command, server) -> tuple[bool, str]:
-    """The --drain or --undrain command with {host} and {node} (the inventory's node, else the host) filled in; it
-    returns once done, a drain once the node is empty. None configured: nothing to do, as in the lab."""
+    """rollout.yaml's drain or undrain command with {host} and {node} (the inventory's node, else the host) filled in.
+    A drain must return only once the node is empty, its jobs ended, not once the scheduler stops sending it new ones;
+    one still running after SCHEDULER_TIMEOUT fails. None configured: nothing to do, as in the lab."""
     if not command:
         return True, "no scheduler configured"
     try:
         argv = shlex.split(command.format(host=server["host"], node=server.get("node", server["host"])))
-        p = subprocess.run(argv, capture_output=True, text=True, timeout=24 * 3600)
+        p = subprocess.run(argv, capture_output=True, text=True, timeout=SCHEDULER_TIMEOUT)
     except (OSError, ValueError, subprocess.TimeoutExpired) as e:
         return False, str(e)
     return p.returncode == 0, (p.stdout + p.stderr).strip()[-300:] or f"exit {p.returncode}"
@@ -889,10 +913,16 @@ def scheduler(command, server) -> tuple[bool, str]:
 def run_host(server, key, baselines, policy, rec) -> dict:
     """A drain only when the reset touches the host (a system or chassis reset). A failure before the reset leaves
     the old firmware running: undrain. After it: roll back by reinstalling the version that ran before, check again,
-    undrain. A failed rollback, or no way to roll back, leaves the host drained for a person: needs_attention."""
+    undrain. A failed rollback, or no way to roll back, leaves the host drained for a person: needs_attention, as does
+    an undrain that failed."""
     host, started = server["host"], time.monotonic()
     found, _ = read_host(server, tunnel(server))
     r = check(found, baselines, key, policy)
+    planned = policy.get("identities", {}).get(host)
+    if planned and r["verdict"] == "go" and r.get("identity") != planned:  # another BMC answers at its address
+        detail = f"not the BMC the plan approved: {r.get('identity')}, approved {planned}"
+        r.update(verdict="block", reasons=[detail], checks=[*r["checks"], {"check": "identity", "ok": False,
+                                                                           "detail": detail}])
     rec(host, "pre-flight", r["verdict"], checks=r["checks"], reasons=r["reasons"], running=r["running"],
         target=r["want"], identity=r.get("identity"))
     out = {"host": host, "from": text(r["running"]), "now": text(r["running"])}
@@ -918,7 +948,7 @@ def run_host(server, key, baselines, policy, rec) -> dict:
     if not passed and activated:
         back = image_for(policy["images"], found, r["model"], component, before["version"])
         if not r["rollback"].startswith("reinstall") or not back:
-            state, detail = "needs_attention", f"{detail}; rollback: {r['rollback']} (switching banks isn't built)"
+            state, detail = "needs_attention", f"{detail}; no rollback: the update went on by --accept-no-rollback"
         else:
             rec(host, "rollback", "start", to=before["version"], reason=detail)
             fresh, _ = read_host(server, tunnel(server))
@@ -930,6 +960,8 @@ def run_host(server, key, baselines, policy, rec) -> dict:
         rec(host, "undrain", "start", command=policy["undrain"])
         ok, output = scheduler(policy["undrain"], server)
         rec(host, "undrain", "done" if ok else "failed", detail=output)
+        if not ok:  # the firmware may be fine, but the host isn't back in service
+            state, detail = "needs_attention", f"{detail}; undrain failed: {output}"
     else:
         rec(host, "undrain", "skipped", detail="kept drained for a person" if drain else "nothing was drained")
     now, _ = read_host(server, tunnel(server))
@@ -1006,6 +1038,11 @@ def run(args) -> list:
     soak check that failed, or more than halt_at of the hosts tried failed."""
     args.exit_code, saved = 0, json.loads(Path(args.plan).read_text()) if args.plan else None
     if saved:
+        if changed := changed_inputs(saved):
+            raise SystemExit(f"changed since the plan was approved: {', '.join(changed)}. A run does only what its "
+                             "plan approved: plan again")
+        if args.halt_at is not None:
+            raise SystemExit("--halt-at changes the approved plan's policy: plan again with it")
         for key in ("component", "inventory", "baseline", "images", "allow_downgrade", "accept_no_rollback"):
             setattr(args, key, saved[key])
         stage = {name: hosts for name, hosts in saved["waves"].items()
@@ -1019,11 +1056,12 @@ def run(args) -> list:
     servers, reads, results, planned, baselines, policy, rollout = (
         step[k] for k in ("servers", "reads", "results", "planned", "baselines", "policy", "rollout"))
     if saved:
-        rollout = {**saved["rollout"], **({"halt_at": args.halt_at} if args.halt_at is not None else {})}
+        rollout = saved["rollout"]
         by_host = {s["host"]: s for s in servers}
         planned = [(name, [by_host[h] for h in hosts if h in by_host]) for name, hosts in stage.items()]
-    policy.update(faults=dict(args.fault or []), apply_time=APPLY_TIME, drain=args.drain, undrain=args.undrain,
-                  task_timeout=TASK_TIMEOUT, reset_timeout=args.reset_timeout)
+    policy.update(faults=dict(args.fault or []), apply_time=APPLY_TIME, drain=rollout["drain"],
+                  undrain=rollout["undrain"], task_timeout=TASK_TIMEOUT, reset_timeout=args.reset_timeout,
+                  identities={h: v.get("identity") for h, v in saved["verdicts"].items()} if saved else {})
     counts = Counter(r["verdict"] for r in results)
     faults = f"\nFaults injected: {', '.join(f'{h}={k}' for h, k in args.fault)}" if args.fault else ""
     caption = (f"{len(servers)} hosts read live from {step['read_at']} · {counts['go']} go · {counts['skip']} "
@@ -1464,12 +1502,8 @@ def main() -> None:
     r.add_argument("--stage", default="all", choices=("all", "canary", "waves"),
                    help="with --plan: the canary, the waves after it, or all [all]")
     r.add_argument("--yes", action="store_true", help="really update the hosts that pass (only writable ones)")
-    r.add_argument("--drain", help="command that empties a host, e.g. 'scontrol update NodeName={node} State=DRAIN "
-                                   "Reason=firmware'; it runs only when the reset touches the host")
-    r.add_argument("--undrain", help="command that gives a host back, e.g. 'scontrol update NodeName={node} "
-                                     "State=RESUME'")
     r.add_argument("--halt-at", type=float, help="after the strict waves, stop when more than this share failed "
-                                                 "[policy]")
+                                                 "[policy]; not with --plan, whose policy is approved")
     r.add_argument("--reset-timeout", type=int, default=900, help="seconds for a reset to come back [900]")
     r.add_argument("--fault", action="append", type=fault_spec, metavar="[HOST=]KIND",
                    help="lab testing: inject a fault into a host's update (every host's without HOST=); may repeat. "

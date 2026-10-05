@@ -1,7 +1,9 @@
 # Redfish firmware rollout
 
 Firmware updates for server BMCs over the standard [Redfish](https://www.dmtf.org/standards/redfish) API. Production
-is read-only; writes happen only in the lab. Four parts, each run with `make` ([Quick start](#quick-start-the-lab)):
+has only been read (monitoring, plans, dry runs); every update so far ran on the lab. `make update` refuses
+production, and `rollout.py` itself updates only hosts marked `writable: true`, and only with `--yes`
+([Production](#approach-in-production-it-equipment)). Four parts, each run with `make` ([Quick start](#quick-start-the-lab)):
 
 | Part | What it does |
 |---|---|
@@ -22,36 +24,47 @@ version per model and component) and `images.yaml` (the image file and sha256 pe
 
 1. **plan**: reads every BMC live and pre-flights it, then puts the hosts that pass in waves as the site's rollout
    policy says ([Rollout policy](#rollout-policy)): a canary of each hardware model, then waves that grow, spread
-   across racks. It saves `plan.json`, and the later stages run exactly that plan.
+   across racks. It saves `plan.json`, and the later stages run exactly that plan: it records the sha256 of every
+   file it read (inventory, baseline, catalog, policy) and each BMC's identity, and a stage refuses to start when one
+   of those files changed since.
 2. **canary**: updates the canary hosts. Gate: any failure stops the pipeline, so wave 1 never starts.
 3. **waves**: wave 1 starts only after the canary passed and soaked. After each wave, the gate: the first waves are
    strict like the canary (any failure stops the pipeline); later ones stop when more than `halt_at` of the hosts
-   tried failed. A wave that passes soaks too, then its hosts are checked again before the next wave starts.
+   tried failed. Soak: after every wave but the last, when none of its hosts failed, the pipeline waits `soak`
+   seconds, then runs the post-check again on each host the wave updated; one that fails now is `needs_attention`,
+   and the gate halts.
 4. **report**: one report of the whole pipeline, from the plan and the run records (see [Reports](#reports)). It
    runs even after a stop; a stopped pipeline exits 1.
 
 Every host, in the canary and in each wave, goes through six steps; the hosts of one wave run side by side:
 
-1. **pre-flight** again, on a fresh read: the host may have changed since the plan.
-2. **drain**, only when the reset restarts the host (BIOS, system firmware); a BMC reset leaves the host running.
+1. **pre-flight** again, on a fresh read: the host may have changed since the plan, and it must be the BMC the plan
+   approved (the same identity: model, service UUID, serial).
+2. **drain**, only when the reset restarts the host (BIOS, system firmware); a BMC reset leaves the host running. The
+   drain command, from the site's `rollout.yaml`, must return only once the node is empty, its jobs ended; one that
+   fails, or runs past 24 h, fails the host before any update.
 3. **update**: multipart push of the image, or `SimpleUpdate` from a URL, applied on reset. The BMC runs it as a
    `Task` of its `TaskService`; every change of `TaskState`, `PercentComplete` and `Messages` is recorded, and the
    report shows the task, its messages and its progress under the step.
 4. **reset**: `Manager.Reset` or `ComputerSystem.Reset`, graceful first, then wait until it answers again.
-5. **post-check**: the target version runs, health is no worse than before, and no new job or task failed or hangs.
+5. **post-check**: the target version runs, health is no worse than before (a system or manager that reported no
+   health before and still doesn't passes; one that is gone fails), and no new job or task failed or hangs.
    When it fails, roll back: reinstall the version from before, reset, check again. A host that can't be rolled back
    stays drained for a person (`needs_attention`).
 6. **undrain**: the host goes back to the scheduler after an update, a rollback, or a failure before the reset; only a
-   host left for a person stays drained.
+   host left for a person stays drained. An undrain that fails leaves the host `needs_attention`: its firmware may be
+   fine, but it isn't back in service.
 
 Pre-flight gives each host **go**, **skip** (nothing to do, or busy: try a later wave) or **block** (a person has to
 look), with every reason. It blocks a downgrade or a version order it can't tell (unless `--allow-downgrade`), a
 component Redfish can't update (`Updateable` false, `WriteProtected`), a target below `LowestSupportedVersion`, a
-missing image, a sha256 mismatch, an image over `MaxImageSizeBytes`, no rollback path (no A/B bank and no image of the
-running version, unless `--accept-no-rollback`), a disabled update service, health not OK, and failed jobs.
+missing image, a sha256 mismatch, an image over `MaxImageSizeBytes`, no rollback path (no image of the running version
+to reinstall, unless `--accept-no-rollback`; an A/B bank doesn't count, as switching banks isn't built), a reset that
+restarts the host with no drain configured, a disabled update service, health not OK, and failed jobs.
 
 Every step goes into `<site>/runs/<run id>.jsonl`, its intent before it and its result after, so a run stopped halfway
-still shows where each host was. Each pipeline keeps its plan and reports in `<site>/runs/pipeline-<time>/`.
+still shows where each host was. The records explain what happened; they don't resume a run or lock a host: a stopped
+pipeline is planned and run again, and pre-flight skips the hosts already on the target ([Not built yet](#not-built-yet)). Each pipeline keeps its plan and reports in `<site>/runs/pipeline-<time>/`.
 
 ## What a run looks like
 
@@ -167,11 +180,14 @@ reports the Manager `Quiesced`, health `Critical`. The health check then stops Q
 the BMC again ([lab/Dockerfile](lab/Dockerfile)); pre-flight would block it, as it would a real one.
 
 Beside the BMCs, Compose runs the **image store** and the site's **image cache** in front of it, as production has
-them. [lab/promote-fw-images.sh](lab/promote-fw-images.sh) is the ingest gate: it checks the RSA-SHA256 signature of every signed file in each package (its MANIFEST, its key and its image)
-against the key pinned in the repository, [lab/openbmc-dev.pub](lab/openbmc-dev.pub), never against the key the package
-carries, which anyone could replace together with the image. A package that fails never reaches the store. The pinned key
-is OpenBMC's development key, whose private half is in OpenBMC's public source tree, so in the lab the check proves a
-package is unchanged since its build, not who built it; in production the pinned key is the vendor's.
+them. [lab/promote-fw-images.sh](lab/promote-fw-images.sh) is the ingest gate: a package must hold its MANIFEST, its key
+(`publickey`) and its image (`image-bmc`), each with an RSA-SHA256 signature, and every signature must verify against
+the key pinned in the repository, [lab/openbmc-dev.pub](lab/openbmc-dev.pub), never against the key the package
+carries, which anyone could replace together with the image. A package that fails never reaches the store. The pinned
+key is OpenBMC's development key, and its private half is public in OpenBMC's source tree: anyone can sign a modified
+package with it. In the lab the gate shows how the verification works (required files, a pinned key, a refusal before
+the store), and protects nothing. Production needs the vendor's signing key pinned, whose private half only the vendor
+holds.
 
 The store is SeaweedFS, an object store standing in for the production store (MinIO no longer publishes its images):
 `promote-fw-images.sh` uploads the packages into its bucket `firmware`, which keeps the only copy and allows anonymous reads
@@ -182,23 +198,28 @@ image from the cache, as a site agent does in production: pre-flight
 downloads it into `lab/spool/` and checks it against the sha256 in `lab/images.yaml` (a copy that doesn't match is
 deleted, to be fetched again), and the update pushes that copy. These BMCs can't pull an image themselves (their
 UpdateService has no `SimpleUpdate`), so the lab runs the push half; pull, a URL handed to the BMC, is covered by
-pre-flight's checks and the tests. The images are files: in the store's bucket, in the cache and in the agent's copy;
+pre-flight's checks (the protocol and target the BMC allows) and the tests. With pull the agent never sees the bytes,
+so nothing checks what the BMC downloads against the catalog's sha256 ([push and pull](#a-production-system---scaling-for-a-large-fleet)). The images are files: in the store's bucket, in the cache and in the agent's copy;
 no database holds them, only the catalog's path and sha256 for each.
 
-**How an update runs on the lab's BMCs.** End to end, with no staging: these BMCs report `SoftwareInventory` v1_1_0,
-without `Staged` or `Active` (v1_12_0), and their UpdateService has no `Activate` action, so an image can't be queued
-for a later activation. The rollout pushes the image to `MultipartHttpPushUri` with `@Redfish.OperationApplyTime:
-OnReset` (about a minute for 64 MiB), follows the Task the BMC creates (Running → Completed, 100 %, in 5 s, the BMC
-still up), then activates the image with its own reset step, `Manager.Reset` `GracefulRestart` (the BMC is back in
-about 4.5 minutes), and the post-check confirms the new version runs. `OnReset` rather than `Immediate`, which would
+**How an update runs on the lab's BMCs.** An upload applied at the next reset, then the rollout's own reset, then a
+version check. The rollout pushes the image to `MultipartHttpPushUri` with `@Redfish.OperationApplyTime: OnReset`
+(about a minute for 64 MiB): the BMC keeps it for its next reset, and the Task it creates goes Running → Completed,
+100 %, in 5 s, the BMC still up. The reset step then applies it, `Manager.Reset` `GracefulRestart` (the BMC is back
+in about 4.5 minutes), and the post-check confirms the new version runs. While the image waits for the reset, these
+BMCs don't show it: `SoftwareInventory` v1_1_0 has no `Staged` or `Active` (v1_12_0), so pre-flight's "nothing
+staged" check can't see a waiting image here, and with no `Activate` action the reset is the only way to apply it.
+`OnReset` rather than `Immediate`, which would
 flash and reboot inside the task: the task's `Completed` is recorded before the BMC goes away, and the rollout chooses
 the reset and times the return. bmcweb drops its tasks when it reboots, so with `Immediate` the task's end could not be
 observed.
 
-These BMCs have no JobService, so the Task carries every message of the update. A BMC that schedules the apply tracks it
-as a Job, which pre-flight and the post-check read as they read a Task; no BMC of this fleet exposes one, as iDRAC 8
-keeps its update jobs as Oem `DellJob` resources, which a standard-only tool doesn't read. The same update, resource by
-resource, in production and in the lab:
+These BMCs have no JobService, so the Task carries every message of the update. Jobs are read, not driven: pre-flight
+and the post-check read a BMC's Jobs as they read its Tasks (a failed one blocks, a new failed one fails the
+post-check), but an apply scheduled as a Job, an `Activate` action, a staged image or a switch of A/B banks needs
+support the rollout doesn't have yet. No BMC of this fleet exposes a Job: iDRAC 8 keeps its update jobs as Oem
+`DellJob` resources, which a standard-only tool doesn't read. The same update, resource by resource, in production and
+in the lab, with what isn't built marked:
 
 ![One update as Redfish resources, row by row: production on the left, the lab on the right](docs/update-flow.svg)
 
@@ -395,19 +416,20 @@ another canary. `docker compose -f lab/docker-compose.yaml restart bmc1` clears 
 
 ## Test-driven development
 
-`make test` runs [test_rollout.py](test_rollout.py) in under a second, with no BMC. It tests the decisions that keep a
+`make test` runs [test_rollout.py](test_rollout.py) in about a second, with no BMC. It tests the decisions that keep a
 bad image from spreading, on real Redfish data: the lab BMC as a collect saved it
 ([fixtures/openbmc-gb200.json](fixtures/openbmc-gb200.json)), with one fact changed per case.
 
 | What decides | The cases |
 |---|---|
-| Pre-flight (`check`) | go; a skip when already on the baseline or nothing is approved for the model; a downgrade, or an order nobody can tell, blocked unless `--allow-downgrade` (dotted integers compare as numbers: 2.9 to 2.10 is up); a missing image, a sha256 that doesn't match, an image over `MaxImageSizeBytes`; no way back unless `--accept-no-rollback`; an unreachable BMC, `Updateable` false, a Critical manager or a failed task blocked, a running task skipped |
-| Post-check (`after_checks`) | the target runs; health no worse than before; no new failed task. A task that says `Completed` while the old firmware still runs fails it |
-| Rollback (`run_host`) | a failure before the reset: the old firmware still runs, nothing to roll back; after it: the version that ran before is reinstalled, not the target; a failed rollback, or none possible: `needs_attention` |
+| Pre-flight (`check`) | go; a skip when already on the baseline or nothing is approved for the model; a downgrade, or an order nobody can tell, blocked unless `--allow-downgrade` (dotted integers compare as numbers: 2.9 to 2.10 is up); a missing image, a sha256 that doesn't match, an image over `MaxImageSizeBytes`; no image to reinstall blocked unless `--accept-no-rollback`, even with an A/B bank reported; a reset that restarts the host blocked without a drain; an unreachable BMC, `Updateable` false, a Critical manager or a failed task blocked, a running task skipped |
+| Post-check (`after_checks`) | the target runs; health no worse than before; a manager gone since fails; no new failed task. A task that says `Completed` while the old firmware still runs fails it |
+| One host (`run_host`, `scheduler`) | a failure before the reset: the old firmware still runs, nothing to roll back; after it: the version that ran before is reinstalled, not the target; a failed rollback, or none possible: `needs_attention`; a drain that fails or runs past its timeout fails the host before any update; an undrain that fails: `needs_attention`; a BMC that isn't the one the plan approved is blocked |
+| The frozen plan (`changed_inputs`) | an input file changed or gone since the plan stops the run |
 | The gate (`gate`) | any failure halts the canary and the strict waves; a later wave halts over `halt_at`, exactly `halt_at` passes; a host that failed its soak halts any wave; blocked and skipped hosts were never tried |
-| The ingest gate (`lab/promote-fw-images.sh`) | a package signed with any key but the pinned one, or not signed at all, is refused |
+| The ingest gate (`lab/promote-fw-images.sh`) | a package signed with the pinned key is uploaded and written into the catalog; one without its image's signature, with its image changed after signing, without a required file, signed with another key, or not signed at all, is refused, and nothing reaches the store |
 | The image cache (`image_problems`) | an image fetched from a real HTTP server into the agent's copy and checked; one the cache doesn't have, or bytes that don't match, block, and the bad copy is deleted |
-| The plan, update methods, metrics, the exporter | waves per model and rack; push or pull against what the BMC allows; metrics mid-run; one series per sensor |
+| The plan, update methods, metrics, the exporter | waves per model and rack; canaries keep to the rack limit; push or pull against what the BMC allows; metrics mid-run; one series per sensor |
 
 Only the network is replaced, in `run_host`: the read and the update, which need a BMC. Everything that decides runs as
 it does in a rollout.
@@ -417,8 +439,8 @@ test first: the tests failed (there was no `gate` or `after_checks`), then the c
 `post_check` until they passed. For the code that came before its tests, [mutations.py](mutations.py) (`make mutations`)
 breaks one rule of `rollout.py` at a time the way a careless edit would: a downgrade let through,
 versions compared as text, a sha256 mismatch ignored, the rollback installing the target, the gate halting at exactly
-`halt_at`, an image never fetched from the cache, and 14 more. For each break, the test that guards the rule must
-fail: 20 of 20 do. Its first run found a
+`halt_at`, an image never fetched from the cache, an A/B bank counted as a way back, a host reset with no drain, a
+changed plan run anyway, and 18 more. For each break, the test that guards the rule must fail: 27 of 27 do. Its first run found a
 gap: the strict-wave case had enough failures to halt anyway, so it passed with wave 1 not strict; the case now has 1
 failure in 11 hosts.
 
@@ -433,19 +455,21 @@ test that fails, then the code that makes it pass.
 
 ## Rollout policy
 
-Each site has a `rollout.yaml` next to its inventory and baseline. `plan` and `run` read it, an option overrides one
-value for one run (`--canary`, `--waves`, `--max-per-rack`, `--halt-at`), and the plan and the report record what was
-used. It is reviewed like code: it decides how many hosts a bad image can reach before something stops it.
+Each site has a `rollout.yaml` next to its inventory and baseline. `plan` reads it, an option overrides one value for
+one plan (`--canary`, `--waves`, `--max-per-rack`, `--halt-at`), and the plan and the report record what was used. The
+pipeline's stages run the plan's policy, and refuse a change to it (`--halt-at` with a saved plan, or a `rollout.yaml`
+edited since the plan). It is reviewed like code: it decides how many hosts a bad image can reach before something stops it.
 
 | Setting | [lab](lab/rollout.yaml) | [production](prod/rollout.yaml) | What it does |
 |---|---|---|---|
-| `canary_per_model` | 1 | 1 | Hosts of each hardware model that go first. A bad image is almost always model-specific, so one canary for the whole fleet proves nothing for the other models. Hosts marked `canary: true` in the inventory go first. |
+| `canary_per_model` | 1 | 1 | Hosts of each hardware model that go first. A bad image is almost always model-specific, so one canary for the whole fleet proves nothing for the other models. Hosts marked `canary: true` in the inventory go first, and the canaries keep to `max_per_rack` too, unless every host of a model is in a full rack. |
 | `waves` | 33, 100 | 5, 25, 100 | Cumulative % of the other hosts done after each wave: small while the evidence is thin, bigger once gates have passed. |
-| `max_per_rack` | 2 | 1 | Hosts of one rack in the same wave, at most: a rack never loses more nodes than it can spare. The rest wait for a later wave, so it also caps a wave's size: 1,000 hosts in 100 racks at 1 per rack take 11 waves after the canary (50, then up to 100 each); at 2 per rack, 6. |
+| `max_per_rack` | 2 | 1 | Hosts of one rack in the same wave, at most: a rack never loses more nodes than it can spare. The rest wait for a later wave, so it also caps a wave's size: 1,000 hosts in 100 racks at 1 per rack take 11 waves after the canary (50, then up to 100 each); at 2 per rack, 6. Racks only: limits per PDU, fabric pod or capacity aren't built. |
 | `strict_waves` | 1 | 1 | The first waves after the canary that halt on any failure, as the canary does. |
 | `halt_at` | 10% | 2% | Later waves stop when more than this share of the hosts tried failed. 10% of 1,000 would be 100 broken BMCs. |
 | `max_parallel` | 10 | 50 | Updates running at once within a wave: the BMCs and the image server set the limit. |
-| `soak` | 60 s | 30 min | After a wave, wait, then check its hosts again before the next wave: some faults show only after a while. |
+| `soak` | 60 s | 30 min | After every wave but the last, when none of its hosts failed: wait, then run the post-check again on each host it updated; one that fails now is `needs_attention` and halts the pipeline. Some faults show only after a while. |
+| `drain`, `undrain` | none | a Slurm example, commented | The scheduler's commands, run only for a reset that restarts the host; pre-flight blocks such an update without a drain. The drain must return only once the node is empty: Slurm's `DRAIN` only stops new jobs, so the example waits until `sinfo` says `drained`. A drain past 24 h fails the host. |
 
 With the lab's 10 BMCs in 3 racks: canary 2441 (fw image), wave 1 of 3 (one per rack), wave 2 of 6 (two per rack).
 
@@ -468,7 +492,7 @@ source.
 
 Equipment running production services runs the same tools, the same pipeline and the same six steps with `SITE=prod`; only the inventory, the credentials and the policy change.
 
-Production (**ASUS**, **Dell**, **HPE**, **Gigabyte**, **Supermicro**) is **read-only**: `make collect SITE=prod`, the views (`make health SITE=prod`, `make firmware SITE=prod`...), `make plan SITE=prod`, `make dry-run SITE=prod`, and `exporter-prod`, every 5 minutes. `make update` and `make fault` refuse `SITE=prod`. They read only, plus a Redfish session login and logout. The Supermicro has no row in `prod/baseline.yaml` yet, so the plan skips it as not in the baseline.
+Production (**ASUS**, **Dell**, **HPE**, **Gigabyte**, **Supermicro**) has been used **read-only**: `make collect SITE=prod`, the views (`make health SITE=prod`, `make firmware SITE=prod`...), `make plan SITE=prod`, `make dry-run SITE=prod`, and `exporter-prod`, every 5 minutes. They read only, plus a Redfish session login and logout. `make update` and `make fault` refuse `SITE=prod`, and no production host is marked `writable`. The runner underneath can write: `rollout.py run --yes` updates a host the inventory marks `writable: true`, which is how a change window would run ([To run it](#to-run-it)). The Supermicro has no row in `prod/baseline.yaml` yet, so the plan skips it as not in the baseline.
 
 [prod/inventory.example.yaml](prod/inventory.example.yaml)
 
@@ -493,23 +517,24 @@ How a production rollout is built, from the whole fleet down to one host:
 2. **One component per pipeline**, in rollout order: the BMC first (it carries the other updates), then BIOS, then the
    rest. The baseline says the target per hardware model, and the catalog has the image for each.
 3. **Group by what fails together.** The canary covers every hardware model the update touches, because firmware
-   faults follow the model. Each wave spreads across racks, PDUs and InfiniBand pods, with at most `max_per_rack`
-   hosts of one rack in a wave, so no rack or pod loses more capacity than it can spare. Idle and spare nodes go
-   first; the scheduler drains busy ones (`--drain`) before a reset that restarts the host.
+   faults follow the model. Each wave spreads across racks, with at most `max_per_rack` hosts of one rack in a wave,
+   so no rack loses more capacity than it can spare; PDUs and InfiniBand pods need the same limit, which isn't built.
+   Idle and spare nodes go first; the scheduler drains busy ones before a reset that restarts the host.
 4. **Waves that grow, gates that start strict**, as [the rollout](#how-the-rollout-works) does everywhere, with
    production's policy: canary, then 5%, 25% and the rest; the first wave strict, later ones halting over 2%; 30
    minutes of soak between waves.
 5. **Evidence.** The plan, the run records and the report in `prod/runs/` are the change's record: `report.json` for
    the services that track fleet state, the report for the people who approve the next ring.
 
-To run it:
+### To run it
 
 - **Accounts**: keep the poller on a ReadOnly role. Give the rollout its own account whose role can update firmware
   and reset the BMC (`ConfigureComponents` and `ConfigureManager`, Administrator on most BMCs).
 - **Scope**: mark hosts `writable: true` only for the change window, give each its `rack`, and mark a few
   representative spare hosts per model `canary: true`.
-- **Drain**: pass the scheduler's commands, e.g. `--drain "scontrol update NodeName={node} State=DRAIN Reason=firmware"`
-  and `--undrain "scontrol update NodeName={node} State=RESUME"`. They run only when the reset restarts the host.
+- **Drain**: set `drain` and `undrain` in `prod/rollout.yaml`, the scheduler's commands with `{node}`; the file has
+  a Slurm example. The drain must wait until the node is empty, not just stop new jobs. Without it, pre-flight
+  blocks every update whose reset restarts the host (BIOS, system firmware); a BMC update needs none.
 - **Images**: the vendor packages in `prod/images.yaml` with their sha256, and the packages of the versions running
   now, so every host has a way back. Serve them from the site's HTTPS cache and set `IMAGE_CACHE` to its address, as
   the lab does: `images.yaml`'s files become paths in it, and the rollout fetches, checks and pushes each one. A BMC
@@ -518,12 +543,22 @@ To run it:
   doesn't allow.
 - **Run**: `make dry-run SITE=prod` is the dry run. The update itself, once hosts are `writable`, is
   `SITE=prod YES=1 ./pipeline.sh "Manager (BMC)"` with `prod/.env` exported, from an admin host: the Makefile never writes
-  to production.
+  to production. The plan is the approval: its stages refuse to run when an input file changed since, and block a host
+  whose BMC isn't the one the plan read.
 
 ---
 ## Not built yet
-- Rolling back by switching to the other A/B bank (a host that would need it stays drained as
-  `needs_attention`).
+- **Other update flows**: switching to the other A/B bank as a rollback (pre-flight doesn't count a bank as a way
+  back), an `Activate` action, a staged image, an apply scheduled as a Job. The rollout uses an upload applied at
+  reset, its own reset, and a reinstall of the version before as the way back.
+- **Durable orchestration**: a lock per host, so two rollouts never touch one; picking up a stopped run where it
+  was, after a crash; resolving a request whose answer was lost (an update the BMC may or may not have taken). The run
+  records say what happened, but nothing resumes from them: a stopped pipeline is planned and run again, and
+  pre-flight skips the hosts already on the target. In production this is the workflow engine and the rollout state
+  database ([below](#a-production-system---scaling-for-a-large-fleet)).
+- **Limits beyond racks**: per PDU, fabric pod or remaining capacity.
+- **Pull integrity**: a pulled image is never seen by the agent, so its sha256 isn't checked against the catalog;
+  it relies on the URL pointing at the store's copy, which never changes, and the BMC's own signature check.
 - Rolling out ring by ring or region by region.
 
 ### A production system - scaling for a large fleet
@@ -563,7 +598,8 @@ downloads:
 | | Pull: `SimpleUpdate` | Push: `MultipartHttpPushUri` |
 |---|---|---|
 | Who downloads the image | the BMC, from the cache URL the site agent hands it | the site agent, from the same cache |
-| Checked before it is flashed | its sha256 when it was promoted; the vendor's signature by the BMC | its sha256 by the agent, against the catalog, before it pushes; the signature by the BMC |
+| Checked before it is flashed | its sha256 when it was promoted; the vendor's signature by the BMC. Nothing compares what the BMC downloads with the catalog | its sha256 by the agent, against the catalog, before it pushes; the signature by the BMC |
+| What keeps it the approved image | the URL: a path in the store under the image's sha256, which never serves other bytes | the agent's check: a copy that doesn't match is deleted, never pushed |
 | The path | cache → BMC | cache → agent → BMC |
 | For | a BMC that allows the URL's protocol and target | a BMC that can't pull, like the lab's GB200 build |
 
@@ -594,10 +630,10 @@ How this repository maps onto it:
 | Inventory / CMDB | `inventory.yaml`; the poller's snapshots are the observed versions, and `make firmware SITE=prod` shows drift from the baseline | generate the inventory from NetBox or Nautobot |
 | Rollout API and CLI | the `make` targets and `pipeline.sh`; `YES=1` is the approval | an approval between the canary and wave 1 |
 | Workflow engine | `pipeline.sh`'s stages and `rollout.py run`: waves, gates, soak | a service that resumes a stopped rollout |
-| Rollout state DB | `<site>/runs/*.jsonl`: every step's intent before it and result after it; `report.json` | PostgreSQL, with host locks and the gate as a query |
+| Rollout state DB | `<site>/runs/*.jsonl`: every step's intent before it and result after it; `report.json`. A record: no host locks, no resume | PostgreSQL, with host locks and the gate as a query |
 | Engine store | none: a rerun plans again, and pre-flight skips the hosts already on the target | the engine's own |
 | Site agent | `rollout.py run` on an admin host | one per site |
-| Scheduler | the `--drain` and `--undrain` commands | the same |
+| Scheduler | `drain` and `undrain` in the site's `rollout.yaml`; the drain waits until the node is empty | the same |
 | Secrets | `prod/.env` and `observability/grafana/.grafana.env`, git-ignored | Vault, short-lived credentials |
 | Observability | the report: terminal, HTML and `report.json`; an exporter per site with every BMC's telemetry, health and firmware, the rollout's metrics pushed live, and Grafana dashboards in a folder per site ([Observability](#observability)) | paging the on-call on a halt or a host left for a person; an exporter and a Pushgateway in each site; Redfish `EventService` subscriptions, so a fault arrives in seconds rather than at the next read |
 

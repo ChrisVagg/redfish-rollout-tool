@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # The second half of the lab's firmware ingest, after download-fw-images.sh: promotes OpenBMC update packages into the
-# store. First the gate: the RSA-SHA256 signature of every signed file in a package (its MANIFEST, its key and each
-# image) must verify with the key pinned here, lab/openbmc-dev.pub, never with the key the package carries, which anyone
-# could replace together with the image. A package that fails stops it, before the store. The pinned key is OpenBMC's
-# development key, whose private half is in OpenBMC's public source tree: it proves a package is unchanged since its
-# build, not who built it. In production the pinned key is the vendor's. A package that passes is uploaded into the
+# store. First the gate: a package must hold its MANIFEST, its key (publickey) and its image (image-bmc), each with an
+# RSA-SHA256 signature, and every signature in it must verify with the key pinned in lab/openbmc-dev.pub, never with
+# the key the package carries, which anyone could replace together with the image. A package that fails stops it, before
+# the store. The pinned key is OpenBMC's development key, and its private half is public in OpenBMC's source tree, so
+# anyone can sign a modified package with it: in the lab the gate shows how verification works, it doesn't protect.
+# Production pins the vendor's key, whose private half the vendor keeps secret. A package that passes is uploaded into the
 # store's bucket firmware, as images/<its name>, and its download deleted: the store holds the only copy. Then, from the
 # verified packages, it writes:
 #   lab/images.yaml    the catalog: each package's path in the store and its sha256
@@ -24,6 +25,9 @@ while read -r package; do  # oldest build first
   name=${package##*/}
   dir=$(mktemp -d -p "$work")  # each package in a folder of its own
   tar -xf "$package" -C "$dir"
+  for f in MANIFEST publickey image-bmc; do  # each required, and signed: a signed MANIFEST doesn't sign the image
+    [ -f "$dir/$f" ] && [ -f "$dir/$f.sig" ] || { echo "$package: $f or its signature $f.sig is missing" >&2; exit 1; }
+  done
   signed=0
   for sig in "$dir"/*.sig; do
     file=${sig%.sig}
@@ -32,7 +36,6 @@ while read -r package; do  # oldest build first
       { echo "$package: ${file##*/}: its signature doesn't verify with ${key##*/}" >&2; exit 1; }
     signed=$((signed + 1))
   done
-  [ -f "$dir/MANIFEST.sig" ] && [ "$signed" -ge 2 ] || { echo "$package: not signed" >&2; exit 1; }
   echo "$name: $signed signatures verified with ${key##*/}"
 
   store sh -c "cat > /tmp/$name && weed filer.copy /tmp/$name http://127.0.0.1:8888/buckets/firmware/images/ \

@@ -34,7 +34,7 @@ Every target runs on the lab unless SITE=prod: the real fleet in prod/, which is
 
 Setup
   make setup               create venv/ and install requirements.txt
-  make test                the rollout's decisions on recorded Redfish data, in under a second, no BMC needed
+  make test                the rollout's decisions on recorded Redfish data, in about a second, no BMC needed
   make mutations           break each safety rule of rollout.py, in a copy: each break must fail a test
 
 Lab: 10 emulated OpenBMC BMCs, QEMU in Docker, on 127.0.0.1:2441-2450, and their HTTPS image cache on :8443

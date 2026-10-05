@@ -1,4 +1,4 @@
-<svg viewBox="0 0 900 660" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="One firmware update as Redfish resources, in production and in the lab, row by row. rollout.py, the site agent, takes every image from the site's cache and checks its sha256. It hands the image to the UpdateService: in production by a push to MultipartHttpPushUri or a pull with SimpleUpdate, with an OperationApplyTime; in the lab by a multipart push only, OnReset, as bmcweb offers no SimpleUpdate and no Activate. The UpdateService answers 202 Accepted with a Task: in production the Task follows the transfer and the image's checks with TaskState, PercentComplete and Messages; in the lab Task 0 goes from Running at 0 percent to Completed at 100 percent in 5 seconds, with the messages TaskStarted and TaskCompletedOK. In production a scheduled apply becomes a Job in the JobService, Scheduled to Completed with its own messages; no BMC of this fleet exposes one, and iDRAC 8 keeps its update jobs as Oem DellJob resources. The lab has no JobService: the Task carries every message. In production the new image waits in the SoftwareInventory as Staged while the running one is Active, an A/B bank being a way back without a reflash; the lab's SoftwareInventory v1_1_0 reports one image with no Staged or Active, so the rollback reinstalls the version before. Activation is an Activate action or a reset, Manager.Reset or ComputerSystem.Reset, the host drained first when it restarts; in the lab it is the rollout's own reset step, Manager.Reset GracefulRestart, and the host keeps running. In both, the post-check reads the BMC again: the target version runs, health is no worse, no new Task or Job failed, otherwise the rollout rolls back.">
+<svg viewBox="0 0 900 660" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="One firmware update as Redfish resources, in production and in the lab, row by row. rollout.py, the site agent, takes every image from the site's cache, and checks the sha256 of one it pushes; a pulled one the BMC fetches itself. It hands the image to the UpdateService: in production by a push to MultipartHttpPushUri or a pull with SimpleUpdate, with an OperationApplyTime; in the lab by a multipart push only, OnReset, as bmcweb offers no SimpleUpdate and no Activate. The UpdateService answers 202 Accepted with a Task: in production the Task follows the transfer and the image's checks with TaskState, PercentComplete and Messages; in the lab Task 0 goes from Running at 0 percent to Completed at 100 percent in 5 seconds, with the messages TaskStarted and TaskCompletedOK. In production a scheduled apply becomes a Job in the JobService, Scheduled to Completed with its own messages; no BMC of this fleet exposes one, and iDRAC 8 keeps its update jobs as Oem DellJob resources. The lab has no JobService: the Task carries every message. In production the new image waits in the SoftwareInventory as Staged while the running one is Active, and an A/B bank could be a way back without a reflash; the rollout reads Jobs in its checks, but doesn't drive a Job-scheduled apply, an Activate action or a switch of banks yet; the lab's SoftwareInventory v1_1_0 reports one image with no Staged or Active, so the rollback reinstalls the version before. Activation is an Activate action or a reset, Manager.Reset or ComputerSystem.Reset, the host drained first when it restarts; in the lab it is the rollout's own reset step, Manager.Reset GracefulRestart, and the host keeps running. In both, the post-check reads the BMC again: the target version runs, health is no worse, no new Task or Job failed, otherwise the rollout rolls back.">
   <style>
     .rfu text { font-family: var(--mono, monospace); }
     .rfu .bg { fill: var(--bg-deep, #050708); }
@@ -27,7 +27,7 @@
     <text class="band hi" x="20" y="24">THE UPDATE AS REDFISH RESOURCES · PRODUCTION AND THE LAB</text>
 
     <text class="name hi" x="305" y="50" text-anchor="middle">Production · the standard's flow</text>
-    <text class="sub" x="305" y="64" text-anchor="middle">what the rollout handles, as each BMC offers it</text>
+    <text class="sub" x="305" y="64" text-anchor="middle">what the standard offers · the rollout: push, pull, Task, reset</text>
     <text class="name hi" x="695" y="50" text-anchor="middle">Lab · OpenBMC GB200 NVL, bmcweb</text>
     <text class="sub" x="695" y="64" text-anchor="middle">what the ten emulated BMCs offer</text>
 
@@ -43,7 +43,7 @@
     <!-- the site agent, the same in both -->
     <rect class="box" x="120" y="76" width="760" height="40" rx="8"/>
     <text class="name" x="500" y="93" text-anchor="middle">rollout.py, the site agent</text>
-    <text class="sub" x="500" y="107" text-anchor="middle">every image from the site's cache, its sha256 checked before it goes out</text>
+    <text class="sub" x="500" y="107" text-anchor="middle">every image from the site's cache · a pushed one's sha256 checked before it goes out</text>
 
     <!-- production -->
     <path class="wire flow" d="M305 116V146" marker-end="url(#rfu-teal)"/>
@@ -66,17 +66,17 @@
     <rect class="box" x="120" y="330" width="370" height="52" rx="8"/>
     <text class="name" x="305" y="350" text-anchor="middle">Job · JobService</text>
     <text class="sub" x="305" y="365" text-anchor="middle">JobState: Scheduled → Completed, its Messages</text>
-    <text class="sub" x="305" y="377" text-anchor="middle">this fleet: none; iDRAC 8's jobs are Oem</text>
+    <text class="sub" x="305" y="377" text-anchor="middle">read by the checks · a Job apply isn't built</text>
 
     <path class="wire flow" d="M305 382V416" marker-end="url(#rfu-teal)"/>
     <text class="lbl" x="313" y="403">the image waits, Staged</text>
     <rect class="box" x="120" y="420" width="370" height="52" rx="8"/>
     <text class="name" x="305" y="440" text-anchor="middle">SoftwareInventory</text>
     <text class="sub" x="305" y="455" text-anchor="middle">the new image Staged, the running one Active</text>
-    <text class="sub" x="305" y="467" text-anchor="middle">an A/B bank: a way back without a reflash</text>
+    <text class="sub" x="305" y="467" text-anchor="middle">an A/B bank · switching to it isn't built</text>
 
     <path class="wire flow" d="M305 472V506" marker-end="url(#rfu-teal)"/>
-    <text class="lbl" x="313" y="493">Activate, or a reset</text>
+    <text class="lbl" x="313" y="493">a reset · Activate isn't built</text>
     <rect class="box" x="120" y="510" width="370" height="52" rx="8"/>
     <text class="name" x="305" y="530" text-anchor="middle">Manager · ComputerSystem</text>
     <text class="sub" x="305" y="545" text-anchor="middle">#Manager.Reset or #ComputerSystem.Reset</text>
@@ -102,7 +102,7 @@
     <text class="sub" x="695" y="287" text-anchor="middle">TaskStarted · TaskCompletedOK</text>
 
     <path class="wire flow" d="M530 292V416" marker-end="url(#rfu-teal)"/>
-    <text class="lbl" x="538" y="313">Completed: the image is written</text>
+    <text class="lbl" x="538" y="313">Completed: uploaded, applied at the reset</text>
     <g class="none">
       <rect class="box" x="550" y="330" width="330" height="52" rx="8"/>
       <text class="name" x="715" y="352" text-anchor="middle">No JobService</text>
