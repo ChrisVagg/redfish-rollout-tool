@@ -222,6 +222,31 @@ What the exporter does differently from a one-off `collect`, because it never st
   and a beat scheduler for one periodic read; durable, resumable jobs, like a rollout, belong to the workflow engine
   of [a production system](#a-production-system---scaling-for-a-large-fleet).
 
+### The production fleet in Grafana
+ The fleet manager shows which BMCs answer, their health, equipment and firmware, and how each component can be updated. 
+The host dashboard shows host in full: its firmware, the health of every component, and every reading
+against its thresholds.
+
+![Prod · Fleet manager](docs/grafana/prod/fleet.png)
+
+<details><summary>More of the fleet manager</summary>
+
+![Prod · Fleet manager: firmware and the readings nearest their thresholds](docs/grafana/prod/fleets-details-2.png)
+
+![Prod · Fleet manager: what is not OK, and crawl times](docs/grafana/prod/fleet-details-1.png)
+
+</details>
+
+![Prod · Host: a Supermicro SYS-221H-TNR](docs/grafana/prod/supermicro.png)
+
+<details><summary>More of the host</summary>
+
+![Prod · Host: thermal and power](docs/grafana/prod/supermicro-details.png)
+
+![Prod · Host: the BMC and its Redfish service](docs/grafana/prod/supermicro-details-2.png)
+
+</details>
+
 ## Bad updates
 
 `make fault SCENARIO=<name>` runs the real pipeline to the build the lab doesn't run, with faults
