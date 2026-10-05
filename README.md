@@ -222,10 +222,45 @@ What the exporter does differently from a one-off `collect`, because it never st
   and a beat scheduler for one periodic read; durable, resumable jobs, like a rollout, belong to the workflow engine
   of [a production system](#a-production-system---scaling-for-a-large-fleet).
 
+### The lab in Grafana
+
+The Lab folder over six hours: the ten emulated BMCs, all answering and healthy, read every 10 seconds. The fleet
+manager and the host dashboard show what they show for production, here with the BMC's own CPU, memory and storage,
+which OpenBMC reports; the pipeline dashboard follows two real rollouts, one where every gate passed and one where the
+canary failed its post-check (the `unhealthy` fault), was rolled back, and the gate halted the pipeline.
+
+#### Fleet manager
+
+![Lab · Fleet manager](docs/grafana/lab/fleet.png)
+
+<details><summary>More of the fleet manager</summary>
+
+![Lab · Fleet manager: the BMCs' memory, storage and crawl times](docs/grafana/lab/fleet-1.png)
+
+</details>
+
+#### Host
+
+![Lab · Host: one emulated BMC](docs/grafana/lab/host.png)
+
+<details><summary>More of the host</summary>
+
+![Lab · Host: the BMC's CPU, memory, storage and Redfish service](docs/grafana/lab/host-details-1.png)
+
+</details>
+
+#### Pipeline
+
+![Lab · Pipeline: every gate passed](docs/grafana/lab/pipeline-pass.png)
+
+![Lab · Pipeline: the canary rolled back, the pipeline halted](docs/grafana/lab/pipeline-rollback.png)
+
 ### The production fleet in Grafana
  The fleet manager shows which BMCs answer, their health, equipment and firmware, and how each component can be updated. 
 The host dashboard shows host in full: its firmware, the health of every component, and every reading
 against its thresholds.
+
+#### Fleet manager
 
 ![Prod · Fleet manager](docs/grafana/prod/fleet.png)
 
@@ -236,6 +271,8 @@ against its thresholds.
 ![Prod · Fleet manager: what is not OK, and crawl times](docs/grafana/prod/fleet-details-1.png)
 
 </details>
+
+#### Host
 
 ![Prod · Host: a Supermicro SYS-221H-TNR](docs/grafana/prod/supermicro.png)
 
