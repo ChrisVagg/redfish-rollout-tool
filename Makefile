@@ -2,7 +2,7 @@
 #   poller.py       reads the resources each BMC's Redfish service exposes: health, firmware, inventory, telemetry
 #   rollout.py      updates firmware: pre-flight, a canary, then waves, each after a gate (pipeline.sh runs the stages)
 #   lab/            10 emulated OpenBMC BMCs, QEMU in Docker: the only BMCs the rollout updates
-#   observability/  exporter-lab, exporter-prod, Pushgateway, Prometheus and Grafana, in Docker
+#   observability/  exporter-lab, exporter-prod, Pushgateway, Loki, Prometheus and Grafana, in Docker
 # Every target runs on the lab unless SITE=prod: the real fleet in prod/, read-only.
 
 SITE      ?= lab
@@ -15,9 +15,9 @@ MONITOR   := docker compose -f observability/docker-compose.yaml
 FIRMWARE   = $(or $(COMPONENT),Manager (BMC))
 
 ifeq ($(SITE),lab)
-  # OpenBMC's public default account; the rollout pushes its metrics to the Pushgateway
+  # OpenBMC's public default account; the rollout pushes its metrics to the Pushgateway and its events to Loki
   ENV       := SITE=lab LAB_USERNAME=root LAB_PASSWORD=0penBmc PUSHGATEWAY=http://127.0.0.1:9091 \
-               IMAGE_CACHE=https://127.0.0.1:8443
+               LOKI=http://127.0.0.1:3100 IMAGE_CACHE=https://127.0.0.1:8443
   # pre-flight can't put OpenBMC versions in order, so the lab allows either direction
   PLAN_ARGS := --allow-downgrade
 else ifeq ($(SITE),prod)
@@ -63,7 +63,7 @@ Rollout: firmware updates, a canary first, then waves, each after a gate
   make watch               follow a running update from a second terminal
   make fault SCENARIO=...  a bad update on the lab: silent-fail, unhealthy, rejected, bad-checksum, no-return, hybrid
 
-Observability: exporter-lab, exporter-prod, Pushgateway, Prometheus and Grafana, in Docker
+Observability: exporter-lab, exporter-prod, Pushgateway, Loki, Prometheus and Grafana, in Docker
   make monitor-up          start them; Grafana on http://127.0.0.1:3000 (account: observability/grafana/.grafana.env)
   make monitor-logs        follow the exporters' logs
   make monitor-down        stop them; their data stays in volumes

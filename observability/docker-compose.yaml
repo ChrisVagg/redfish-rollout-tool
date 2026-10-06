@@ -1,12 +1,9 @@
-# Monitoring for both sites, on this machine's network, every service listening on 127.0.0.1 only:
-#   exporter-lab   poller.py exporter on the lab BMCs, every 10 s                        127.0.0.1:9101
-#   exporter-prod  the same on the real fleet, every 5 min: read-only, one session per BMC  127.0.0.1:9102
-#                  (prod/inventory.yaml and prod/.env; without an inventory it reads nothing and stays up)
-#   pushgateway    where rollout.py run pushes each run's metrics (PUSHGATEWAY)          127.0.0.1:9091
-#   prometheus     scrapes them, keeps 15 days                                          127.0.0.1:9090
-#   grafana        a Lab and a Prod folder: Fleet manager, Host and Pipeline; admin only,  127.0.0.1:3000
-#                  the account from grafana/.grafana.env
-# Host network: the exporters reach the lab BMCs on 127.0.0.1 and the fleet the way this machine does.
+#   exporter-lab   poller.py 
+#   exporter-prod  poller.py 
+#   pushgateway    where rollout.py run pushes each run's metrics
+#   prometheus     scrapes them                                       
+#   loki           where rollout.py run sends every event of its run record 
+#   grafana        
 name: redfish-observability
 x-exporter: &exporter
   build: {context: .., dockerfile: observability/Dockerfile}
@@ -36,6 +33,12 @@ services:
     command: [--config.file=/etc/prometheus/prometheus.yml, --storage.tsdb.path=/prometheus,
               --web.listen-address=127.0.0.1:9090]
     volumes: ["./prometheus.yml:/etc/prometheus/prometheus.yml:ro", "prometheus:/prometheus"]
+  loki:
+    image: grafana/loki:3.7.8
+    restart: unless-stopped
+    network_mode: host
+    command: [-config.file=/etc/loki/loki.yaml]
+    volumes: ["./loki/loki.yaml:/etc/loki/loki.yaml:ro", "loki:/loki"]
   grafana:
     image: grafana/grafana:13.2.3
     restart: unless-stopped
@@ -48,4 +51,5 @@ services:
               "grafana:/var/lib/grafana"]
 volumes:
   prometheus:
+  loki:
   grafana:

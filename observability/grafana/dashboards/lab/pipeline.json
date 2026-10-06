@@ -1,11 +1,11 @@
 {
  "uid": "lab-pipeline",
  "title": "Lab · Pipeline",
- "description": "A rollout as rollout.py run pushes it: hosts by wave and state, versions, steps, checks and gates",
+ "description": "A firmware rollout as rollout.py run reports it: the run, the verdict, host counts, gates and wave progress, every host's evidence step by step, checks and recovery, the decision log; then one host's events, the timeline and timing, errors",
  "schemaVersion": 39,
  "editable": false,
  "time": {
-  "from": "now-1h",
+  "from": "now-30m",
   "to": "now"
  },
  "refresh": "5s",
@@ -27,51 +27,92 @@
  ],
  "panels": [
   {
+   "transparent": false,
    "type": "stat",
-   "title": "Hosts by state",
-   "gridPos": {
-    "x": 0,
-    "y": 0,
-    "w": 12,
-    "h": 5
+   "title": "Run",
+   "description": "The latest stage's start: the site, the component, the target and the update's OperationApplyTime, OnReset: the image waits for the rollout's own reset",
+   "datasource": {
+    "type": "loki",
+    "uid": "loki"
    },
    "targets": [
     {
      "datasource": {
-      "type": "prometheus",
-      "uid": "prometheus"
+      "type": "loki",
+      "uid": "loki"
      },
-     "expr": "sum by (state) (rollout_hosts{site=\"$site\",pipeline=\"$pipeline\"})",
-     "legendFormat": "{{state}}",
+     "expr": "{job=\"rollout\",site=\"$site\"} | json | pipeline=\"$pipeline\" | step=\"run\" | state=\"start\"",
+     "queryType": "range",
      "refId": "A",
-     "instant": false,
-     "range": true
+     "maxLines": 1
     }
    ],
-   "datasource": {
-    "type": "prometheus",
-    "uid": "prometheus"
+   "transformations": [
+    {
+     "id": "extractFields",
+     "options": {
+      "source": "labels",
+      "format": "auto",
+      "replace": false
+     }
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "noValue": "-",
+     "color": {
+      "mode": "fixed",
+      "fixedColor": "#a4adbc"
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "#a4adbc",
+        "value": null
+       }
+      ]
+     }
+    },
+    "overrides": []
    },
-   "id": 1,
    "options": {
     "reduceOptions": {
      "calcs": [
       "lastNotNull"
-     ]
+     ],
+     "values": false,
+     "fields": "/^(component|target|apply_time)$/"
     },
     "textMode": "value_and_name",
-    "colorMode": "none"
+    "colorMode": "none",
+    "graphMode": "none",
+    "justifyMode": "center",
+    "text": {
+     "titleSize": 12,
+     "valueSize": 17
+    },
+    "wideLayout": true,
+    "showPercentChange": false
    },
-   "transparent": true
+   "id": 1,
+   "gridPos": {
+    "x": 0,
+    "y": 0,
+    "w": 15,
+    "h": 3
+   },
+   "timeFrom": "15d",
+   "hideTimeOverride": true
   },
   {
+   "transparent": false,
    "type": "stat",
-   "title": "Gate after each wave",
-   "gridPos": {
-    "x": 12,
-    "y": 0,
-    "w": 12,
-    "h": 5
+   "title": "Elapsed",
+   "description": "From each stage's first event to its last, the stages added up",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
    },
    "targets": [
     {
@@ -79,18 +120,143 @@
       "type": "prometheus",
       "uid": "prometheus"
      },
-     "expr": "max by (wave) (rollout_gate_halted{site=\"$site\",pipeline=\"$pipeline\"})",
-     "legendFormat": "{{wave}}",
+     "expr": "sum(rollout_seconds{site=\"$site\",pipeline=\"$pipeline\"})",
+     "legendFormat": "",
      "refId": "A",
-     "instant": false,
-     "range": true
+     "instant": true,
+     "range": false
     }
    ],
+   "fieldConfig": {
+    "defaults": {
+     "noValue": "-",
+     "unit": "s",
+     "color": {
+      "mode": "fixed",
+      "fixedColor": "#a4adbc"
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "#a4adbc",
+        "value": null
+       }
+      ]
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "values": false
+    },
+    "textMode": "value",
+    "colorMode": "none",
+    "graphMode": "none",
+    "justifyMode": "center",
+    "wideLayout": true,
+    "showPercentChange": false
+   },
+   "id": 2,
+   "gridPos": {
+    "x": 15,
+    "y": 0,
+    "w": 4,
+    "h": 3
+   }
+  },
+  {
+   "transparent": false,
+   "type": "stat",
+   "title": "Last event",
+   "description": "How fresh this is: a running pipeline writes an event every few seconds",
+   "datasource": {
+    "type": "loki",
+    "uid": "loki"
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "expr": "{job=\"rollout\",site=\"$site\"} | json | pipeline=\"$pipeline\"",
+     "queryType": "range",
+     "refId": "A",
+     "maxLines": 1
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "noValue": "-",
+     "unit": "dateTimeFromNow",
+     "color": {
+      "mode": "fixed",
+      "fixedColor": "#a4adbc"
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "#a4adbc",
+        "value": null
+       }
+      ]
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "values": false,
+     "fields": "/^Time$/"
+    },
+    "textMode": "value",
+    "colorMode": "none",
+    "graphMode": "none",
+    "justifyMode": "center",
+    "wideLayout": true,
+    "showPercentChange": false
+   },
+   "id": 3,
+   "gridPos": {
+    "x": 19,
+    "y": 0,
+    "w": 5,
+    "h": 3
+   },
+   "timeFrom": "15d",
+   "hideTimeOverride": true
+  },
+  {
+   "transparent": false,
+   "type": "stat",
+   "title": "Result",
+   "description": "HALTED: a gate stopped the pipeline. RUNNING: a stage runs. PASSED: every gate passed",
    "datasource": {
     "type": "prometheus",
     "uid": "prometheus"
    },
-   "id": 2,
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "(max(rollout_gate_halted{site=\"$site\",pipeline=\"$pipeline\"}) * 2 or vector(0)) + (max(rollout_running{site=\"$site\",pipeline=\"$pipeline\"}) or vector(0))",
+     "legendFormat": "",
+     "refId": "A",
+     "instant": true,
+     "range": false
+    }
+   ],
    "fieldConfig": {
     "defaults": {
      "mappings": [
@@ -98,21 +264,40 @@
        "type": "value",
        "options": {
         "0": {
-         "text": "passed",
-         "color": "green",
+         "text": "PASSED",
+         "color": "#559f77",
          "index": 0
         },
         "1": {
-         "text": "HALTED",
-         "color": "red",
+         "text": "RUNNING",
+         "color": "#5989b7",
          "index": 1
+        },
+        "2": {
+         "text": "HALTED",
+         "color": "#bb626d",
+         "index": 2
+        },
+        "3": {
+         "text": "HALTED",
+         "color": "#bb626d",
+         "index": 3
         }
        }
       }
      ],
+     "noValue": "0",
      "color": {
-      "mode": "fixed",
-      "fixedColor": "green"
+      "mode": "thresholds"
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "#a4adbc",
+        "value": null
+       }
+      ]
      }
     },
     "overrides": []
@@ -121,21 +306,118 @@
     "reduceOptions": {
      "calcs": [
       "lastNotNull"
-     ]
+     ],
+     "values": false
     },
-    "textMode": "value_and_name",
-    "colorMode": "background"
+    "textMode": "value",
+    "colorMode": "background",
+    "graphMode": "none",
+    "justifyMode": "center",
+    "wideLayout": true,
+    "showPercentChange": false
    },
-   "transparent": true
-  },
-  {
-   "type": "timeseries",
-   "title": "Hosts by state over the run",
+   "id": 4,
    "gridPos": {
     "x": 0,
-    "y": 5,
-    "w": 12,
-    "h": 8
+    "y": 3,
+    "w": 5,
+    "h": 4
+   }
+  },
+  {
+   "transparent": false,
+   "type": "stat",
+   "title": "How it ended: the latest stage",
+   "description": "A gate's decision in words: which wave, how many of its hosts failed. The hosts that need a person, with their next step, are in Host evidence below",
+   "datasource": {
+    "type": "loki",
+    "uid": "loki"
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "expr": "{job=\"rollout\",site=\"$site\"} | json | pipeline=\"$pipeline\" | step=\"run\" | state=\"end\" | line_format \"{{.stage}} stage: {{.detail}}\"",
+     "queryType": "range",
+     "refId": "A",
+     "maxLines": 1
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "mappings": [
+      {
+       "type": "regex",
+       "options": {
+        "pattern": ".*halted.*",
+        "result": {
+         "color": "#bb626d",
+         "index": 0
+        }
+       }
+      },
+      {
+       "type": "regex",
+       "options": {
+        "pattern": ".*every wave done.*",
+        "result": {
+         "color": "#559f77",
+         "index": 1
+        }
+       }
+      }
+     ],
+     "noValue": "No stage end in Loki: still running, or it ran before Loki",
+     "color": {
+      "mode": "thresholds"
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "#a4adbc",
+        "value": null
+       }
+      ]
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "values": false,
+     "fields": "/^Line$/"
+    },
+    "textMode": "value",
+    "colorMode": "background",
+    "graphMode": "none",
+    "justifyMode": "center",
+    "wideLayout": true,
+    "showPercentChange": false
+   },
+   "id": 5,
+   "gridPos": {
+    "x": 5,
+    "y": 3,
+    "w": 19,
+    "h": 4
+   },
+   "timeFrom": "15d",
+   "hideTimeOverride": true
+  },
+  {
+   "transparent": false,
+   "type": "stat",
+   "title": "Updated and verified",
+   "description": "The target runs and the post-check passed",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
    },
    "targets": [
     {
@@ -143,53 +425,1846 @@
       "type": "prometheus",
       "uid": "prometheus"
      },
-     "expr": "sum by (state) (rollout_hosts{site=\"$site\",pipeline=\"$pipeline\"})",
-     "legendFormat": "{{state}}",
+     "expr": "sum(rollout_hosts{site=\"$site\",pipeline=\"$pipeline\",state=\"updated\"}) or vector(0)",
+     "legendFormat": "updated",
      "refId": "A",
-     "instant": false,
-     "range": true
+     "instant": true,
+     "range": false
+    },
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "max(rollout_planned_hosts{site=\"$site\",pipeline=\"$pipeline\"}) or sum(rollout_hosts{site=\"$site\",pipeline=\"$pipeline\"})",
+     "legendFormat": "of planned",
+     "refId": "B",
+     "instant": true,
+     "range": false
     }
    ],
-   "datasource": {
-    "type": "prometheus",
-    "uid": "prometheus"
-   },
-   "id": 3,
    "fieldConfig": {
     "defaults": {
-     "custom": {
-      "lineWidth": 1,
-      "fillOpacity": 0,
-      "spanNulls": false,
-      "showPoints": "never"
+     "noValue": "0",
+     "color": {
+      "mode": "fixed",
+      "fixedColor": "#559f77"
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "#a4adbc",
+        "value": null
+       }
+      ]
      }
     },
     "overrides": []
    },
    "options": {
-    "legend": {
-     "displayMode": "table",
-     "placement": "right",
+    "reduceOptions": {
      "calcs": [
       "lastNotNull"
      ],
-     "showLegend": true
+     "values": false
     },
-    "tooltip": {
-     "mode": "multi",
-     "sort": "desc"
-    }
+    "textMode": "value_and_name",
+    "colorMode": "value",
+    "graphMode": "none",
+    "justifyMode": "center",
+    "wideLayout": true,
+    "showPercentChange": false
    },
-   "transparent": true
+   "id": 6,
+   "gridPos": {
+    "x": 0,
+    "y": 7,
+    "w": 5,
+    "h": 4
+   }
   },
   {
+   "transparent": false,
+   "type": "stat",
+   "title": "Rolled back · failed",
+   "description": "Rolled back: the post-check failed, the version before is back and verified. Failed: the update failed before the reset, the old firmware still runs",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "sum(rollout_hosts{site=\"$site\",pipeline=\"$pipeline\",state=\"rolled_back\"}) or vector(0)",
+     "legendFormat": "rolled back",
+     "refId": "A",
+     "instant": true,
+     "range": false
+    },
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "sum(rollout_hosts{site=\"$site\",pipeline=\"$pipeline\",state=\"failed\"}) or vector(0)",
+     "legendFormat": "failed",
+     "refId": "B",
+     "instant": true,
+     "range": false
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "noValue": "0",
+     "color": {
+      "mode": "fixed",
+      "fixedColor": "#b67b38"
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "#a4adbc",
+        "value": null
+       }
+      ]
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "values": false
+    },
+    "textMode": "value_and_name",
+    "colorMode": "value",
+    "graphMode": "none",
+    "justifyMode": "center",
+    "wideLayout": true,
+    "showPercentChange": false
+   },
+   "id": 7,
+   "gridPos": {
+    "x": 5,
+    "y": 7,
+    "w": 5,
+    "h": 4
+   }
+  },
+  {
+   "transparent": false,
+   "type": "stat",
+   "title": "Needs a person · blocked",
+   "description": "Needs attention: no verified outcome, left drained. Blocked: pre-flight refused it",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "sum(rollout_hosts{site=\"$site\",pipeline=\"$pipeline\",state=\"needs_attention\"}) or vector(0)",
+     "legendFormat": "needs attention",
+     "refId": "A",
+     "instant": true,
+     "range": false
+    },
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "sum(rollout_hosts{site=\"$site\",pipeline=\"$pipeline\",state=\"blocked\"}) or vector(0)",
+     "legendFormat": "blocked",
+     "refId": "B",
+     "instant": true,
+     "range": false
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "noValue": "0",
+     "color": {
+      "mode": "fixed",
+      "fixedColor": "#bb626d"
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "#a4adbc",
+        "value": null
+       }
+      ]
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "values": false
+    },
+    "textMode": "value_and_name",
+    "colorMode": "value",
+    "graphMode": "none",
+    "justifyMode": "center",
+    "wideLayout": true,
+    "showPercentChange": false
+   },
+   "id": 8,
+   "gridPos": {
+    "x": 10,
+    "y": 7,
+    "w": 5,
+    "h": 4
+   }
+  },
+  {
+   "transparent": false,
+   "type": "stat",
+   "title": "Running · not started",
+   "description": "Not started: its wave hasn't run, or a gate halted before it, the waves of a halted canary too",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "sum(rollout_hosts{site=\"$site\",pipeline=\"$pipeline\",state=\"running\"}) or vector(0)",
+     "legendFormat": "running",
+     "refId": "A",
+     "instant": true,
+     "range": false
+    },
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "(max(rollout_planned_hosts{site=\"$site\",pipeline=\"$pipeline\"}) - sum(rollout_hosts{site=\"$site\",pipeline=\"$pipeline\"}) or vector(0)) + (sum(rollout_hosts{site=\"$site\",pipeline=\"$pipeline\",state=\"untouched\"}) or vector(0))",
+     "legendFormat": "not started",
+     "refId": "B",
+     "instant": true,
+     "range": false
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "noValue": "0",
+     "color": {
+      "mode": "fixed",
+      "fixedColor": "#5989b7"
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "#a4adbc",
+        "value": null
+       }
+      ]
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "values": false
+    },
+    "textMode": "value_and_name",
+    "colorMode": "value",
+    "graphMode": "none",
+    "justifyMode": "center",
+    "wideLayout": true,
+    "showPercentChange": false
+   },
+   "id": 9,
+   "gridPos": {
+    "x": 15,
+    "y": 7,
+    "w": 5,
+    "h": 4
+   }
+  },
+  {
+   "transparent": false,
+   "type": "stat",
+   "title": "Still drained",
+   "description": "Hosts out of service: drained for a reset and not given back. A BMC update drains nothing",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "sum(rollout_hosts_drained{site=\"$site\",pipeline=\"$pipeline\"}) or vector(0)",
+     "legendFormat": "",
+     "refId": "A",
+     "instant": true,
+     "range": false
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "mappings": [
+      {
+       "type": "value",
+       "options": {
+        "0": {
+         "color": "#559f77",
+         "index": 0
+        }
+       }
+      }
+     ],
+     "noValue": "0",
+     "color": {
+      "mode": "fixed",
+      "fixedColor": "#b67b38"
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "#a4adbc",
+        "value": null
+       }
+      ]
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "values": false
+    },
+    "textMode": "value",
+    "colorMode": "value",
+    "graphMode": "none",
+    "justifyMode": "center",
+    "wideLayout": true,
+    "showPercentChange": false
+   },
+   "id": 10,
+   "gridPos": {
+    "x": 20,
+    "y": 7,
+    "w": 4,
+    "h": 4
+   }
+  },
+  {
+   "transparent": false,
+   "type": "stat",
+   "title": "Plan: the policy it used",
+   "description": "The plan stage reads every BMC live, pre-flights it, and puts the hosts that pass into the canary and waves by the site's rollout.yaml: this policy. Every later stage runs this plan",
+   "datasource": {
+    "type": "loki",
+    "uid": "loki"
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "expr": "{job=\"rollout\",site=\"$site\"} | json | pipeline=\"$pipeline\" | step=\"plan\" | host=\"-\"",
+     "queryType": "range",
+     "refId": "A",
+     "maxLines": 1
+    }
+   ],
+   "transformations": [
+    {
+     "id": "extractFields",
+     "options": {
+      "source": "labels",
+      "format": "auto",
+      "replace": false
+     }
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "noValue": "No plan in Loki for this pipeline",
+     "color": {
+      "mode": "fixed",
+      "fixedColor": "#a4adbc"
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "#a4adbc",
+        "value": null
+       }
+      ]
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "values": false,
+     "fields": "/^detail$/"
+    },
+    "textMode": "value",
+    "colorMode": "none",
+    "graphMode": "none",
+    "justifyMode": "center",
+    "text": {
+     "valueSize": 16
+    },
+    "wideLayout": true,
+    "showPercentChange": false
+   },
+   "id": 11,
+   "gridPos": {
+    "x": 0,
+    "y": 11,
+    "w": 24,
+    "h": 3
+   },
+   "timeFrom": "15d",
+   "hideTimeOverride": true
+  },
+  {
+   "transparent": false,
+   "type": "table",
+   "title": "Plan: every host's pre-flight, its wave, and how it would be rolled back",
+   "datasource": {
+    "type": "loki",
+    "uid": "loki"
+   },
+   "description": "The plan's pre-flight verdict per host: go, into the canary or a wave; skip, nothing to do now; block, a person has to look, with the reasons. Then how its component's update activates, which reset and whether the host restarts (then it is drained first), and the rollback the rollout carries out if the post-check fails: a reinstall of the version it runs now, from the catalog's package. none: no way back, so pre-flight blocks it unless --accept-no-rollback",
+   "targets": [
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "expr": "{job=\"rollout\",site=\"$site\"} | json | pipeline=\"$pipeline\" | step=\"plan\" | host!=\"-\" | label_format rollback=`{{regexReplaceAll \"^reinstall .* from (images/)?\" .rollback \"reinstall \"}}`",
+     "queryType": "range",
+     "refId": "A",
+     "maxLines": 1000
+    }
+   ],
+   "transformations": [
+    {
+     "id": "extractFields",
+     "options": {
+      "source": "labels",
+      "format": "auto",
+      "replace": false
+     }
+    },
+    {
+     "id": "filterFieldsByName",
+     "options": {
+      "include": {
+       "names": [
+        "wave",
+        "host",
+        "state",
+        "running",
+        "target",
+        "activation",
+        "host_restarts",
+        "rollback",
+        "detail"
+       ]
+      }
+     }
+    },
+    {
+     "id": "organize",
+     "options": {
+      "indexByName": {
+       "wave": 0,
+       "host": 1,
+       "state": 2,
+       "running": 3,
+       "target": 4,
+       "activation": 5,
+       "host_restarts": 6,
+       "rollback": 7,
+       "detail": 8
+      },
+      "renameByName": {
+       "state": "verdict",
+       "running": "runs now",
+       "activation": "activation",
+       "host_restarts": "host restarts",
+       "rollback": "rollback if it fails",
+       "detail": "reasons"
+      }
+     }
+    },
+    {
+     "id": "sortBy",
+     "options": {
+      "sort": [
+       {
+        "field": "host",
+        "desc": false
+       }
+      ]
+     }
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "noValue": "-"
+    },
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "host"
+      },
+      "properties": [
+       {
+        "id": "links",
+        "value": [
+         {
+          "title": "Its every event in this run",
+          "url": "/d/lab-pipeline?${pipeline:queryparam}&var-host=${__value.raw}&viewPanel=panel-19&${__url_time_range}"
+         },
+         {
+          "title": "The host's dashboard",
+          "url": "/d/lab-host?var-host=${__value.raw}&${__url_time_range}"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "wave"
+      },
+      "properties": [
+       {
+        "id": "custom.width",
+        "value": 75
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "host"
+      },
+      "properties": [
+       {
+        "id": "custom.width",
+        "value": 125
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "verdict"
+      },
+      "properties": [
+       {
+        "id": "custom.width",
+        "value": 75
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "activation"
+      },
+      "properties": [
+       {
+        "id": "custom.width",
+        "value": 220
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "host restarts"
+      },
+      "properties": [
+       {
+        "id": "custom.width",
+        "value": 140
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "host restarts"
+      },
+      "properties": [
+       {
+        "id": "mappings",
+        "value": [
+         {
+          "type": "value",
+          "options": {
+           "false": {
+            "text": "no: the BMC alone",
+            "index": 0
+           },
+           "true": {
+            "text": "yes: drained first",
+            "index": 1
+           }
+          }
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "verdict"
+      },
+      "properties": [
+       {
+        "id": "mappings",
+        "value": [
+         {
+          "type": "value",
+          "options": {
+           "go": {
+            "color": "#559f77",
+            "index": 0
+           },
+           "skip": {
+            "color": "#b67b38",
+            "index": 1
+           },
+           "block": {
+            "color": "#bb626d",
+            "index": 2
+           }
+          }
+         }
+        ]
+       },
+       {
+        "id": "custom.cellOptions",
+        "value": {
+         "type": "color-text"
+        }
+       }
+      ]
+     }
+    ]
+   },
+   "options": {
+    "showHeader": true,
+    "cellHeight": "sm"
+   },
+   "id": 12,
+   "gridPos": {
+    "x": 0,
+    "y": 14,
+    "w": 24,
+    "h": 12
+   },
+   "timeFrom": "15d",
+   "hideTimeOverride": true
+  },
+  {
+   "transparent": false,
+   "type": "table",
+   "title": "Gates: the canary, then each wave",
+   "datasource": {
+    "type": "loki",
+    "uid": "loki"
+   },
+   "description": "The canary and the strict waves halt on any failure; a later wave over its halt_at; a host that failed its soak halts any wave",
+   "targets": [
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "expr": "{job=\"rollout\",site=\"$site\"} | json | pipeline=\"$pipeline\" | step=\"gate\"",
+     "queryType": "range",
+     "refId": "A",
+     "maxLines": 1000
+    }
+   ],
+   "transformations": [
+    {
+     "id": "extractFields",
+     "options": {
+      "source": "labels",
+      "format": "auto",
+      "replace": false
+     }
+    },
+    {
+     "id": "filterFieldsByName",
+     "options": {
+      "include": {
+       "names": [
+        "wave",
+        "state",
+        "failed",
+        "tried",
+        "limit",
+        "strict",
+        "soak_failed"
+       ]
+      }
+     }
+    },
+    {
+     "id": "organize",
+     "options": {
+      "indexByName": {
+       "wave": 0,
+       "state": 1,
+       "failed": 2,
+       "tried": 3,
+       "limit": 4,
+       "strict": 5,
+       "soak_failed": 6
+      },
+      "renameByName": {
+       "state": "gate",
+       "failed": "failed",
+       "tried": "of tried so far",
+       "limit": "halt over",
+       "strict": "strict",
+       "soak_failed": "soak failures"
+      }
+     }
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "noValue": "-"
+    },
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "gate"
+      },
+      "properties": [
+       {
+        "id": "mappings",
+        "value": [
+         {
+          "type": "value",
+          "options": {
+           "passed": {
+            "color": "#559f77",
+            "index": 0
+           },
+           "halted": {
+            "color": "#bb626d",
+            "index": 1
+           }
+          }
+         }
+        ]
+       },
+       {
+        "id": "custom.cellOptions",
+        "value": {
+         "type": "color-text"
+        }
+       }
+      ]
+     }
+    ]
+   },
+   "options": {
+    "showHeader": true,
+    "cellHeight": "sm",
+    "sortBy": [
+     {
+      "displayName": "wave",
+      "desc": false
+     }
+    ]
+   },
+   "id": 13,
+   "gridPos": {
+    "x": 0,
+    "y": 26,
+    "w": 11,
+    "h": 7
+   },
+   "timeFrom": "15d",
+   "hideTimeOverride": true
+  },
+  {
+   "transparent": false,
+   "type": "barchart",
+   "title": "Wave progress",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "description": "Every host of each wave by how it ended or where it is; the canary first",
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "sum by (wave, state) (rollout_hosts{site=\"$site\",pipeline=\"$pipeline\"})",
+     "legendFormat": "",
+     "refId": "A",
+     "instant": true,
+     "range": false,
+     "format": "table"
+    }
+   ],
+   "transformations": [
+    {
+     "id": "groupingToMatrix",
+     "options": {
+      "columnField": "state",
+      "rowField": "wave",
+      "valueField": "Value",
+      "emptyValue": "null"
+     }
+    },
+    {
+     "id": "organize",
+     "options": {
+      "renameByName": {
+       "wave\\state": "wave"
+      }
+     }
+    },
+    {
+     "id": "sortBy",
+     "options": {
+      "sort": [
+       {
+        "field": "wave",
+        "desc": false
+       }
+      ]
+     }
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "fillOpacity": 90,
+      "lineWidth": 0
+     },
+     "color": {
+      "mode": "fixed"
+     }
+    },
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "updated"
+      },
+      "properties": [
+       {
+        "id": "color",
+        "value": {
+         "mode": "fixed",
+         "fixedColor": "#559f77"
+        }
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "rolled_back"
+      },
+      "properties": [
+       {
+        "id": "color",
+        "value": {
+         "mode": "fixed",
+         "fixedColor": "#b67b38"
+        }
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "failed"
+      },
+      "properties": [
+       {
+        "id": "color",
+        "value": {
+         "mode": "fixed",
+         "fixedColor": "#bb626d"
+        }
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "needs_attention"
+      },
+      "properties": [
+       {
+        "id": "color",
+        "value": {
+         "mode": "fixed",
+         "fixedColor": "#8f2d3a"
+        }
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "blocked"
+      },
+      "properties": [
+       {
+        "id": "color",
+        "value": {
+         "mode": "fixed",
+         "fixedColor": "#7d5a2b"
+        }
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "running"
+      },
+      "properties": [
+       {
+        "id": "color",
+        "value": {
+         "mode": "fixed",
+         "fixedColor": "#5989b7"
+        }
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "untouched"
+      },
+      "properties": [
+       {
+        "id": "color",
+        "value": {
+         "mode": "fixed",
+         "fixedColor": "#39414f"
+        }
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "skipped"
+      },
+      "properties": [
+       {
+        "id": "color",
+        "value": {
+         "mode": "fixed",
+         "fixedColor": "#39414f"
+        }
+       }
+      ]
+     }
+    ]
+   },
+   "options": {
+    "orientation": "horizontal",
+    "stacking": "normal",
+    "xField": "wave",
+    "showValue": "never",
+    "barWidth": 0.6,
+    "groupWidth": 0.7,
+    "legend": {
+     "showLegend": true,
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi"
+    },
+    "xTickLabelRotation": 0
+   },
+   "id": 14,
+   "gridPos": {
+    "x": 11,
+    "y": 26,
+    "w": 13,
+    "h": 7
+   }
+  },
+  {
+   "transparent": false,
+   "type": "table",
+   "title": "Host evidence: each host, step by step",
+   "description": "One row per host of the plan, canary first: its versions before and after, then each step's outcome with its detail (the update's last Task message, how long the reset took, a check that failed), and how it ended. A host's link opens its every event, or its own dashboard",
+   "datasource": {
+    "type": "datasource",
+    "uid": "-- Mixed --"
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "rollout_host_info{site=\"$site\",pipeline=\"$pipeline\"}",
+     "legendFormat": "",
+     "refId": "A",
+     "instant": true,
+     "range": false,
+     "format": "table"
+    },
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "expr": "{job=\"rollout\",site=\"$site\"} | json | pipeline=\"$pipeline\" | host!=\"-\" | step!=\"pre-flight check\" | state!=\"start\" | state!=\"task\" | json reasons_text=\"reasons\" | line_format \"{{.state}}{{if .detail}}{{if eq .step \\\"update\\\" \\\"rollback update\\\" \\\"reset\\\" \\\"rollback reset\\\"}} · {{regexReplaceAll \\\"TaskEvent.1.0.|: The task.*|BMC back after \\\" .detail \\\"\\\"}}{{else if eq .step \\\"rollback\\\" \\\"done\\\"}} · {{.detail}}{{end}}{{end}}{{if and .reasons_text (ne .reasons_text \\\"[]\\\")}} · {{.reasons_text}}{{end}}\" | label_format step=`{{if eq .step \"pre-flight\"}}1 pre-flight{{else if eq .step \"drain\"}}2 drain{{else if eq .step \"update\"}}3 update{{else if eq .step \"reset\"}}4 reset{{else if eq .step \"post-check\"}}5 post-check{{else if eq .step \"rollback\"}}5 rollback{{else if eq .step \"rollback update\"}}5 rollback · update{{else if eq .step \"rollback reset\"}}5 rollback · reset{{else if eq .step \"rollback post-check\"}}5 rollback · post-check{{else if eq .step \"undrain\"}}6 undrain{{else if eq .step \"soak\"}}after the wave · soak{{else if eq .step \"done\"}}end · outcome{{else}}{{.step}}{{end}}`",
+     "queryType": "range",
+     "refId": "B",
+     "maxLines": 1000
+    }
+   ],
+   "transformations": [
+    {
+     "id": "extractFields",
+     "options": {
+      "source": "labels",
+      "format": "auto",
+      "replace": false
+     },
+     "filter": {
+      "id": "byRefId",
+      "options": "B"
+     }
+    },
+    {
+     "id": "groupingToMatrix",
+     "options": {
+      "columnField": "step",
+      "rowField": "host",
+      "valueField": "Line"
+     },
+     "filter": {
+      "id": "byRefId",
+      "options": "B"
+     }
+    },
+    {
+     "id": "organize",
+     "options": {
+      "renameByName": {
+       "host\\step": "host"
+      }
+     }
+    },
+    {
+     "id": "joinByField",
+     "options": {
+      "byField": "host",
+      "mode": "outer"
+     }
+    },
+    {
+     "id": "filterFieldsByName",
+     "options": {
+      "include": {
+       "names": [
+        "host",
+        "wave",
+        "before",
+        "after",
+        "1 pre-flight",
+        "2 drain",
+        "3 update",
+        "4 reset",
+        "5 post-check",
+        "5 rollback",
+        "6 undrain",
+        "after the wave · soak",
+        "end · outcome"
+       ]
+      }
+     }
+    },
+    {
+     "id": "organize",
+     "options": {
+      "indexByName": {
+       "host": 0,
+       "wave": 1,
+       "before": 2,
+       "after": 3,
+       "1 pre-flight": 4,
+       "2 drain": 5,
+       "3 update": 6,
+       "4 reset": 7,
+       "5 post-check": 8,
+       "5 rollback": 9,
+       "6 undrain": 10,
+       "after the wave · soak": 11,
+       "end · outcome": 12
+      },
+      "renameByName": {
+       "end · outcome": "outcome",
+       "after the wave · soak": "soak",
+       "3 update": "3 update (Task)"
+      }
+     }
+    },
+    {
+     "id": "sortBy",
+     "options": {
+      "sort": [
+       {
+        "field": "host",
+        "desc": false
+       }
+      ]
+     }
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "noValue": "-",
+     "mappings": [
+      {
+       "type": "regex",
+       "options": {
+        "pattern": "^(skipped|untouched).*",
+        "result": {
+         "color": "#a4adbc",
+         "index": 0
+        }
+       }
+      },
+      {
+       "type": "regex",
+       "options": {
+        "pattern": "^(passed|Completed|go|done|updated|Enabled).*",
+        "result": {
+         "color": "#559f77",
+         "index": 1
+        }
+       }
+      },
+      {
+       "type": "regex",
+       "options": {
+        "pattern": "^(failed|Exception|block|needs_attention|halted|incomplete).*",
+        "result": {
+         "color": "#bb626d",
+         "index": 2
+        }
+       }
+      },
+      {
+       "type": "regex",
+       "options": {
+        "pattern": "^(rolled_back|skip|blocked).*",
+        "result": {
+         "color": "#b67b38",
+         "index": 3
+        }
+       }
+      },
+      {
+       "type": "regex",
+       "options": {
+        "pattern": "^(running|start|task).*",
+        "result": {
+         "color": "#5989b7",
+         "index": 4
+        }
+       }
+      }
+     ],
+     "custom": {
+      "cellOptions": {
+       "type": "color-text"
+      },
+      "inspect": true
+     }
+    },
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "host"
+      },
+      "properties": [
+       {
+        "id": "links",
+        "value": [
+         {
+          "title": "Its every event in this run",
+          "url": "/d/lab-pipeline?${pipeline:queryparam}&var-host=${__value.raw}&viewPanel=panel-19&${__url_time_range}"
+         },
+         {
+          "title": "The host's dashboard",
+          "url": "/d/lab-host?var-host=${__value.raw}&${__url_time_range}"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "host"
+      },
+      "properties": [
+       {
+        "id": "custom.width",
+        "value": 125
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "wave"
+      },
+      "properties": [
+       {
+        "id": "custom.width",
+        "value": 75
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "before"
+      },
+      "properties": [
+       {
+        "id": "custom.width",
+        "value": 150
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "after"
+      },
+      "properties": [
+       {
+        "id": "custom.width",
+        "value": 150
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "1 pre-flight"
+      },
+      "properties": [
+       {
+        "id": "custom.width",
+        "value": 100
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "2 drain"
+      },
+      "properties": [
+       {
+        "id": "custom.width",
+        "value": 75
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "3 update (Task)"
+      },
+      "properties": [
+       {
+        "id": "custom.width",
+        "value": 190
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "4 reset"
+      },
+      "properties": [
+       {
+        "id": "custom.width",
+        "value": 95
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "5 post-check"
+      },
+      "properties": [
+       {
+        "id": "custom.width",
+        "value": 105
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "soak"
+      },
+      "properties": [
+       {
+        "id": "custom.width",
+        "value": 80
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "5 rollback"
+      },
+      "properties": [
+       {
+        "id": "custom.width",
+        "value": 170
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "6 undrain"
+      },
+      "properties": [
+       {
+        "id": "custom.width",
+        "value": 85
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "outcome"
+      },
+      "properties": [
+       {
+        "id": "custom.cellOptions",
+        "value": {
+         "type": "color-text",
+         "wrapText": true
+        }
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byRegexp",
+       "options": "^(host|wave|before|after)$"
+      },
+      "properties": [
+       {
+        "id": "custom.cellOptions",
+        "value": {
+         "type": "auto"
+        }
+       },
+       {
+        "id": "mappings",
+        "value": []
+       }
+      ]
+     }
+    ]
+   },
+   "options": {
+    "showHeader": true,
+    "cellHeight": "sm"
+   },
+   "id": 15,
+   "gridPos": {
+    "x": 0,
+    "y": 33,
+    "w": 24,
+    "h": 12
+   },
+   "timeFrom": "15d",
+   "hideTimeOverride": true
+  },
+  {
+   "transparent": false,
+   "type": "table",
+   "title": "Checks and recovery: hosts per step and outcome",
+   "datasource": {
+    "type": "loki",
+    "uid": "loki"
+   },
+   "description": "How many hosts each step passed or failed, in the order a host goes through them: 1 pre-flight again on a fresh read, 2 drain, 3 update, 4 reset, 5 post-check and, when it fails, the rollback, 6 undrain; then the soak after the wave, and how each host ended",
+   "targets": [
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "expr": "sum by (step, state) (count_over_time({job=\"rollout\",site=\"$site\"} | json | pipeline=\"$pipeline\" | host!=\"-\" | state!=\"start\" | state!=\"task\" | step=~\"pre-flight|drain|update|reset|post-check|soak|rollback.*|undrain|done\" | label_format step=`{{if eq .step \"pre-flight\"}}1 pre-flight{{else if eq .step \"drain\"}}2 drain{{else if eq .step \"update\"}}3 update{{else if eq .step \"reset\"}}4 reset{{else if eq .step \"post-check\"}}5 post-check{{else if eq .step \"rollback\"}}5 rollback{{else if eq .step \"rollback update\"}}5 rollback · update{{else if eq .step \"rollback reset\"}}5 rollback · reset{{else if eq .step \"rollback post-check\"}}5 rollback · post-check{{else if eq .step \"undrain\"}}6 undrain{{else if eq .step \"soak\"}}after the wave · soak{{else if eq .step \"done\"}}end · outcome{{else}}{{.step}}{{end}}` [$__range]))",
+     "queryType": "instant",
+     "refId": "A",
+     "maxLines": 1000,
+     "legendFormat": "",
+     "format": "table"
+    }
+   ],
+   "transformations": [
+    {
+     "id": "labelsToFields",
+     "options": {
+      "mode": "columns"
+     }
+    },
+    {
+     "id": "merge",
+     "options": {}
+    },
+    {
+     "id": "organize",
+     "options": {
+      "renameByName": {
+       "Value #A": "Value"
+      }
+     }
+    },
+    {
+     "id": "groupingToMatrix",
+     "options": {
+      "columnField": "state",
+      "rowField": "step",
+      "valueField": "Value"
+     }
+    },
+    {
+     "id": "organize",
+     "options": {
+      "renameByName": {
+       "step\\state": "step"
+      },
+      "indexByName": {
+       "step\\state": 0
+      }
+     }
+    },
+    {
+     "id": "sortBy",
+     "options": {
+      "sort": [
+       {
+        "field": "step",
+        "desc": false
+       }
+      ]
+     }
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "noValue": "-"
+    },
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byRegexp",
+       "options": "^(passed|go|done|Completed|updated)$"
+      },
+      "properties": [
+       {
+        "id": "color",
+        "value": {
+         "mode": "fixed",
+         "fixedColor": "#559f77"
+        }
+       },
+       {
+        "id": "custom.cellOptions",
+        "value": {
+         "type": "color-text"
+        }
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byRegexp",
+       "options": "^(failed|Exception|block|needs_attention)$"
+      },
+      "properties": [
+       {
+        "id": "color",
+        "value": {
+         "mode": "fixed",
+         "fixedColor": "#bb626d"
+        }
+       },
+       {
+        "id": "custom.cellOptions",
+        "value": {
+         "type": "color-text"
+        }
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byRegexp",
+       "options": "^(rolled_back|skip)$"
+      },
+      "properties": [
+       {
+        "id": "color",
+        "value": {
+         "mode": "fixed",
+         "fixedColor": "#b67b38"
+        }
+       },
+       {
+        "id": "custom.cellOptions",
+        "value": {
+         "type": "color-text"
+        }
+       }
+      ]
+     }
+    ]
+   },
+   "options": {
+    "showHeader": true,
+    "cellHeight": "sm"
+   },
+   "id": 16,
+   "gridPos": {
+    "x": 0,
+    "y": 45,
+    "w": 11,
+    "h": 9
+   },
+   "timeFrom": "15d",
+   "hideTimeOverride": true
+  },
+  {
+   "transparent": false,
+   "type": "logs",
+   "title": "Decision log",
+   "datasource": {
+    "type": "loki",
+    "uid": "loki"
+   },
+   "description": "The plan saved, each stage's start and end, each gate, and how each host ended, newest first",
+   "targets": [
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "expr": "{job=\"rollout\",site=\"$site\"} | json | pipeline=\"$pipeline\" | step=~\"run|gate|done\" or (step=\"plan\" and host=\"-\") | line_format \"{{.stage}} · {{.step}} {{.state}}{{if .wave}} · {{.wave}}{{end}}{{if ne .host \\\"-\\\"}} · {{.host}}{{end}}{{if .detail}} · {{.detail}}{{end}}\"",
+     "queryType": "range",
+     "refId": "A",
+     "maxLines": 1000
+    }
+   ],
+   "options": {
+    "showTime": true,
+    "showLabels": false,
+    "showCommonLabels": false,
+    "wrapLogMessage": true,
+    "prettifyLogMessage": false,
+    "enableLogDetails": true,
+    "dedupStrategy": "none",
+    "sortOrder": "Descending"
+   },
+   "id": 17,
+   "gridPos": {
+    "x": 11,
+    "y": 45,
+    "w": 13,
+    "h": 9
+   },
+   "timeFrom": "15d",
+   "hideTimeOverride": true
+  },
+  {
+   "type": "row",
+   "title": "One host: every event of the run",
+   "id": 18,
+   "collapsed": false,
+   "panels": [],
+   "gridPos": {
+    "x": 0,
+    "y": 54,
+    "w": 24,
+    "h": 1
+   }
+  },
+  {
+   "transparent": false,
+   "type": "logs",
+   "title": "$host: every event, oldest first",
+   "datasource": {
+    "type": "loki",
+    "uid": "loki"
+   },
+   "description": "The run record of one host: pre-flight's checks, the update's method, OperationApplyTime and every Task message, the reset, the post-check's checks, a rollback. Pick the host above, or follow a host's link in Host evidence",
+   "targets": [
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "expr": "{job=\"rollout\",site=\"$site\"} | json | pipeline=\"$pipeline\" | host=\"$host\" | step!=\"pre-flight check\"",
+     "queryType": "range",
+     "refId": "A",
+     "maxLines": 1000,
+     "direction": "forward"
+    }
+   ],
+   "options": {
+    "showTime": true,
+    "showLabels": false,
+    "showCommonLabels": false,
+    "wrapLogMessage": true,
+    "prettifyLogMessage": true,
+    "enableLogDetails": true,
+    "dedupStrategy": "none",
+    "sortOrder": "Ascending"
+   },
+   "id": 19,
+   "gridPos": {
+    "x": 0,
+    "y": 55,
+    "w": 24,
+    "h": 13
+   },
+   "timeFrom": "15d",
+   "hideTimeOverride": true
+  },
+  {
+   "type": "row",
+   "title": "Timeline and timing",
+   "id": 20,
+   "collapsed": false,
+   "panels": [],
+   "gridPos": {
+    "x": 0,
+    "y": 68,
+    "w": 24,
+    "h": 1
+   }
+  },
+  {
+   "transparent": false,
+   "type": "state-timeline",
+   "title": "Every host, step by step",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "description": "The step each host is in while it runs, then how it ended",
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "max by (host, wave) (rollout_host_step{site=\"$site\",pipeline=\"$pipeline\"})",
+     "legendFormat": "{{wave}} · {{host}}",
+     "refId": "A",
+     "instant": false,
+     "range": true
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "mappings": [
+      {
+       "type": "value",
+       "options": {
+        "0": {
+         "text": "not started",
+         "color": "transparent",
+         "index": 0
+        },
+        "1": {
+         "text": "pre-flight",
+         "color": "#8ab8ff",
+         "index": 1
+        },
+        "2": {
+         "text": "drain",
+         "color": "#7ea7d8",
+         "index": 2
+        },
+        "3": {
+         "text": "update",
+         "color": "#5989b7",
+         "index": 3
+        },
+        "4": {
+         "text": "reset",
+         "color": "#c9a13b",
+         "index": 4
+        },
+        "5": {
+         "text": "post-check",
+         "color": "#8f7cc9",
+         "index": 5
+        },
+        "6": {
+         "text": "rollback",
+         "color": "#b67b38",
+         "index": 6
+        },
+        "7": {
+         "text": "undrain",
+         "color": "#7ea7d8",
+         "index": 7
+        },
+        "10": {
+         "text": "updated",
+         "color": "#559f77",
+         "index": 8
+        },
+        "11": {
+         "text": "rolled back",
+         "color": "#b67b38",
+         "index": 9
+        },
+        "12": {
+         "text": "failed",
+         "color": "#bb626d",
+         "index": 10
+        },
+        "13": {
+         "text": "needs attention",
+         "color": "#8f2d3a",
+         "index": 11
+        },
+        "14": {
+         "text": "blocked",
+         "color": "#7d5a2b",
+         "index": 12
+        },
+        "15": {
+         "text": "skipped",
+         "color": "#39414f",
+         "index": 13
+        },
+        "16": {
+         "text": "incomplete",
+         "color": "#8f2d3a",
+         "index": 14
+        }
+       }
+      }
+     ],
+     "color": {
+      "mode": "fixed",
+      "fixedColor": "transparent"
+     },
+     "custom": {
+      "fillOpacity": 85,
+      "lineWidth": 0
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "showValue": "auto",
+    "mergeValues": true,
+    "rowHeight": 0.85,
+    "alignValue": "center",
+    "legend": {
+     "showLegend": true,
+     "displayMode": "list",
+     "placement": "bottom"
+    }
+   },
+   "id": 21,
+   "gridPos": {
+    "x": 0,
+    "y": 69,
+    "w": 24,
+    "h": 9
+   }
+  },
+  {
+   "transparent": true,
    "type": "state-timeline",
    "title": "The pipeline's BMCs answering Redfish",
    "gridPos": {
-    "x": 12,
-    "y": 5,
-    "w": 12,
-    "h": 8
+    "x": 0,
+    "y": 78,
+    "w": 24,
+    "h": 7
    },
    "targets": [
     {
@@ -208,7 +2283,7 @@
     "type": "prometheus",
     "uid": "prometheus"
    },
-   "id": 4,
+   "id": 22,
    "fieldConfig": {
     "defaults": {
      "mappings": [
@@ -255,82 +2330,17 @@
      "showLegend": false
     }
    },
-   "description": "From the site's exporter: each reset after a flash is a gap",
-   "transparent": true
+   "description": "From the site's exporter: each reset after a flash is a gap"
   },
   {
-   "type": "table",
-   "title": "Hosts: versions before, target and after",
-   "gridPos": {
-    "x": 0,
-    "y": 13,
-    "w": 24,
-    "h": 9
-   },
-   "targets": [
-    {
-     "datasource": {
-      "type": "prometheus",
-      "uid": "prometheus"
-     },
-     "expr": "rollout_host_info{site=\"$site\",pipeline=\"$pipeline\"}",
-     "legendFormat": "",
-     "refId": "A",
-     "instant": true,
-     "range": false,
-     "format": "table"
-    }
-   ],
-   "datasource": {
-    "type": "prometheus",
-    "uid": "prometheus"
-   },
-   "id": 5,
-   "transformations": [
-    {
-     "id": "organize",
-     "options": {
-      "excludeByName": {
-       "Time": true,
-       "__name__": true,
-       "job": true,
-       "instance": true,
-       "site": true,
-       "pipeline": true,
-       "Value": true
-      },
-      "renameByName": {},
-      "indexByName": {
-       "wave": 0,
-       "host": 1,
-       "state": 2,
-       "before": 3,
-       "target": 4,
-       "after": 5,
-       "stage": 6
-      }
-     }
-    }
-   ],
-   "fieldConfig": {
-    "defaults": {},
-    "overrides": []
-   },
-   "options": {
-    "showHeader": true,
-    "cellHeight": "sm",
-    "sortBy": []
-   },
-   "transparent": true
-  },
-  {
+   "transparent": true,
    "type": "bargauge",
    "title": "Longest step, seconds",
    "gridPos": {
     "x": 0,
-    "y": 22,
+    "y": 85,
     "w": 12,
-    "h": 9
+    "h": 8
    },
    "targets": [
     {
@@ -341,33 +2351,388 @@
      "expr": "max by (step) (rollout_step_seconds{site=\"$site\",pipeline=\"$pipeline\"})",
      "legendFormat": "{{step}}",
      "refId": "A",
-     "instant": false,
-     "range": true
+     "instant": true,
+     "range": false
     }
    ],
    "datasource": {
     "type": "prometheus",
     "uid": "prometheus"
    },
-   "id": 6,
+   "id": 23,
    "options": {
     "orientation": "horizontal",
     "reduceOptions": {
      "calcs": [
       "lastNotNull"
      ]
+    },
+    "displayMode": "basic",
+    "namePlacement": "left",
+    "valueMode": "text",
+    "sizing": "manual",
+    "minVizHeight": 14,
+    "maxVizHeight": 18,
+    "text": {
+     "titleSize": 12,
+     "valueSize": 12
     }
    },
-   "transparent": true
+   "fieldConfig": {
+    "defaults": {
+     "min": 0,
+     "unit": "s",
+     "color": {
+      "mode": "thresholds"
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "#559f77",
+        "value": null
+       },
+       {
+        "color": "#b67b38",
+        "value": 300
+       },
+       {
+        "color": "#bb626d",
+        "value": 600
+       }
+      ]
+     }
+    },
+    "overrides": []
+   }
   },
   {
+   "transparent": false,
+   "type": "bargauge",
+   "title": "Reset: seconds until each BMC answered again",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "description": "A build that boots slower than the others shows here before any check fails",
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "max by (host) (rollout_step_seconds{site=\"$site\",pipeline=\"$pipeline\",step=\"reset\"})",
+     "legendFormat": "{{host}}",
+     "refId": "A",
+     "instant": true,
+     "range": false
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "min": 0,
+     "unit": "s",
+     "color": {
+      "mode": "thresholds"
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "#559f77",
+        "value": null
+       },
+       {
+        "color": "#b67b38",
+        "value": 300
+       },
+       {
+        "color": "#bb626d",
+        "value": 600
+       }
+      ]
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "orientation": "horizontal",
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ]
+    },
+    "displayMode": "basic",
+    "namePlacement": "left",
+    "valueMode": "text",
+    "sizing": "manual",
+    "minVizHeight": 14,
+    "maxVizHeight": 18,
+    "text": {
+     "titleSize": 12,
+     "valueSize": 12
+    }
+   },
+   "id": 24,
+   "gridPos": {
+    "x": 12,
+    "y": 85,
+    "w": 12,
+    "h": 8
+   }
+  },
+  {
+   "type": "row",
+   "title": "Errors and failed checks",
+   "id": 25,
+   "collapsed": false,
+   "panels": [],
+   "gridPos": {
+    "x": 0,
+    "y": 93,
+    "w": 24,
+    "h": 1
+   }
+  },
+  {
+   "transparent": false,
+   "type": "table",
+   "title": "Errors: every step that failed, was refused or halted",
+   "datasource": {
+    "type": "loki",
+    "uid": "loki"
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "expr": "{job=\"rollout\",site=\"$site\"} | json | pipeline=\"$pipeline\" | step!=\"pre-flight check\" | state=~\"failed|Exception|block|halted|needs_attention|rolled_back\"",
+     "queryType": "range",
+     "refId": "A",
+     "maxLines": 1000
+    }
+   ],
+   "transformations": [
+    {
+     "id": "extractFields",
+     "options": {
+      "source": "labels",
+      "format": "auto",
+      "replace": false
+     }
+    },
+    {
+     "id": "filterFieldsByName",
+     "options": {
+      "include": {
+       "names": [
+        "Time",
+        "wave",
+        "host",
+        "step",
+        "state",
+        "detail"
+       ]
+      }
+     }
+    },
+    {
+     "id": "organize",
+     "options": {
+      "indexByName": {
+       "Time": 0,
+       "wave": 1,
+       "host": 2,
+       "step": 3,
+       "state": 4,
+       "detail": 5
+      }
+     }
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "inspect": true
+     }
+    },
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "host"
+      },
+      "properties": [
+       {
+        "id": "links",
+        "value": [
+         {
+          "title": "Its every event in this run",
+          "url": "/d/lab-pipeline?${pipeline:queryparam}&var-host=${__value.raw}&viewPanel=panel-19&${__url_time_range}"
+         },
+         {
+          "title": "The host's dashboard",
+          "url": "/d/lab-host?var-host=${__value.raw}&${__url_time_range}"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "state"
+      },
+      "properties": [
+       {
+        "id": "mappings",
+        "value": [
+         {
+          "type": "value",
+          "options": {
+           "updated": {
+            "color": "#559f77",
+            "index": 0
+           },
+           "passed": {
+            "color": "#559f77",
+            "index": 1
+           },
+           "rolled_back": {
+            "color": "#b67b38",
+            "index": 2
+           },
+           "failed": {
+            "color": "#bb626d",
+            "index": 3
+           },
+           "needs_attention": {
+            "color": "#bb626d",
+            "index": 4
+           },
+           "halted": {
+            "color": "#bb626d",
+            "index": 5
+           },
+           "blocked": {
+            "color": "#b67b38",
+            "index": 6
+           },
+           "skipped": {
+            "color": "#a4adbc",
+            "index": 7
+           },
+           "running": {
+            "color": "#5989b7",
+            "index": 8
+           },
+           "untouched": {
+            "color": "#a4adbc",
+            "index": 9
+           },
+           "incomplete": {
+            "color": "#bb626d",
+            "index": 10
+           }
+          }
+         }
+        ]
+       },
+       {
+        "id": "custom.cellOptions",
+        "value": {
+         "type": "color-text"
+        }
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "Time"
+      },
+      "properties": [
+       {
+        "id": "custom.width",
+        "value": 170
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "wave"
+      },
+      "properties": [
+       {
+        "id": "custom.width",
+        "value": 80
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "host"
+      },
+      "properties": [
+       {
+        "id": "custom.width",
+        "value": 130
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "step"
+      },
+      "properties": [
+       {
+        "id": "custom.width",
+        "value": 120
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "state"
+      },
+      "properties": [
+       {
+        "id": "custom.width",
+        "value": 130
+       }
+      ]
+     }
+    ]
+   },
+   "options": {
+    "showHeader": true,
+    "cellHeight": "sm"
+   },
+   "id": 26,
+   "gridPos": {
+    "x": 0,
+    "y": 94,
+    "w": 24,
+    "h": 7
+   },
+   "timeFrom": "15d",
+   "hideTimeOverride": true
+  },
+  {
+   "transparent": true,
    "type": "table",
    "title": "Checks after the flash that failed",
    "gridPos": {
-    "x": 12,
-    "y": 22,
-    "w": 12,
-    "h": 9
+    "x": 0,
+    "y": 101,
+    "w": 24,
+    "h": 7
    },
    "targets": [
     {
@@ -387,7 +2752,7 @@
     "type": "prometheus",
     "uid": "prometheus"
    },
-   "id": 7,
+   "id": 27,
    "transformations": [
     {
      "id": "organize",
@@ -414,8 +2779,7 @@
     "showHeader": true,
     "cellHeight": "sm",
     "sortBy": []
-   },
-   "transparent": true
+   }
   }
  ],
  "templating": {
@@ -447,14 +2811,53 @@
      "uid": "prometheus"
     },
     "hide": 0,
+    "refresh": 2,
     "query": {
-     "query": "label_values(rollout_hosts{site=\"$site\"}, pipeline)",
+     "query": "query_result(max by (pipeline) (rollout_hosts{site=\"$site\"}))",
      "refId": "pipeline"
     },
-    "refresh": 2,
+    "regex": "/pipeline=\"([^\"]+)\"/",
     "sort": 2,
     "multi": false,
     "includeAll": false
+   },
+   {
+    "name": "host",
+    "label": "Host",
+    "type": "query",
+    "datasource": {
+     "type": "prometheus",
+     "uid": "prometheus"
+    },
+    "hide": 0,
+    "refresh": 2,
+    "query": {
+     "query": "label_values(rollout_host_info{site=\"$site\",pipeline=\"$pipeline\"}, host)",
+     "refId": "host"
+    },
+    "sort": 1,
+    "multi": false,
+    "includeAll": false
+   }
+  ]
+ },
+ "annotations": {
+  "list": [
+   {
+    "name": "Gates",
+    "datasource": {
+     "type": "loki",
+     "uid": "loki"
+    },
+    "enable": true,
+    "iconColor": "#b67b38",
+    "expr": "{job=\"rollout\",site=\"$site\"} | json | pipeline=\"$pipeline\" | step=\"gate\"",
+    "titleFormat": "{{wave}} gate: {{state}}",
+    "textFormat": "{{failed}} of {{tried}} failed",
+    "target": {
+     "expr": "{job=\"rollout\",site=\"$site\"} | json | pipeline=\"$pipeline\" | step=\"gate\"",
+     "refId": "Anno"
+    }
    }
   ]
  }

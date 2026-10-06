@@ -1,0 +1,319 @@
+<svg viewBox="0 0 900 1431" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Production firmware rollout through Redfish, the target design: Redfish resources, capability discovery, controlled activation and verified recovery. 01 rollout controller: canaries, waves, drain and promotion are orchestration policy. Discover and freeze the plan from the UpdateService, its FirmwareInventory and SoftwareInventory, map image to inventory to physical targets, pin digest, versions, dependencies and fallback, and cover hardware and failure domains with canaries, then waves. Preflight and reserve: health, reachability and capacity, current, desired and LowestSupportedVersion, the vendor&#x27;s version order and downgrade policy, Updateable, actions and apply times, the image&#x27;s compatibility, signature and size, A/B banks and a proven fallback, a target lease and event reception. Drain and confirm the disruption is safe: stop placement, evacuate work, verify redundancy, quorum and the unavailable budget, limit per rack, zone and shared dependency, capture the health and configuration baseline, record the drain&#x27;s owner and deadline. 02 per-target Redfish execution, one admitted target at a time per slot: submit the update by a SimpleUpdate pull or a MultipartHttpPushUri push with Targets and an OperationApplyTime, persisting the intent; follow the task monitor, and a Job if the operation hands off to one; reconcile the image state, Staged, Armed and Active, with Activate where advertised; reset only at the required point, the system, the manager or the device, with an allowed ResetType; verify the version, boot, health and service before undrain; undrain, soak and evaluate promotion. The EventService is a parallel observer whose events never advance a wave by themselves. Any failed gate or unknown outcome pauses the rollout and enters recovery: cancel a staged image, or the vendor&#x27;s recovery procedure for a changed image, then verify the recovery; recovered is a separate outcome from updated, and restoring service does not promote the rollout. 03 durable state and the pipeline report: the run database, Prometheus and Loki, and the overall outcomes. Moving dashes show possible routes, not live status.">
+  <style>
+    .pro text { font-family: var(--mono, monospace); }
+    .pro .bg { fill: var(--bg-deep, #050708); }
+    .pro .box { fill: var(--surface, #0d1417); stroke: var(--line, #2a3538); }
+    .pro .box.ghost { fill: none; stroke-dasharray: 4 4; }
+    .pro .name { fill: var(--fg, #e6f7fa); font-size: 12.5px; font-weight: 600; }
+    .pro .sub { fill: var(--dim, #6f8f97); font-size: 10px; }
+    .pro .txt { fill: var(--fg, #e6f7fa); font-size: 10px; }
+    .pro .band { fill: var(--dim, #6f8f97); font-size: 9.5px; letter-spacing: .14em; }
+    .pro .band.hi { fill: var(--teal, #00ffc8); }
+    .pro .lbl { fill: var(--dim, #6f8f97); font-size: 10px; }
+    .pro .cut { fill: none; stroke: var(--line, #2a3538); stroke-width: 1; stroke-dasharray: 5 5; }
+    .pro .chip { fill: var(--bg-deep, #050708); stroke: var(--line, #2a3538); }
+    /* a connection in the colour of what it talks to; the way back is drawn in shorter dashes */
+    .pro .edge { fill: none; stroke-width: 1.2; stroke-dasharray: 5 4; }
+    .pro .edge.g-back { stroke-dasharray: 3 3; }
+    .pro .elabel { fill: var(--fg, #e6f7fa); font-size: 10px; paint-order: stroke; stroke: var(--bg-deep, #050708); stroke-width: 4px; stroke-linejoin: round; }
+    .pro .elabel.c-back { fill: #ff5c8a; }
+    .pro .gate { fill: var(--surface, #0d1417); stroke: #ff5c8a; }
+    .pro .badge circle { fill: var(--amber, #ffb454); }
+    .pro .badge text { fill: var(--bg-deep, #050708); font-size: 10px; font-weight: 700; }
+    .pro a text { text-decoration: underline; }
+    .pro .g-wf { stroke: #6ea8ff; } .pro .bar.g-wf { fill: #6ea8ff; stroke: none; } .pro text.c-wf { fill: #6ea8ff; }
+    .pro .g-rf { stroke: #ffb454; } .pro .bar.g-rf { fill: #ffb454; stroke: none; } .pro text.c-rf { fill: #ffb454; }
+    .pro .g-sch { stroke: #b18cff; } .pro .bar.g-sch { fill: #b18cff; stroke: none; } .pro text.c-sch { fill: #b18cff; }
+    .pro .g-img { stroke: #00ffc8; } .pro .bar.g-img { fill: #00ffc8; stroke: none; } .pro text.c-img { fill: #00ffc8; }
+    .pro .g-back { stroke: #ff5c8a; } .pro .bar.g-back { fill: #ff5c8a; stroke: none; } .pro text.c-back { fill: #ff5c8a; }
+    .pro .g-ev { stroke: #6f8f97; } .pro .bar.g-ev { fill: #6f8f97; stroke: none; } .pro text.c-ev { fill: #6f8f97; }
+    /* motion: a connection's dashes run the way it points */
+    @keyframes pro-flow { to { stroke-dashoffset: -18; } }
+    .pro .edge { animation: pro-flow 1.2s linear infinite; }
+    @media (prefers-reduced-motion: reduce) { .pro .edge { animation: none; } }
+  </style>
+  <defs>
+    <marker id="pro-wf" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path d="M0 0 8 4 0 8z" style="fill: #6ea8ff"/></marker>
+    <marker id="pro-rf" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path d="M0 0 8 4 0 8z" style="fill: #ffb454"/></marker>
+    <marker id="pro-sch" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path d="M0 0 8 4 0 8z" style="fill: #b18cff"/></marker>
+    <marker id="pro-img" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path d="M0 0 8 4 0 8z" style="fill: #00ffc8"/></marker>
+    <marker id="pro-back" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path d="M0 0 8 4 0 8z" style="fill: #ff5c8a"/></marker>
+    <marker id="pro-ev" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path d="M0 0 8 4 0 8z" style="fill: #6f8f97"/></marker>
+  </defs>
+  <g class="pro">
+    <rect class="bg" x="0" y="0" width="900" height="1431" rx="12"/>
+    <text class="band" x="20" y="24">01 · ROLLOUT CONTROLLER</text>
+    <rect class="box" x="40" y="48" width="260" height="184" rx="8"/>
+    <rect class="bar g-wf" x="40" y="56" width="3" height="168" rx="1.5"/>
+    <g class="badge"><title>Stage 1: Plan and pre-flight</title><circle cx="59" cy="66" r="8"/><text x="59" y="69.5" text-anchor="middle">1</text></g>
+    <text class="name" x="74" y="70">Discover, freeze the plan</text>
+    <text class="txt" x="56" y="88">GET /redfish/v1/UpdateService</text>
+    <text class="sub" x="56" y="101">follow FirmwareInventory and</text>
+    <text class="sub" x="68.04" y="114">SoftwareInventory: both hold</text>
+    <text class="sub" x="68.04" y="127">SoftwareInventory resources</text>
+    <text class="sub" x="56" y="140">map image → inventory → targets</text>
+    <text class="sub" x="56" y="153">pin digest, versions, dependencies</text>
+    <text class="sub" x="68.04" y="166">and the fallback</text>
+    <text class="sub" x="56" y="179">canaries cover the hardware and</text>
+    <text class="sub" x="68.04" y="192">the failure domains</text>
+    <rect class="chip" x="56" y="196" width="48" height="18" rx="5"/>
+    <text class="txt" x="80" y="208.5" text-anchor="middle">CANARY</text>
+    <path class="edge g-wf" d="M104 205H112" marker-end="url(#pro-wf)"/>
+    <rect class="chip" x="114" y="196" width="48" height="18" rx="5"/>
+    <text class="txt" x="138" y="208.5" text-anchor="middle">WAVE 1</text>
+    <path class="edge g-wf" d="M162 205H170" marker-end="url(#pro-wf)"/>
+    <rect class="chip" x="172" y="196" width="48" height="18" rx="5"/>
+    <text class="txt" x="196" y="208.5" text-anchor="middle">WAVE 2</text>
+    <path class="edge g-wf" d="M220 205H228" marker-end="url(#pro-wf)"/>
+    <rect class="chip" x="230" y="196" width="48" height="18" rx="5"/>
+    <text class="txt" x="254" y="208.5" text-anchor="middle">WAVE N</text>
+    <rect class="box" x="320" y="48" width="260" height="184" rx="8"/>
+    <rect class="bar g-wf" x="320" y="56" width="3" height="168" rx="1.5"/>
+    <g class="badge"><title>Stage 1: Plan and pre-flight</title><circle cx="339" cy="66" r="8"/><text x="339" y="69.5" text-anchor="middle">1</text></g>
+    <text class="name" x="354" y="70">Preflight and reserve</text>
+    <text class="sub" x="336" y="88">health · BMC and host reachable ·</text>
+    <text class="sub" x="348.04" y="101">capacity</text>
+    <text class="sub" x="336" y="114">current / desired /</text>
+    <text class="sub" x="348.04" y="127">LowestSupportedVersion</text>
+    <text class="sub" x="336" y="140">the vendor's version order and</text>
+    <text class="sub" x="348.04" y="153">downgrade policy</text>
+    <text class="sub" x="336" y="166">Updateable · actions · apply times</text>
+    <text class="sub" x="336" y="179">image compatibility, signature,</text>
+    <text class="sub" x="348.04" y="192">size</text>
+    <text class="sub" x="336" y="205">A/B banks found, fallback proven</text>
+    <text class="sub" x="336" y="218">a target lease · event reception</text>
+    <rect class="box" x="600" y="48" width="260" height="184" rx="8"/>
+    <rect class="bar g-sch" x="600" y="56" width="3" height="168" rx="1.5"/>
+    <g class="badge"><title>Stage 2: Drain</title><circle cx="619" cy="66" r="8"/><text x="619" y="69.5" text-anchor="middle">2</text></g>
+    <text class="name" x="634" y="70">Drain, confirm it's safe</text>
+    <text class="sub" x="616" y="88">stop new placement; evacuate work</text>
+    <text class="sub" x="616" y="101">verify redundancy, quorum and the</text>
+    <text class="sub" x="628.04" y="114">unavailable budget</text>
+    <text class="sub" x="616" y="127">limits per rack, zone and shared</text>
+    <text class="sub" x="628.04" y="140">dependency</text>
+    <text class="sub" x="616" y="153">capture the health and</text>
+    <text class="sub" x="628.04" y="166">configuration baseline</text>
+    <text class="sub" x="616" y="179">record the drain's owner and a</text>
+    <text class="sub" x="628.04" y="192">deadline</text>
+    <text class="txt" x="616" y="205">proceed only when the disruption</text>
+    <text class="txt" x="628.04" y="218">checks that apply pass</text>
+    <path class="edge g-wf" d="M300 98H316" marker-end="url(#pro-wf)"/>
+    <path class="edge g-wf" d="M580 98H596" marker-end="url(#pro-wf)"/>
+    <rect class="cut" x="20" y="32" width="860" height="216" rx="10"/>
+    <text class="band" x="20" y="274">02 · PER-TARGET REDFISH EXECUTION</text>
+    <path class="edge g-wf" d="M730 232V296H300V312" marker-end="url(#pro-wf)"/>
+    <text class="elabel" x="470" y="300" text-anchor="middle">one admitted target at a time per slot</text>
+    <rect class="box" x="40" y="314" width="520" height="167" rx="8"/>
+    <rect class="bar g-rf" x="40" y="322" width="3" height="151" rx="1.5"/>
+    <g class="badge"><title>Stage 3: Update</title><circle cx="59" cy="332" r="8"/><text x="59" y="335.5" text-anchor="middle">3</text></g>
+    <text class="name" x="74" y="336">Submit the update: one transfer method</text>
+    <text class="sub" x="56" y="430">Targets and a supported @Redfish.OperationApplyTime; Stage if it's there</text>
+    <text class="sub" x="56" y="443">starts at its apply time: Immediate, OnReset, a maintenance window, StartUpdate</text>
+    <text class="sub" x="56" y="456">persist the intent and the operation's reference; reconcile an uncertain</text>
+    <text class="sub" x="68.04" y="469">answer before retrying</text>
+    <rect class="chip" x="56" y="345" width="240" height="68" rx="6"/>
+    <text class="txt c-rf" x="66" y="361">PULL · #UpdateService.SimpleUpdate</text>
+    <text class="sub" x="66" y="377">POST the discovered action target</text>
+    <text class="sub" x="66" y="390">ImageURI: an HTTPS artifact URL</text>
+    <text class="sub" x="66" y="403">the BMC fetches it: check access</text>
+    <rect class="chip" x="304" y="345" width="240" height="68" rx="6"/>
+    <text class="txt c-rf" x="314" y="361">PUSH · MultipartHttpPushUri</text>
+    <text class="sub" x="314" y="377">POST multipart/form-data to it</text>
+    <text class="sub" x="314" y="390">UpdateParameters JSON + UpdateFile</text>
+    <text class="sub" x="314" y="403">the client uploads the bytes</text>
+    <path class="edge g-rf" d="M300 481V507" marker-end="url(#pro-rf)"/>
+    <text class="elabel" x="292" y="498" text-anchor="end">202 → Location: the task monitor</text>
+    <text class="elabel" x="308" y="498">a synchronous result: parse it</text>
+    <rect class="box" x="40" y="511" width="520" height="127" rx="8"/>
+    <rect class="bar g-rf" x="40" y="519" width="3" height="111" rx="1.5"/>
+    <g class="badge"><title>Stage 3: Update</title><circle cx="59" cy="529" r="8"/><text x="59" y="532.5" text-anchor="middle">3</text></g>
+    <text class="name" x="74" y="533">Observe, reconcile, handle actions</text>
+    <text class="sub" x="56" y="613">handoff: Update.*.OperationTransitionedToJob → follow the returned Job URI</text>
+    <text class="sub" x="56" y="626">no handoff: parse the result · any end still needs the target verified</text>
+    <rect class="chip" x="56" y="542" width="220" height="52" rx="6"/>
+    <text class="txt" x="66" y="558">TaskService · task monitor</text>
+    <text class="sub" x="66" y="574">poll Location; honor Retry-After</text>
+    <text class="sub" x="66" y="587">TaskState, TaskStatus, Messages</text>
+    <rect class="chip" x="324" y="542" width="220" height="52" rx="6"/>
+    <text class="txt" x="334" y="558">JobService · Jobs/{id}</text>
+    <text class="sub" x="334" y="574">only when it hands off to a Job</text>
+    <text class="sub" x="334" y="587">JobState, steps and Messages</text>
+    <path class="edge g-ev" d="M276 568H320" marker-end="url(#pro-ev)"/>
+    <text class="lbl" x="298" y="562" text-anchor="middle">optional</text>
+    <path class="edge g-rf" d="M300 638V664" marker-end="url(#pro-rf)"/>
+    <text class="elabel" x="292" y="655" text-anchor="end">reconcile each target after</text>
+    <text class="elabel" x="308" y="655">progress, completion or a reset</text>
+    <rect class="box" x="40" y="668" width="520" height="170" rx="8"/>
+    <rect class="bar g-rf" x="40" y="676" width="3" height="154" rx="1.5"/>
+    <g class="badge"><title>Stage 4: Reset</title><circle cx="59" cy="686" r="8"/><text x="59" y="689.5" text-anchor="middle">4</text></g>
+    <text class="name" x="74" y="690">Reconcile the image, finish activation</text>
+    <text class="sub" x="56" y="708">SoftwareInventory's image state and per-target links, where implemented</text>
+    <text class="sub" x="56" y="813">#SoftwareInventory.Activate or #UpdateService.Activate, if advertised</text>
+    <text class="sub" x="56" y="826">Stage=false can activate within the update · not every image visits each state</text>
+    <rect class="chip" x="56" y="732" width="140" height="34" rx="5"/>
+    <text class="txt c-rf" x="126" y="747" text-anchor="middle">STAGED</text>
+    <text class="sub" x="126" y="760" text-anchor="middle">awaits Activate</text>
+    <rect class="chip" x="232" y="732" width="140" height="34" rx="5"/>
+    <text class="txt c-rf" x="302" y="747" text-anchor="middle">ARMED</text>
+    <text class="sub" x="302" y="760" text-anchor="middle">awaits reset, trigger</text>
+    <rect class="chip" x="408" y="732" width="140" height="34" rx="5"/>
+    <text class="txt c-rf" x="478" y="747" text-anchor="middle">ACTIVE</text>
+    <text class="sub" x="478" y="760" text-anchor="middle">runs on the target</text>
+    <path class="edge g-rf" d="M196 749H228" marker-end="url(#pro-rf)"/>
+    <path class="edge g-rf" d="M372 749H404" marker-end="url(#pro-rf)"/>
+    <text class="lbl" x="214" y="726" text-anchor="middle">Activate</text>
+    <text class="lbl" x="390" y="726" text-anchor="middle">reset</text>
+    <path class="edge g-rf" d="M126 766V780H478V770" marker-end="url(#pro-rf)"/>
+    <text class="elabel" x="302" y="784" text-anchor="middle">Activate may make it active directly</text>
+    <path class="edge g-rf" d="M300 838V864" marker-end="url(#pro-rf)"/>
+    <text class="elabel" x="292" y="855" text-anchor="end">the active inventory, the result</text>
+    <text class="elabel" x="308" y="855">feed the verification</text>
+    <rect class="box" x="40" y="868" width="520" height="91" rx="8"/>
+    <rect class="bar g-rf" x="40" y="876" width="3" height="75" rx="1.5"/>
+    <g class="badge"><title>Stage 5: Post-check</title><circle cx="59" cy="886" r="8"/><text x="59" y="889.5" text-anchor="middle">5</text></g>
+    <text class="name" x="74" y="890">Verify the target before undrain</text>
+    <text class="sub" x="56" y="908">the desired version active on every intended component; bundles part-fail</text>
+    <text class="sub" x="56" y="921">host boot, BMC reachable, device health, driver compatibility, smoke tests</text>
+    <text class="sub" x="56" y="934">against the baseline, on fresh evidence · unreachable or ambiguous: UNKNOWN</text>
+    <text class="txt" x="56" y="947">success needs version + health + service: a TaskState alone isn't enough</text>
+    <path class="edge g-rf" d="M300 959V985" marker-end="url(#pro-rf)"/>
+    <text class="elabel" x="308" y="976">every required check passes</text>
+    <rect class="box" x="40" y="989" width="520" height="78" rx="8"/>
+    <rect class="bar g-sch" x="40" y="997" width="3" height="62" rx="1.5"/>
+    <g class="badge"><title>Stage 6: Undrain, or roll back</title><circle cx="59" cy="1007" r="8"/><text x="59" y="1010.5" text-anchor="middle">6</text></g>
+    <text class="name" x="74" y="1011">Undrain, soak, evaluate promotion</text>
+    <text class="sub" x="56" y="1029">restore scheduling and traffic gradually: workloads rejoin, SLOs hold</text>
+    <text class="sub" x="56" y="1042">soak the configured window: errors, latency, availability against baseline</text>
+    <text class="sub" x="56" y="1055">the gate passes → the next wave · a regression → pause, drain, recover</text>
+    <path class="edge g-wf" d="M40 1028.0H10V38H450V44" marker-end="url(#pro-wf)"/>
+    <text class="elabel" text-anchor="middle" transform="translate(14 518.5) rotate(-90)">next wave: recheck preflight, capacity and the target lease</text>
+    <rect class="box" x="590" y="314" width="270" height="156" rx="8"/>
+    <rect class="bar g-rf" x="590" y="322" width="3" height="140" rx="1.5"/>
+    <text class="name" x="606" y="336">EventService, beside it</text>
+    <text class="txt" x="606" y="354">/redfish/v1/EventService/Subscriptions</text>
+    <text class="sub" x="606" y="367">subscribe before the disruption</text>
+    <text class="sub" x="606" y="380">the task and resource events it</text>
+    <text class="sub" x="618.04" y="393">supports · SSE when advertised</text>
+    <text class="txt" x="606" y="406">event → correlate → refresh state</text>
+    <text class="sub" x="606" y="419">deduplicate; handle gaps, reconnects</text>
+    <text class="sub" x="606" y="432">polling and reconciliation stay as</text>
+    <text class="sub" x="618.04" y="445">the fallback</text>
+    <text class="txt" x="606" y="458">events never advance a wave alone</text>
+    <path class="edge g-rf" d="M590 450H575V541H564" marker-end="url(#pro-rf)"/>
+    <text class="elabel" x="568" y="466" text-anchor="end">events</text>
+    <rect class="box" x="590" y="500" width="270" height="143" rx="8"/>
+    <rect class="bar g-rf" x="590" y="508" width="3" height="127" rx="1.5"/>
+    <g class="badge"><title>Stage 4: Reset</title><circle cx="609" cy="518" r="8"/><text x="609" y="521.5" text-anchor="middle">4</text></g>
+    <text class="name" x="624" y="522">Reset only where needed</text>
+    <text class="txt" x="606" y="540">host → #ComputerSystem.Reset</text>
+    <text class="txt" x="606" y="553">BMC → #Manager.Reset</text>
+    <text class="txt" x="606" y="566">device → its advertised reset</text>
+    <text class="sub" x="606" y="579">an allowed ResetType: GracefulRestart</text>
+    <text class="sub" x="606" y="592">ActionInfo, or ResetType@Redfish.</text>
+    <text class="sub" x="618.04" y="605">AllowableValues</text>
+    <text class="sub" x="606" y="618">wait until reachable; renew the</text>
+    <text class="sub" x="618.04" y="631">session and reconcile</text>
+    <path class="edge g-rf" d="M560 561H586" marker-end="url(#pro-rf)"/>
+    <text class="elabel" x="575" y="575" text-anchor="middle">OnReset</text>
+    <path class="edge g-rf" d="M560 698H574V627H586" marker-end="url(#pro-rf)"/>
+    <text class="elabel" x="568" y="714" text-anchor="end">reset</text>
+    <text class="lbl" x="725" y="657" text-anchor="middle">it may start the update or complete activation</text>
+    <rect class="box" x="590" y="677" width="270" height="286" rx="8"/>
+    <rect class="bar g-back" x="590" y="685" width="3" height="270" rx="1.5"/>
+    <g class="badge"><title>Stage 6: Undrain, or roll back</title><circle cx="609" cy="695" r="8"/><text x="609" y="698.5" text-anchor="middle">6</text></g>
+    <text class="name" x="624" y="699">Hold the promotion, recover</text>
+    <text class="txt c-back" x="606" y="717">failed gate, unknown outcome → PAUSE</text>
+    <text class="sub" x="606" y="730">keep the targets drained, isolated</text>
+    <text class="sub" x="606" y="743">a soak failure: drain again first</text>
+    <text class="sub" x="606" y="756">reconcile unknown state; never</text>
+    <text class="sub" x="618.04" y="769">interrupt a flash</text>
+    <text class="txt" x="606" y="782">1 · staged only</text>
+    <text class="sub" x="606" y="795">#SoftwareInventory.Cancel, if there;</text>
+    <text class="sub" x="618.04" y="808">the old image active and healthy</text>
+    <text class="txt" x="606" y="821">2 · a changed image, a boot failure</text>
+    <text class="sub" x="606" y="834">the vendor's recovery: A/B fallback,</text>
+    <text class="sub" x="618.04" y="847">bank select, or reflash the prior</text>
+    <text class="sub" x="618.04" y="860">image · anti-rollback floors hold</text>
+    <text class="txt" x="606" y="873">3 · verify the recovery</text>
+    <text class="sub" x="606" y="886">known-good version, boot, health,</text>
+    <text class="sub" x="618.04" y="899">service tests</text>
+    <text class="sub" x="606" y="912">PASS → undrain under recovery policy</text>
+    <text class="sub" x="606" y="925">FAIL, UNKNOWN → quarantine, by hand</text>
+    <text class="txt c-back" x="606" y="938">recovered ≠ updated successfully</text>
+    <text class="sub" x="606" y="951">Redfish has no universal A/B rollback</text>
+    <path class="edge g-back" d="M560 898H586" marker-end="url(#pro-back)"/>
+    <path class="edge g-back" d="M560 1019H578V943H586" marker-end="url(#pro-back)"/>
+    <text class="elabel c-back" x="556" y="1011" text-anchor="end">regression</text>
+    <rect class="box ghost" x="590" y="979" width="270" height="65" rx="8"/>
+    <rect class="bar g-back" x="590" y="987" width="3" height="49" rx="1.5"/>
+    <text class="name" x="606" y="1001">Restoring service ≠ promotion</text>
+    <text class="sub" x="606" y="1019">the campaign stays held until its</text>
+    <text class="sub" x="618.04" y="1032">policy permits a resume</text>
+    <path class="edge g-back" d="M725 963V975" marker-end="url(#pro-back)"/>
+    <rect class="cut" x="20" y="282" width="860" height="801" rx="10"/>
+    <text class="band" x="20" y="1109">03 · DURABLE STATE AND PIPELINE REPORT</text>
+    <rect class="box" x="40" y="1123" width="260" height="130" rx="8"/>
+    <rect class="bar g-wf" x="40" y="1131" width="3" height="114" rx="1.5"/>
+    <text class="name" x="56" y="1145">Run database</text>
+    <text class="sub" x="56" y="1163">plan, image digest, targets, waves</text>
+    <text class="sub" x="56" y="1176">before / desired / observed</text>
+    <text class="sub" x="68.04" y="1189">versions · bank state</text>
+    <text class="sub" x="56" y="1202">stage changes, attempts, leases,</text>
+    <text class="sub" x="68.04" y="1215">evidence</text>
+    <text class="sub" x="56" y="1228">Task and Job URIs · reason codes</text>
+    <text class="sub" x="68.04" y="1241">· freshness</text>
+    <rect class="box" x="320" y="1123" width="260" height="130" rx="8"/>
+    <rect class="bar g-ev" x="320" y="1131" width="3" height="114" rx="1.5"/>
+    <text class="name" x="336" y="1145">Prometheus + Loki</text>
+    <text class="sub" x="336" y="1163">Prometheus: SLOs, durations, counts</text>
+    <text class="sub" x="336" y="1176">Loki: per-target operation</text>
+    <text class="sub" x="348.04" y="1189">events</text>
+    <text class="sub" x="336" y="1202">run and target IDs never as</text>
+    <text class="sub" x="348.04" y="1215">unbounded labels</text>
+    <text class="sub" x="336" y="1228">logs joined on the run and</text>
+    <text class="sub" x="348.04" y="1241">operation IDs</text>
+    <rect class="box" x="600" y="1123" width="260" height="130" rx="8"/>
+    <rect class="bar g-wf" x="600" y="1131" width="3" height="114" rx="1.5"/>
+    <text class="name" x="616" y="1145">Overall outcomes</text>
+    <text class="sub" x="616" y="1163">updated and healthy · recovered ·</text>
+    <text class="sub" x="628.04" y="1176">failed · pending · skipped ·</text>
+    <text class="sub" x="628.04" y="1189">blocked · unknown</text>
+    <text class="sub" x="616" y="1202">planned against completed</text>
+    <text class="sub" x="628.04" y="1215">denominators</text>
+    <text class="sub" x="616" y="1228">a target's recovery isn't the</text>
+    <text class="sub" x="628.04" y="1241">rollout's success</text>
+    <text class="sub" x="450" y="1271" text-anchor="middle">persist state before side effects · bound retries and deadlines · reconcile after a controller restart or a BMC outage</text>
+    <text class="band" x="20" y="1301">DESIGN NOTES</text>
+    <text class="sub" x="150" y="1301">capabilities vary by platform · A/B bank ownership, fallback and downgrade rules need a tested</text>
+    <text class="sub" x="150" y="1315">vendor procedure · the workflow and its gates are recommendations; Redfish's operations and</text>
+    <text class="sub" x="150" y="1329">states follow:</text>
+    <a href="https://www.dmtf.org/sites/default/files/standards/documents/DSP2062_1.3.0.pdf"><text class="sub c-img" x="240.3" y="1329">DSP2062 1.3.0</text></a>
+    <a href="https://redfish.dmtf.org/schemas/v1/UpdateService.v1_17_0.json"><text class="sub c-img" x="336.62" y="1329">UpdateService</text></a>
+    <a href="https://redfish.dmtf.org/schemas/v1/ComputerSystem.v1_25_0.json"><text class="sub c-img" x="432.94" y="1329">ComputerSystem</text></a>
+    <a href="https://redfish.dmtf.org/schemas/v1/EventService.v1_11_0.json"><text class="sub c-img" x="535.28" y="1329">EventService</text></a>
+    <text class="band" x="20" y="1361">CONNECTIONS</text>
+    <path class="edge g-wf" d="M150 1358H172"/>
+    <text class="lbl" x="180" y="1361">Controller: plan, waves, gates</text>
+    <path class="edge g-rf" d="M400 1358H422"/>
+    <text class="lbl" x="430" y="1361">Redfish (BMC)</text>
+    <path class="edge g-sch" d="M560 1358H582"/>
+    <text class="lbl" x="590" y="1361">Scheduler</text>
+    <path class="edge g-img" d="M690 1358H712"/>
+    <text class="lbl" x="720" y="1361">Image</text>
+    <path class="edge g-back" d="M150 1378H172"/>
+    <text class="lbl" x="180" y="1381">Failure, hold, way back</text>
+    <text class="band" x="20" y="1409">ROLLOUT STAGES</text>
+    <g class="badge"><title>Stage 1: Plan and pre-flight</title><circle cx="158" cy="1406" r="8"/><text x="158" y="1409.5" text-anchor="middle">1</text></g>
+    <text class="lbl" x="172" y="1409">Plan and pre-flight</text>
+    <g class="badge"><title>Stage 2: Drain</title><circle cx="312.38" cy="1406" r="8"/><text x="312.38" y="1409.5" text-anchor="middle">2</text></g>
+    <text class="lbl" x="326.38" y="1409">Drain</text>
+    <g class="badge"><title>Stage 3: Update</title><circle cx="382.48" cy="1406" r="8"/><text x="382.48" y="1409.5" text-anchor="middle">3</text></g>
+    <text class="lbl" x="396.48" y="1409">Update</text>
+    <g class="badge"><title>Stage 4: Reset</title><circle cx="458.6" cy="1406" r="8"/><text x="458.6" y="1409.5" text-anchor="middle">4</text></g>
+    <text class="lbl" x="472.6" y="1409">Reset</text>
+    <g class="badge"><title>Stage 5: Post-check</title><circle cx="528.7" cy="1406" r="8"/><text x="528.7" y="1409.5" text-anchor="middle">5</text></g>
+    <text class="lbl" x="542.7" y="1409">Post-check</text>
+    <g class="badge"><title>Stage 6: Undrain, or roll back</title><circle cx="628.9" cy="1406" r="8"/><text x="628.9" y="1409.5" text-anchor="middle">6</text></g>
+    <text class="lbl" x="642.9" y="1409">Undrain, or roll back</text>
+  </g>
+</svg>

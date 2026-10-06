@@ -120,6 +120,11 @@ LEFT_OUT_ROW = ("Host", "Verdict", "Running", "Target", "Why")
 STEP_ROW = ("Step", "Started (UTC)", "Took", "Result", "Detail")
 REPORT_SCHEMA = "rollout-report/1"  # the version of report.json's layout, for the services that read it
 # What a host that didn't end updated needs next: these make the report's "action needed"
+# Where a host is, as a number for Grafana's timeline (rollout_host_step): the step it is in while it runs, then how it
+# ended. The pipeline dashboard maps each back to its name and colour
+HOST_STEP = {"untouched": 0, "pre-flight": 1, "drain": 2, "update": 3, "reset": 4, "post-check": 5, "rollback": 6,
+             "undrain": 7, "updated": 10, "rolled_back": 11, "failed": 12, "needs_attention": 13, "blocked": 14,
+             "skipped": 15, "incomplete": 16}
 NEXT_STEP = {"failed": "the old firmware still runs: read the task's messages before trying again",
              "rolled_back": "back on the version from before, verified: find out why the new one failed first",
              "needs_attention": "not verified: check the BMC answers and which version it runs, then give it back",

@@ -1,4 +1,4 @@
-<svg viewBox="0 0 900 760" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="The lab: ten emulated BMCs in three racks, where the rollout really updates firmware, and the observability stack that watches them. lab/rollout.yaml plans a canary of one BMC, bmc1, marked canary: true; wave 1 of three, bmc2 to bmc4, strict; wave 2 of the other six; at most two BMCs of a rack in a wave, a halt over 10% failed, a 60 second soak, ten at once. poller.py and pipeline.sh with rollout.py share the lab/ folder: the inventory of ten writable BMCs, the policy, the baseline and the image catalog, and the snapshots, run records and reports. They speak Redfish over HTTPS: reads, updates and resets. The firmware's way in: OpenBMC's Jenkins builds each version as a signed .tar package. lab/download-fw-images.sh downloads the two newest into lab/staging/. lab/promote-fw-images.sh, the ingest gate, checks each one's signatures against the pinned key; only a package that passes is uploaded into the store, a SeaweedFS bucket that keeps the only copy, and its download deleted; it writes into lab/ the catalog images.yaml and the baseline, never the packages, and takes the older build's image-bmc out as bmc.mtd, which each BMC's flash volume starts from. The cache, nginx over HTTPS, fetches each package from the store once. rollout.py fetches a package from the cache into lab/spool/, its own copy, checks its sha256 against the catalog and pushes that copy to the BMC, which writes it into its flash. Docker Compose runs one container per BMC on 127.0.0.1 ports 2441 to 2450. In each, QEMU's gb200nvl-bmc machine stands in for the server, emulating only its BMC, an AST2600 chip, which runs OpenBMC's GB200 NVL firmware and bmcweb serving Redfish on port 443, from a 64 MiB flash volume kept across restarts. They boot in batches of four, each once the batch before is healthy, and a BMC whose boot comes up degraded boots again. At start-up, the two scripts fetch the two newest GB200 NVL builds from OpenBMC's Jenkins and check their signatures; the lab boots the older and approves the newer. The observability stack runs in Docker Compose, every service on 127.0.0.1: exporter-lab, poller.py exporter, reads the ten BMCs over Redfish every 10 seconds; rollout.py run pushes every event of a run to the Pushgateway; Prometheus scrapes both; Grafana shows them in a Lab folder, Lab · Fleet manager, Lab · Host and Lab · Pipeline, next to a Prod folder.">
+<svg viewBox="0 0 900 768" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="The lab: ten emulated BMCs in three racks, where the rollout really updates firmware, and the observability stack that watches them. lab/rollout.yaml plans a canary of one BMC, bmc1, marked canary: true; wave 1 of three, bmc2 to bmc4, strict; wave 2 of the other six; at most two BMCs of a rack in a wave, a halt over 10% failed, a 60 second soak, ten at once. poller.py and pipeline.sh with rollout.py share the lab/ folder: the inventory of ten writable BMCs, the policy, the baseline and the image catalog, and the snapshots, run records and reports. They speak Redfish over HTTPS: reads, updates and resets. The firmware's way in: OpenBMC's Jenkins builds each version as a signed .tar package. lab/download-fw-images.sh downloads the two newest into lab/staging/. lab/promote-fw-images.sh, the ingest gate, checks each one's signatures against the pinned key; only a package that passes is uploaded into the store, a SeaweedFS bucket that keeps the only copy, and its download deleted; it writes into lab/ the catalog images.yaml and the baseline, never the packages, and takes the older build's image-bmc out as bmc.mtd, which each BMC's flash volume starts from. The cache, nginx over HTTPS, fetches each package from the store once. rollout.py fetches a package from the cache into lab/spool/, its own copy, checks its sha256 against the catalog and pushes that copy to the BMC, which writes it into its flash. Docker Compose runs one container per BMC on 127.0.0.1 ports 2441 to 2450. In each, QEMU's gb200nvl-bmc machine stands in for the server, emulating only its BMC, an AST2600 chip, which runs OpenBMC's GB200 NVL firmware and bmcweb serving Redfish on port 443, from a 64 MiB flash volume kept across restarts. They boot in batches of four, each once the batch before is healthy, and a BMC whose boot comes up degraded boots again. At start-up, the two scripts fetch the two newest GB200 NVL builds from OpenBMC's Jenkins and check their signatures; the lab boots the older and approves the newer. The observability stack runs in Docker Compose, every service on 127.0.0.1: exporter-lab, poller.py exporter, reads the ten BMCs over Redfish every 10 seconds; rollout.py run pushes its metrics to the Pushgateway and sends every event of its run record to Loki; Prometheus pulls, scraping /metrics from the exporter every 10 seconds and the Pushgateway every 5; Loki is pushed to. Each BMC's Redfish EventService, its own events, isn't collected yet: this bmcweb build advertises a server-sent event stream but doesn't serve it; Grafana reads Prometheus and Loki and shows them in a Lab folder, Lab · Fleet manager, Lab · Host and Lab · Pipeline, next to a Prod folder.">
   <style>
     .rfl text { font-family: var(--mono, monospace); }
     .rfl .bg { fill: var(--bg-deep, #050708); }
@@ -45,7 +45,7 @@
     </marker>
   </defs>
   <g class="rfl">
-    <rect class="bg" x="0" y="0" width="900" height="760" rx="12"/>
+    <rect class="bg" x="0" y="0" width="900" height="768" rx="12"/>
 
 
     <!-- the firmware's way into the lab: what each script does, and what it feeds -->
@@ -140,7 +140,7 @@
     <rect class="box" x="86" y="366" width="208" height="26" rx="5"/>
     <text class="name" x="190" y="384" text-anchor="middle">OpenBMC GB200 NVL</text>
     <rect class="box" x="86" y="398" width="208" height="26" rx="5"/>
-    <text class="name hi" x="190" y="416" text-anchor="middle">bmcweb · Redfish :443</text>
+    <text class="name hi" x="190" y="416" text-anchor="middle" style="font-size: 11px">bmcweb · Redfish · EventService</text>
 
     <path class="wire" d="M190 430V446"/>
     <rect class="box" x="52" y="446" width="276" height="32" rx="6"/>
@@ -226,30 +226,42 @@
     <text class="lbl" x="448" y="503">wave 1</text>
     <rect class="box" x="504" y="494" width="10" height="10" rx="2"/>
     <text class="lbl" x="520" y="503">wave 2</text>
+    <!-- each BMC's EventService, its own events: advertised, but this bmcweb build serves no SSE, so nothing collects them -->
+    <text class="lbl" x="860" y="503" text-anchor="end">BMC EventService → Loki: not built yet</text>
 
-    <!-- observability: the exporter reads the BMCs on the same Redfish line, rollout.py pushes its runs -->
-    <path class="wire-hi flow" d="M165 200H10V564H40"/>
+    <!-- observability: the exporter reads the BMCs on the same Redfish line; rollout.py sends its events to Loki and
+         pushes its metrics to the Pushgateway -->
+    <path class="wire-hi flow" d="M165 200H10V568H40"/>
     <text class="lbl hi" x="26" y="212">exporter-lab: GET every 10 s</text>
-    <path class="wire flow" d="M860 124H890V564H864" marker-end="url(#rfl-dim)"/>
+    <path class="wire flow" d="M860 124H890V568H864" marker-end="url(#rfl-dim)"/>
+    <path class="wire flow" d="M890 538H565V543" marker-end="url(#rfl-dim)"/>
     <g transform="translate(0 -62)">
-      <rect class="cut" x="20" y="592" width="860" height="134" rx="10"/>
-      <rect class="box" x="40" y="608" width="250" height="36" rx="8"/>
-      <text class="name" x="165" y="631" text-anchor="middle">exporter-lab</text>
-      <rect class="box" x="325" y="608" width="250" height="36" rx="8"/>
-      <text class="name hi" x="450" y="631" text-anchor="middle">Prometheus</text>
-      <rect class="box" x="610" y="608" width="250" height="36" rx="8"/>
-      <text class="name" x="735" y="631" text-anchor="middle">Pushgateway</text>
-      <path class="wire flow" d="M290 626H321" marker-end="url(#rfl-dim)"/>
-      <path class="wire flow" d="M610 626H579" marker-end="url(#rfl-dim)"/>
-      <path class="wire flow" d="M450 644V658" marker-end="url(#rfl-dim)"/>
-      <rect class="grp" x="40" y="662" width="820" height="52" rx="8"/>
-      <text class="name hi" x="165" y="692" text-anchor="middle">Grafana</text>
-      <rect class="box" x="300" y="672" width="172" height="32" rx="6"/>
-      <text class="name" x="386" y="692" text-anchor="middle">Lab · Fleet manager</text>
-      <rect class="box" x="488" y="672" width="172" height="32" rx="6"/>
-      <text class="name" x="574" y="692" text-anchor="middle">Lab · Host</text>
-      <rect class="box" x="676" y="672" width="172" height="32" rx="6"/>
-      <text class="name" x="762" y="692" text-anchor="middle">Lab · Pipeline</text>
+      <!-- Prometheus pulls: it scrapes /metrics from the exporter and the Pushgateway. Loki is pushed to -->
+      <rect class="cut" x="20" y="592" width="860" height="142" rx="10"/>
+      <rect class="box" x="40" y="608" width="190" height="44" rx="8"/>
+      <text class="name" x="135" y="627" text-anchor="middle">exporter-lab</text>
+      <text class="sub" x="135" y="643" text-anchor="middle">polls each BMC every 10 s</text>
+      <rect class="box" x="255" y="608" width="190" height="44" rx="8"/>
+      <text class="name hi" x="350" y="627" text-anchor="middle">Prometheus</text>
+      <text class="sub" x="350" y="643" text-anchor="middle">pulls /metrics every 5-10 s</text>
+      <rect class="box" x="470" y="608" width="190" height="44" rx="8"/>
+      <text class="name" x="565" y="627" text-anchor="middle">Pushgateway · metrics</text>
+      <text class="sub" x="565" y="643" text-anchor="middle">pushed by rollout.py · PUT</text>
+      <rect class="box" x="685" y="608" width="175" height="44" rx="8"/>
+      <text class="name hi" x="772" y="627" text-anchor="middle">Loki · events</text>
+      <text class="sub" x="772" y="643" text-anchor="middle">pushed by rollout.py · POST</text>
+      <path class="wire flow" d="M230 630H251" marker-end="url(#rfl-dim)"/>
+      <path class="wire flow" d="M470 630H449" marker-end="url(#rfl-dim)"/>
+      <path class="wire flow" d="M350 652V666" marker-end="url(#rfl-dim)"/>
+      <path class="wire flow" d="M772 652V666" marker-end="url(#rfl-dim)"/>
+      <rect class="grp" x="40" y="670" width="820" height="52" rx="8"/>
+      <text class="name hi" x="165" y="700" text-anchor="middle">Grafana</text>
+      <rect class="box" x="300" y="680" width="172" height="32" rx="6"/>
+      <text class="name" x="386" y="700" text-anchor="middle">Lab · Fleet manager</text>
+      <rect class="box" x="488" y="680" width="172" height="32" rx="6"/>
+      <text class="name" x="574" y="700" text-anchor="middle">Lab · Host</text>
+      <rect class="box" x="676" y="680" width="172" height="32" rx="6"/>
+      <text class="name" x="762" y="700" text-anchor="middle">Lab · Pipeline</text>
     </g>
     </g>
   </g>

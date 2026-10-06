@@ -1,0 +1,30 @@
+# Loki for the rollout's events: one process, on 127.0.0.1 only, its data in the loki volume, kept 15 days like
+# Prometheus. rollout.py run sends every event of its run record here (LOKI); Grafana reads them with LogQL.
+auth_enabled: false
+server:
+  http_listen_address: 127.0.0.1
+  http_listen_port: 3100
+  grpc_listen_address: 127.0.0.1
+  grpc_listen_port: 9096
+# the query frontend tells the querier where to send results: 127.0.0.1, where gRPC listens, not the host's address
+frontend:
+  address: 127.0.0.1
+common:
+  path_prefix: /loki
+  replication_factor: 1
+  ring: {instance_addr: 127.0.0.1, kvstore: {store: inmemory}}
+  storage: {filesystem: {chunks_directory: /loki/chunks, rules_directory: /loki/rules}}
+# the write-ahead log in the volume too, so a crash loses no event Loki already took
+ingester:
+  wal: {dir: /loki/wal}
+schema_config:
+  configs:
+    - {from: 2026-01-01, store: tsdb, object_store: filesystem, schema: v13, index: {prefix: index_, period: 24h}}
+limits_config:
+  retention_period: 360h
+compactor:
+  working_directory: /loki/compactor
+  retention_enabled: true
+  delete_request_store: filesystem
+analytics:
+  reporting_enabled: false

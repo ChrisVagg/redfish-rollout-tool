@@ -393,6 +393,79 @@ def test_metrics_mid_run():
     assert doc["result"] == "running" and doc["waves"][0]["hosts"][0]["state"] == "running"
     text = rollout.metrics(doc)
     assert 'rollout_hosts{wave="wave 1",state="running"} 1' in text and "rollout_running 1" in text
+    # Pushed mid-run, a host the run hasn't reached yet takes its versions from the plan, not "-"
+    record = Path(tempfile.mkdtemp()) / "run.jsonl"
+    record.write_text("".join(json.dumps(e) + "\n" for e in events))
+    plan = {"waves": {"wave 1": ["h1"], "wave 2": ["h2"]}, "planned": 10,
+            "verdicts": {h: {"verdict": "go", "running": "1.0", "target": "2.0"} for h in ("h1", "h2")}}
+    pushed = []
+
+    class Pushgateway:
+        def raise_for_status(self) -> None:
+            pass
+    with (patch.dict(os.environ, {"PUSHGATEWAY": "http://pushgateway"}),
+          patch.object(rollout.requests, "put", lambda url, data, timeout: pushed.append(data) or Pushgateway())):
+        rollout.push_metrics(record, "site/lab", {}, plan)
+    assert 'host="h2",state="untouched",before="1.0",target="2.0",after="-"' in pushed[0], pushed
+    # The timeline's value: h1 in its update step, h2 not reached
+    assert 'rollout_host_step{wave="wave 1",host="h1"} 3' in pushed[0], pushed
+    assert 'rollout_host_step{wave="wave 2",host="h2"} 0' in pushed[0], pushed
+    assert "rollout_hosts_drained 0" in pushed[0] and "rollout_seconds 9" in pushed[0], pushed
+    assert "rollout_planned_hosts 10" in pushed[0], pushed  # the whole plan, even if this stage is its canary
+    # A host drained and not given back is out of service: it counts until its undrain is done
+    drained = [*events, {"at": at("00:10"), "host": "h1", "step": "drain", "state": "done"}]
+    assert "rollout_hosts_drained 1" in rollout.metrics(rollout.pipeline_report(None, drained, "run", []))
+    given_back = [*drained, {"at": at("00:11"), "host": "h1", "step": "undrain", "state": "done"}]
+    assert "rollout_hosts_drained 0" in rollout.metrics(rollout.pipeline_report(None, given_back, "run", []))
+
+
+# Each event goes to Loki as one JSON line, labelled only job and site: the pipeline, wave and host are in the line
+def test_events_to_loki():
+    sent = []
+
+    class Loki:
+        def raise_for_status(self) -> None:
+            pass
+    event = {"at": "2026-10-06T00:00:00+00:00", "host": "h1", "step": "done", "state": "failed", "pipeline": "p",
+             "wave": "wave 1"}
+    with (patch.dict(os.environ, {"LOKI": "http://loki"}),
+          patch.object(rollout.requests, "post", lambda url, json, timeout: sent.append((url, json)) or Loki())):
+        rollout.push_event(event, {})
+    url, body = sent[0]
+    stream = body["streams"][0]
+    assert url == "http://loki/loki/api/v1/push" and stream["stream"] == {"job": "rollout", "site": rollout.SITE.name}
+    assert json.loads(stream["values"][0][1]) == {**event, "level": "error"}  # a failed host, coloured as an error
+
+
+# The saved plan goes to Loki as the policy, then a verdict per host with its wave: the dashboard's Plan section
+def test_plan_to_loki():
+    sent = []
+
+    class Loki:
+        def raise_for_status(self) -> None:
+            pass
+    args = type("Args", (), {"save": "lab/runs/pipeline-p/plan.json"})()
+    servers = [{"host": "h1"}, {"host": "h2"}]
+    results = [{"verdict": "go", "running": "1.0", "want": "2.0", "reasons": [], "component": BMC,
+                "rollback": "reinstall 1.0 from bmc/1.0.tar", "ab": "not reported: one image",
+                "checks": [{"check": "image sha256", "ok": True, "detail": "matches"}]},
+               {"verdict": "block", "running": "1.0", "want": "2.0", "reasons": ["no image"], "component": BMC,
+                "rollback": "none", "ab": "not reported: one image",
+                "checks": [{"check": "image in the catalog", "ok": False, "detail": "no image"}]}]
+    with (patch.dict(os.environ, {"LOKI": "http://loki"}),
+          patch.object(rollout.requests, "post", lambda url, json, timeout: sent.append(json) or Loki())):
+        rollout.push_plan(args, servers, [(lab(), 0.0)] * 2, results, [("canary", [servers[0]])],
+                          {"canary_per_model": 1, "waves": [100.0], "max_per_rack": 0, "strict_waves": 1,
+                           "halt_at": 0.1, "max_parallel": 0, "soak": 0})
+    events = [json.loads(b["streams"][0]["values"][0][1]) for b in sent]
+    assert [(e["host"], e["step"], e["state"], e.get("wave")) for e in events] == [
+        ("-", "plan", "saved", None), ("h1", "plan", "go", "canary"), ("h1", "pre-flight check", "passed", "canary"),
+        ("h2", "plan", "block", None), ("h2", "pre-flight check", "failed", None)], events
+    assert (events[4]["check"], events[4]["detail"], events[4]["stage"]) == ("image in the catalog", "no image", "plan")
+    assert events[0]["pipeline"] == "pipeline-p" and events[3]["detail"] == "no image" and events[3]["level"] == "error"
+    # how the lab BMC's update activates, and how it would be rolled back: the BMC alone resets, the host runs on
+    assert (events[1]["activation"], events[1]["host_restarts"], events[1]["rollback"]) == (
+        "Manager.Reset GracefulRestart", False, "reinstall 1.0 from bmc/1.0.tar"), events[1]
 
 
 # The exporter's samples are one series each: two sensors of one name (iLO 4's power supplies) stay two series.

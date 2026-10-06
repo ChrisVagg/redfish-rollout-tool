@@ -1,0 +1,1704 @@
+{
+ "uid": "lab-details",
+ "title": "Lab · Update details",
+ "tags": [
+  "redfish",
+  "lab"
+ ],
+ "editable": false,
+ "description": "How a BMC firmware update runs on the lab, each fact checked against the DMTF Redfish schemas and on a lab BMC, and each pipeline's evidence: drain, the push, the Task, the reset, the rollback",
+ "schemaVersion": 39,
+ "time": {
+  "from": "now-30m",
+  "to": "now"
+ },
+ "refresh": "",
+ "links": [
+  {
+   "type": "dashboards",
+   "tags": [
+    "lab"
+   ],
+   "title": "Lab",
+   "asDropdown": false,
+   "includeVars": false,
+   "keepTime": true
+  }
+ ],
+ "templating": {
+  "list": [
+   {
+    "name": "site",
+    "label": "Site",
+    "type": "constant",
+    "query": "lab",
+    "hide": 2,
+    "current": {
+     "text": "lab",
+     "value": "lab"
+    },
+    "options": [
+     {
+      "text": "lab",
+      "value": "lab",
+      "selected": true
+     }
+    ]
+   },
+   {
+    "name": "pipeline",
+    "label": "Pipeline",
+    "type": "query",
+    "datasource": {
+     "type": "prometheus",
+     "uid": "prometheus"
+    },
+    "hide": 0,
+    "refresh": 2,
+    "query": {
+     "query": "query_result(max by (pipeline) (rollout_hosts{site=\"$site\"}))",
+     "refId": "pipeline"
+    },
+    "regex": "/pipeline=\"([^\"]+)\"/",
+    "sort": 2,
+    "multi": false,
+    "includeAll": false
+   }
+  ]
+ },
+ "annotations": {
+  "list": []
+ },
+ "panels": [
+  {
+   "transparent": false,
+   "type": "text",
+   "title": "A BMC firmware update on this lab, checked against Redfish",
+   "options": {
+    "mode": "markdown",
+    "content": "Each fact is checked twice: against the latest DMTF Redfish schemas, and on a lab BMC (bmc10, 6 Oct 2026), by requests built as `rollout.py` builds them. Every pipeline's own evidence is below.\n\n| | The Redfish standard | This lab's BMC: OpenBMC GB200 NVL, bmcweb | What the rollout does |\n|---|---|---|---|\n| **1 · `@Redfish.OperationApplyTime` is `OnReset`** | `Settings.OperationApplyTime` (Settings v1_5_0): `Immediate`, `OnReset` (*applied when the system or service is reset*), `AtMaintenanceWindowStart`, `InMaintenanceWindowOnReset`, `OnStartUpdateRequest`, `OnTargetReset`. A multipart push carries it in its `UpdateParameters` part. A service may advertise the values it takes in `@Redfish.OperationApplyTimeSupport` | UpdateService v1_11_1 advertises none, so each value was tried: **`OnReset` → 202** and a Task; `OnTargetReset`, `AtMaintenanceWindowStart`, `InMaintenanceWindowOnReset`, `OnStartUpdateRequest` → **400 `PropertyValueNotInList`**. `Immediate` is taken too, and flashes and reboots inside the Task | sends `OnReset` on every update, so the Task's end is seen before the BMC goes away, and the rollout chooses the reset and times the return ✓ |\n| **2 · `OnReset` resets the BMC only: the host isn't restarted** | `OnReset` applies the update when *the system or service* is reset. A BMC image's `SoftwareInventory.RelatedItem` is its Manager, so the reset that applies it is `Manager.Reset`; only a `ComputerSystem.Reset` or `Chassis.Reset` restarts the host | `RelatedItem` → `/redfish/v1/Managers/bmc`; `Manager.Reset` takes `GracefulRestart` and `ForceRestart`. After a **Completed** `OnReset` update the BMC **still ran the old version**; the **Manager reset** (back in 215 s) booted the new one. No `ComputerSystem.Reset` was sent | resets the Manager, `GracefulRestart`, then post-checks; the drain is skipped: *not needed: the reset leaves the host running* ✓ |\n| **3 · A Task tracks the update; it isn't promoted to a Job** | The push answers 202 Accepted with a Task (TaskService). A service that schedules the work may create a Job (JobService: `JobState`, `Schedule`) and list it in the Task's `Links.CreatedResources` | Task v1_4_3 at `/redfish/v1/TaskService/Tasks/0`: Running → **Completed**, 100 %, `TaskStarted`, `TaskProgressChanged`, `TaskCompletedOK`. **No `Links`**: nothing created. **No JobService**: `GET /redfish/v1/JobService` → 404 | follows the Task's `TaskState`, `PercentComplete` and `Messages`, and records each change; pre-flight and the post-check read Jobs too, where a BMC has them ✓ |\n| **4 · The image is never Staged or Armed, so there is nothing to cancel** | SoftwareInventory v1_12: `Active`, `Staged` (*queued for activation on the next `Activate` action*); v1_15: `Armed` (*will become active on the next reset*), `ImageState`; v1_14: the `Cancel` action *cancels the pending activation*, and errors if there is none | SoftwareInventory **v1_1_0**: none of these, no `Activate`, no `Cancel`. The running image is named by `Manager.Links.ActiveSoftwareImage`, the only one in `SoftwareImages`. While a Completed `OnReset` update waited for its reset, the BMC reported **no pending image**: the firmware inventory was empty until the reset. After a **failed** update (`TaskAborted`), the inventory was unchanged and a reset **booted the same version**: nothing was pending | never stages: `OnReset`, then its own reset at once. A failure before the reset leaves the old firmware running and nothing to cancel; after the reset, the rollback reinstalls the version before ✓ |\n"
+   },
+   "id": 1,
+   "gridPos": {
+    "x": 0,
+    "y": 0,
+    "w": 24,
+    "h": 17
+   }
+  },
+  {
+   "transparent": false,
+   "type": "text",
+   "title": "Rollback, per resource the rollout updates",
+   "options": {
+    "mode": "markdown",
+    "content": "Only a way back the rollout carries out counts: a host without one is blocked in pre-flight unless `--accept-no-rollback`. The plan shows each host's below.\n\n| Resource the image updates | How the update activates | The host | Rollback the rollout carries out | Not built |\n|---|---|---|---|---|\n| **Manager**: BMC firmware, the lab's only updatable component | `Manager.Reset`, `GracefulRestart` before `ForceRestart`, from its `ResetActionInfo` | keeps running: not drained | reinstall the version that ran before, from the catalog's package, the same way (push or pull, `OnReset`, `Manager.Reset`), then the post-check again | switching to an A/B bank (`Manager.Links.ActiveSoftwareImage`, `SoftwareInventory.Activate`): a bank the BMC reports doesn't count as a way back |\n| **ComputerSystem**: BIOS, host firmware | `ComputerSystem.Reset`, `GracefulRestart`, `ForceRestart`, then `PowerCycle` | restarts: drained first, given back after | reinstall, `ComputerSystem.Reset`, post-check, then undrain | the same bank switch |\n| **Chassis**: a device whose `RelatedItem` is a Chassis | `Chassis.Reset`, `PowerCycle` first | restarts: drained first | reinstall, `Chassis.Reset`, post-check, undrain | the same bank switch |\n| Any component with `ResetRequiredOnUpdate: false` | no reset | keeps running | reinstall, no reset | |\n\n**When it fails.** Before the reset (a Task that ends in `Exception`, a rejected image): nothing to roll back, the old firmware still runs, and nothing waits to apply on a later reset. After the reset (a post-check that fails, a BMC that doesn't come back): the rollback reinstalls the version before. A rollback that fails too, or no way back: `needs_attention`, left drained for a person. An undrain that fails: `needs_attention`.\n"
+   },
+   "id": 2,
+   "gridPos": {
+    "x": 0,
+    "y": 17,
+    "w": 24,
+    "h": 10
+   }
+  },
+  {
+   "type": "row",
+   "title": "The pipeline's evidence, stage by stage: the plan, then each host's steps; pick the pipeline above",
+   "id": 3,
+   "collapsed": false,
+   "panels": [],
+   "gridPos": {
+    "x": 0,
+    "y": 27,
+    "w": 24,
+    "h": 1
+   }
+  },
+  {
+   "transparent": false,
+   "type": "table",
+   "title": "Plan · every host's pre-flight, before any stage runs",
+   "description": "The plan stage reads every BMC live and pre-flights it: go, into the canary or a wave; skip, nothing to do now; block, a person has to look. Only the hosts that go get into the waves",
+   "datasource": {
+    "type": "loki",
+    "uid": "loki"
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "expr": "{job=\"rollout\",site=\"$site\"} | json | pipeline=\"$pipeline\" | step=\"plan\" | host!=\"-\"",
+     "queryType": "range",
+     "refId": "A",
+     "maxLines": 1000
+    }
+   ],
+   "transformations": [
+    {
+     "id": "extractFields",
+     "options": {
+      "source": "labels",
+      "format": "auto",
+      "replace": false
+     }
+    },
+    {
+     "id": "filterFieldsByName",
+     "options": {
+      "include": {
+       "names": [
+        "wave",
+        "host",
+        "state",
+        "running",
+        "target",
+        "detail"
+       ]
+      }
+     }
+    },
+    {
+     "id": "organize",
+     "options": {
+      "indexByName": {
+       "wave": 0,
+       "host": 1,
+       "state": 2,
+       "running": 3,
+       "target": 4,
+       "detail": 5
+      },
+      "renameByName": {
+       "state": "verdict",
+       "running": "runs now",
+       "detail": "reasons"
+      }
+     }
+    },
+    {
+     "id": "sortBy",
+     "options": {
+      "sort": [
+       {
+        "field": "host",
+        "desc": false
+       }
+      ]
+     }
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "noValue": "-",
+     "custom": {
+      "inspect": true
+     }
+    },
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "host"
+      },
+      "properties": [
+       {
+        "id": "links",
+        "value": [
+         {
+          "title": "This host in the pipeline",
+          "url": "/d/lab-pipeline?${pipeline:queryparam}&var-host=${__value.raw}&${__url_time_range}"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "host"
+      },
+      "properties": [
+       {
+        "id": "custom.width",
+        "value": 125
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "wave"
+      },
+      "properties": [
+       {
+        "id": "custom.width",
+        "value": 75
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "verdict"
+      },
+      "properties": [
+       {
+        "id": "custom.width",
+        "value": 75
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "verdict"
+      },
+      "properties": [
+       {
+        "id": "mappings",
+        "value": [
+         {
+          "type": "value",
+          "options": {
+           "go": {
+            "color": "#559f77",
+            "index": 0
+           },
+           "skip": {
+            "color": "#b67b38",
+            "index": 1
+           },
+           "block": {
+            "color": "#bb626d",
+            "index": 2
+           }
+          }
+         }
+        ]
+       },
+       {
+        "id": "custom.cellOptions",
+        "value": {
+         "type": "color-text"
+        }
+       }
+      ]
+     }
+    ]
+   },
+   "options": {
+    "showHeader": true,
+    "cellHeight": "sm"
+   },
+   "id": 4,
+   "gridPos": {
+    "x": 0,
+    "y": 28,
+    "w": 24,
+    "h": 12
+   },
+   "timeFrom": "15d",
+   "hideTimeOverride": true
+  },
+  {
+   "transparent": false,
+   "type": "table",
+   "title": "Plan · each pre-flight check, on every host",
+   "description": "What the plan's pre-flight checked on each host: the live read, the baseline, the version and its direction, Updateable, nothing staged, the image in the catalog and its sha256, the rollback path, the update service and the push, the health and open tasks. ✓ passed; ✗ failed, with why",
+   "datasource": {
+    "type": "loki",
+    "uid": "loki"
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "expr": "{job=\"rollout\",site=\"$site\"} | json | pipeline=\"$pipeline\" | step=\"pre-flight check\" | stage=\"plan\" | line_format \"{{if eq .state \\\"passed\\\"}}✓{{else}}✗ {{.detail}}{{end}}\"",
+     "queryType": "range",
+     "refId": "A",
+     "maxLines": 5000,
+     "direction": "forward"
+    }
+   ],
+   "transformations": [
+    {
+     "id": "extractFields",
+     "options": {
+      "source": "labels",
+      "format": "auto",
+      "replace": false
+     }
+    },
+    {
+     "id": "groupingToMatrix",
+     "options": {
+      "columnField": "host",
+      "rowField": "check",
+      "valueField": "Line"
+     }
+    },
+    {
+     "id": "organize",
+     "options": {
+      "renameByName": {
+       "check\\host": "check"
+      },
+      "indexByName": {
+       "check\\host": 0,
+       "127.0.0.1:2441": 1,
+       "127.0.0.1:2442": 2,
+       "127.0.0.1:2443": 3,
+       "127.0.0.1:2444": 4,
+       "127.0.0.1:2445": 5,
+       "127.0.0.1:2446": 6,
+       "127.0.0.1:2447": 7,
+       "127.0.0.1:2448": 8,
+       "127.0.0.1:2449": 9,
+       "127.0.0.1:2450": 10
+      }
+     }
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "noValue": "-",
+     "custom": {
+      "inspect": true,
+      "cellOptions": {
+       "type": "color-text"
+      }
+     },
+     "mappings": [
+      {
+       "type": "regex",
+       "options": {
+        "pattern": "^✓.*",
+        "result": {
+         "color": "#559f77",
+         "index": 0
+        }
+       }
+      },
+      {
+       "type": "regex",
+       "options": {
+        "pattern": "^✗.*",
+        "result": {
+         "color": "#bb626d",
+         "index": 1
+        }
+       }
+      }
+     ]
+    },
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "check"
+      },
+      "properties": [
+       {
+        "id": "custom.width",
+        "value": 165
+       },
+       {
+        "id": "custom.cellOptions",
+        "value": {
+         "type": "auto"
+        }
+       },
+       {
+        "id": "mappings",
+        "value": []
+       }
+      ]
+     }
+    ]
+   },
+   "options": {
+    "showHeader": true,
+    "cellHeight": "sm"
+   },
+   "id": 5,
+   "gridPos": {
+    "x": 0,
+    "y": 40,
+    "w": 24,
+    "h": 19
+   },
+   "timeFrom": "15d",
+   "hideTimeOverride": true
+  },
+  {
+   "transparent": false,
+   "type": "table",
+   "title": "1 · Pre-flight again, right before each host is touched",
+   "description": "Step 1 of every host, in its stage: a fresh read and the same checks again, since the host may have changed since the plan, and the BMC must be the one the plan approved (its identity: the Redfish service UUID)",
+   "datasource": {
+    "type": "loki",
+    "uid": "loki"
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "expr": "{job=\"rollout\",site=\"$site\"} | json | pipeline=\"$pipeline\" | step=\"pre-flight\" | json reasons_text=\"reasons\"",
+     "queryType": "range",
+     "refId": "A",
+     "maxLines": 1000
+    }
+   ],
+   "transformations": [
+    {
+     "id": "extractFields",
+     "options": {
+      "source": "labels",
+      "format": "auto",
+      "replace": false
+     }
+    },
+    {
+     "id": "filterFieldsByName",
+     "options": {
+      "include": {
+       "names": [
+        "host",
+        "stage",
+        "wave",
+        "state",
+        "running",
+        "target",
+        "identity_service_uuid",
+        "reasons_text"
+       ]
+      }
+     }
+    },
+    {
+     "id": "organize",
+     "options": {
+      "indexByName": {
+       "host": 0,
+       "stage": 1,
+       "wave": 2,
+       "state": 3,
+       "running": 4,
+       "target": 5,
+       "identity_service_uuid": 6,
+       "reasons_text": 7
+      },
+      "renameByName": {
+       "state": "verdict",
+       "running": "runs now",
+       "identity_service_uuid": "BMC identity: service UUID",
+       "reasons_text": "reasons"
+      }
+     }
+    },
+    {
+     "id": "sortBy",
+     "options": {
+      "sort": [
+       {
+        "field": "host",
+        "desc": false
+       }
+      ]
+     }
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "noValue": "-",
+     "custom": {
+      "inspect": true
+     }
+    },
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "host"
+      },
+      "properties": [
+       {
+        "id": "links",
+        "value": [
+         {
+          "title": "This host in the pipeline",
+          "url": "/d/lab-pipeline?${pipeline:queryparam}&var-host=${__value.raw}&${__url_time_range}"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "host"
+      },
+      "properties": [
+       {
+        "id": "custom.width",
+        "value": 125
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "stage"
+      },
+      "properties": [
+       {
+        "id": "custom.width",
+        "value": 75
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "wave"
+      },
+      "properties": [
+       {
+        "id": "custom.width",
+        "value": 75
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "verdict"
+      },
+      "properties": [
+       {
+        "id": "custom.width",
+        "value": 75
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "BMC identity: service UUID"
+      },
+      "properties": [
+       {
+        "id": "custom.width",
+        "value": 300
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "verdict"
+      },
+      "properties": [
+       {
+        "id": "mappings",
+        "value": [
+         {
+          "type": "value",
+          "options": {
+           "go": {
+            "color": "#559f77",
+            "index": 0
+           },
+           "skip": {
+            "color": "#b67b38",
+            "index": 1
+           },
+           "block": {
+            "color": "#bb626d",
+            "index": 2
+           }
+          }
+         }
+        ]
+       },
+       {
+        "id": "custom.cellOptions",
+        "value": {
+         "type": "color-text"
+        }
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "reasons"
+      },
+      "properties": [
+       {
+        "id": "mappings",
+        "value": [
+         {
+          "type": "value",
+          "options": {
+           "[]": {
+            "text": "-",
+            "index": 0
+           }
+          }
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   },
+   "options": {
+    "showHeader": true,
+    "cellHeight": "sm"
+   },
+   "id": 6,
+   "gridPos": {
+    "x": 0,
+    "y": 59,
+    "w": 24,
+    "h": 12
+   },
+   "timeFrom": "15d",
+   "hideTimeOverride": true
+  },
+  {
+   "transparent": false,
+   "type": "table",
+   "title": "1 · Each pre-flight check again, on every host",
+   "description": "The same checks on the fresh read of step 1, in the canary and the waves: a host that changed since the plan fails here, before anything is written",
+   "datasource": {
+    "type": "loki",
+    "uid": "loki"
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "expr": "{job=\"rollout\",site=\"$site\"} | json | pipeline=\"$pipeline\" | step=\"pre-flight check\" | stage!=\"plan\" | line_format \"{{if eq .state \\\"passed\\\"}}✓{{else}}✗ {{.detail}}{{end}}\"",
+     "queryType": "range",
+     "refId": "A",
+     "maxLines": 5000,
+     "direction": "forward"
+    }
+   ],
+   "transformations": [
+    {
+     "id": "extractFields",
+     "options": {
+      "source": "labels",
+      "format": "auto",
+      "replace": false
+     }
+    },
+    {
+     "id": "groupingToMatrix",
+     "options": {
+      "columnField": "host",
+      "rowField": "check",
+      "valueField": "Line"
+     }
+    },
+    {
+     "id": "organize",
+     "options": {
+      "renameByName": {
+       "check\\host": "check"
+      },
+      "indexByName": {
+       "check\\host": 0,
+       "127.0.0.1:2441": 1,
+       "127.0.0.1:2442": 2,
+       "127.0.0.1:2443": 3,
+       "127.0.0.1:2444": 4,
+       "127.0.0.1:2445": 5,
+       "127.0.0.1:2446": 6,
+       "127.0.0.1:2447": 7,
+       "127.0.0.1:2448": 8,
+       "127.0.0.1:2449": 9,
+       "127.0.0.1:2450": 10
+      }
+     }
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "noValue": "-",
+     "custom": {
+      "inspect": true,
+      "cellOptions": {
+       "type": "color-text"
+      }
+     },
+     "mappings": [
+      {
+       "type": "regex",
+       "options": {
+        "pattern": "^✓.*",
+        "result": {
+         "color": "#559f77",
+         "index": 0
+        }
+       }
+      },
+      {
+       "type": "regex",
+       "options": {
+        "pattern": "^✗.*",
+        "result": {
+         "color": "#bb626d",
+         "index": 1
+        }
+       }
+      }
+     ]
+    },
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "check"
+      },
+      "properties": [
+       {
+        "id": "custom.width",
+        "value": 165
+       },
+       {
+        "id": "custom.cellOptions",
+        "value": {
+         "type": "auto"
+        }
+       },
+       {
+        "id": "mappings",
+        "value": []
+       }
+      ]
+     }
+    ]
+   },
+   "options": {
+    "showHeader": true,
+    "cellHeight": "sm"
+   },
+   "id": 7,
+   "gridPos": {
+    "x": 0,
+    "y": 71,
+    "w": 24,
+    "h": 19
+   },
+   "timeFrom": "15d",
+   "hideTimeOverride": true
+  },
+  {
+   "transparent": false,
+   "type": "table",
+   "title": "2 · Drain: the host keeps running",
+   "description": "A BMC firmware update resets the Manager, the BMC alone: the host is not restarted, so it isn't drained",
+   "datasource": {
+    "type": "loki",
+    "uid": "loki"
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "expr": "{job=\"rollout\",site=\"$site\"} | json | pipeline=\"$pipeline\" | step=\"drain\" | state!=\"start\"",
+     "queryType": "range",
+     "refId": "A",
+     "maxLines": 1000
+    }
+   ],
+   "transformations": [
+    {
+     "id": "extractFields",
+     "options": {
+      "source": "labels",
+      "format": "auto",
+      "replace": false
+     }
+    },
+    {
+     "id": "filterFieldsByName",
+     "options": {
+      "include": {
+       "names": [
+        "host",
+        "wave",
+        "state",
+        "detail"
+       ]
+      }
+     }
+    },
+    {
+     "id": "organize",
+     "options": {
+      "indexByName": {
+       "host": 0,
+       "wave": 1,
+       "state": 2,
+       "detail": 3
+      },
+      "renameByName": {
+       "state": "drain",
+       "detail": "why"
+      }
+     }
+    },
+    {
+     "id": "sortBy",
+     "options": {
+      "sort": [
+       {
+        "field": "host",
+        "desc": false
+       }
+      ]
+     }
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "noValue": "-",
+     "custom": {
+      "inspect": true
+     }
+    },
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "host"
+      },
+      "properties": [
+       {
+        "id": "links",
+        "value": [
+         {
+          "title": "This host in the pipeline",
+          "url": "/d/lab-pipeline?${pipeline:queryparam}&var-host=${__value.raw}&${__url_time_range}"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "host"
+      },
+      "properties": [
+       {
+        "id": "custom.width",
+        "value": 125
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "wave"
+      },
+      "properties": [
+       {
+        "id": "custom.width",
+        "value": 70
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "drain"
+      },
+      "properties": [
+       {
+        "id": "custom.width",
+        "value": 80
+       }
+      ]
+     }
+    ]
+   },
+   "options": {
+    "showHeader": true,
+    "cellHeight": "sm"
+   },
+   "id": 8,
+   "gridPos": {
+    "x": 0,
+    "y": 90,
+    "w": 24,
+    "h": 12
+   },
+   "timeFrom": "15d",
+   "hideTimeOverride": true
+  },
+  {
+   "transparent": false,
+   "type": "table",
+   "title": "3 · The update request: a multipart push, applied on reset",
+   "description": "What rollout.py sent: the method, the BMC's MultipartHttpPushUri, @Redfish.OperationApplyTime in the UpdateParameters part, and the package, by the catalog's file and sha256",
+   "datasource": {
+    "type": "loki",
+    "uid": "loki"
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "expr": "{job=\"rollout\",site=\"$site\"} | json | pipeline=\"$pipeline\" | step=~\"update|rollback update\" | state=\"start\"",
+     "queryType": "range",
+     "refId": "A",
+     "maxLines": 1000
+    }
+   ],
+   "transformations": [
+    {
+     "id": "extractFields",
+     "options": {
+      "source": "labels",
+      "format": "auto",
+      "replace": false
+     }
+    },
+    {
+     "id": "filterFieldsByName",
+     "options": {
+      "include": {
+       "names": [
+        "host",
+        "step",
+        "method",
+        "uri",
+        "apply_time",
+        "image_file",
+        "image_sha256"
+       ]
+      }
+     }
+    },
+    {
+     "id": "organize",
+     "options": {
+      "indexByName": {
+       "host": 0,
+       "step": 1,
+       "method": 2,
+       "uri": 3,
+       "apply_time": 4,
+       "image_file": 5,
+       "image_sha256": 6
+      },
+      "renameByName": {
+       "apply_time": "@Redfish.OperationApplyTime",
+       "image_file": "package",
+       "image_sha256": "sha256"
+      }
+     }
+    },
+    {
+     "id": "sortBy",
+     "options": {
+      "sort": [
+       {
+        "field": "host",
+        "desc": false
+       }
+      ]
+     }
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "noValue": "-",
+     "custom": {
+      "inspect": true
+     }
+    },
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "host"
+      },
+      "properties": [
+       {
+        "id": "links",
+        "value": [
+         {
+          "title": "This host in the pipeline",
+          "url": "/d/lab-pipeline?${pipeline:queryparam}&var-host=${__value.raw}&${__url_time_range}"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "host"
+      },
+      "properties": [
+       {
+        "id": "custom.width",
+        "value": 125
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "step"
+      },
+      "properties": [
+       {
+        "id": "custom.width",
+        "value": 110
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "method"
+      },
+      "properties": [
+       {
+        "id": "custom.width",
+        "value": 65
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "uri"
+      },
+      "properties": [
+       {
+        "id": "custom.width",
+        "value": 290
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "@Redfish.OperationApplyTime"
+      },
+      "properties": [
+       {
+        "id": "custom.width",
+        "value": 215
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "sha256"
+      },
+      "properties": [
+       {
+        "id": "custom.width",
+        "value": 150
+       }
+      ]
+     }
+    ]
+   },
+   "options": {
+    "showHeader": true,
+    "cellHeight": "sm"
+   },
+   "id": 9,
+   "gridPos": {
+    "x": 0,
+    "y": 102,
+    "w": 24,
+    "h": 13
+   },
+   "timeFrom": "15d",
+   "hideTimeOverride": true
+  },
+  {
+   "transparent": false,
+   "type": "table",
+   "title": "3 · What tracks it: a Task of the TaskService, never a Job",
+   "description": "The 202 Accepted's Task, as it ended: its URI under TaskService/Tasks, its TaskState and TaskStatus and its last message. The lab BMC has no JobService, so no Job is created and the Task carries every message",
+   "datasource": {
+    "type": "loki",
+    "uid": "loki"
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "expr": "{job=\"rollout\",site=\"$site\"} | json | pipeline=\"$pipeline\" | step=~\"update|rollback update\" | state!=\"start\" | state!=\"task\"",
+     "queryType": "range",
+     "refId": "A",
+     "maxLines": 1000
+    }
+   ],
+   "transformations": [
+    {
+     "id": "extractFields",
+     "options": {
+      "source": "labels",
+      "format": "auto",
+      "replace": false
+     }
+    },
+    {
+     "id": "filterFieldsByName",
+     "options": {
+      "include": {
+       "names": [
+        "host",
+        "step",
+        "task_uri",
+        "task_state",
+        "task_status",
+        "task_percent",
+        "detail"
+       ]
+      }
+     }
+    },
+    {
+     "id": "organize",
+     "options": {
+      "indexByName": {
+       "host": 0,
+       "step": 1,
+       "task_uri": 2,
+       "task_state": 3,
+       "task_status": 4,
+       "task_percent": 5,
+       "detail": 6
+      },
+      "renameByName": {
+       "task_uri": "Task",
+       "task_state": "TaskState",
+       "task_status": "TaskStatus",
+       "task_percent": "%",
+       "detail": "last message"
+      }
+     }
+    },
+    {
+     "id": "sortBy",
+     "options": {
+      "sort": [
+       {
+        "field": "host",
+        "desc": false
+       }
+      ]
+     }
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "noValue": "-",
+     "custom": {
+      "inspect": true
+     }
+    },
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "host"
+      },
+      "properties": [
+       {
+        "id": "links",
+        "value": [
+         {
+          "title": "This host in the pipeline",
+          "url": "/d/lab-pipeline?${pipeline:queryparam}&var-host=${__value.raw}&${__url_time_range}"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "host"
+      },
+      "properties": [
+       {
+        "id": "custom.width",
+        "value": 125
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "step"
+      },
+      "properties": [
+       {
+        "id": "custom.width",
+        "value": 130
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "Task"
+      },
+      "properties": [
+       {
+        "id": "custom.width",
+        "value": 230
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "%"
+      },
+      "properties": [
+       {
+        "id": "custom.width",
+        "value": 50
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "TaskState"
+      },
+      "properties": [
+       {
+        "id": "mappings",
+        "value": [
+         {
+          "type": "value",
+          "options": {
+           "Completed": {
+            "color": "#559f77",
+            "index": 0
+           },
+           "Exception": {
+            "color": "#bb626d",
+            "index": 1
+           },
+           "Killed": {
+            "color": "#bb626d",
+            "index": 2
+           },
+           "Cancelled": {
+            "color": "#b67b38",
+            "index": 3
+           }
+          }
+         }
+        ]
+       },
+       {
+        "id": "custom.cellOptions",
+        "value": {
+         "type": "color-text"
+        }
+       }
+      ]
+     }
+    ]
+   },
+   "options": {
+    "showHeader": true,
+    "cellHeight": "sm"
+   },
+   "id": 10,
+   "gridPos": {
+    "x": 0,
+    "y": 115,
+    "w": 24,
+    "h": 12
+   },
+   "timeFrom": "15d",
+   "hideTimeOverride": true
+  },
+  {
+   "transparent": false,
+   "type": "table",
+   "title": "4 · Activation: the Manager's reset",
+   "description": "The reset that applies an OnReset update: the action, its target, the ResetType chosen from the ResetActionInfo, and how long the BMC took to answer again",
+   "datasource": {
+    "type": "loki",
+    "uid": "loki"
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "refId": "A",
+     "queryType": "range",
+     "maxLines": 1000,
+     "expr": "{job=\"rollout\",site=\"$site\"} | json | pipeline=\"$pipeline\" | step=~\"reset|rollback reset\" | state=\"start\""
+    },
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "refId": "B",
+     "queryType": "range",
+     "maxLines": 1000,
+     "expr": "{job=\"rollout\",site=\"$site\"} | json | pipeline=\"$pipeline\" | step=~\"reset|rollback reset\" | state!=\"start\""
+    }
+   ],
+   "transformations": [
+    {
+     "id": "extractFields",
+     "options": {
+      "source": "labels",
+      "format": "auto",
+      "replace": false
+     }
+    },
+    {
+     "id": "filterFieldsByName",
+     "options": {
+      "include": {
+       "names": [
+        "host",
+        "step",
+        "action",
+        "resource",
+        "reset_type",
+        "detail"
+       ]
+      }
+     }
+    },
+    {
+     "id": "joinByField",
+     "options": {
+      "byField": "host",
+      "mode": "outer"
+     }
+    },
+    {
+     "id": "organize",
+     "options": {
+      "indexByName": {
+       "host": 0,
+       "step": 1,
+       "action": 2,
+       "resource": 3,
+       "reset_type": 4,
+       "detail": 5
+      },
+      "renameByName": {
+       "reset_type": "ResetType",
+       "detail": "result"
+      },
+      "excludeByName": {
+       "step 2": true
+      }
+     }
+    },
+    {
+     "id": "sortBy",
+     "options": {
+      "sort": [
+       {
+        "field": "host",
+        "desc": false
+       }
+      ]
+     }
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "noValue": "-",
+     "custom": {
+      "inspect": true
+     }
+    },
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "host"
+      },
+      "properties": [
+       {
+        "id": "links",
+        "value": [
+         {
+          "title": "This host in the pipeline",
+          "url": "/d/lab-pipeline?${pipeline:queryparam}&var-host=${__value.raw}&${__url_time_range}"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "host"
+      },
+      "properties": [
+       {
+        "id": "custom.width",
+        "value": 125
+       }
+      ]
+     }
+    ]
+   },
+   "options": {
+    "showHeader": true,
+    "cellHeight": "sm"
+   },
+   "id": 11,
+   "gridPos": {
+    "x": 0,
+    "y": 127,
+    "w": 24,
+    "h": 12
+   },
+   "timeFrom": "15d",
+   "hideTimeOverride": true
+  },
+  {
+   "transparent": false,
+   "type": "table",
+   "title": "Rollback per host, as the plan computed it",
+   "description": "The plan's answer for each host's component: the activation, whether the host restarts (then it is drained), an A/B bank if the BMC reports one, and the rollback the rollout would carry out",
+   "datasource": {
+    "type": "loki",
+    "uid": "loki"
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "expr": "{job=\"rollout\",site=\"$site\"} | json | pipeline=\"$pipeline\" | step=\"plan\" | host!=\"-\"",
+     "queryType": "range",
+     "refId": "A",
+     "maxLines": 1000
+    }
+   ],
+   "transformations": [
+    {
+     "id": "extractFields",
+     "options": {
+      "source": "labels",
+      "format": "auto",
+      "replace": false
+     }
+    },
+    {
+     "id": "filterFieldsByName",
+     "options": {
+      "include": {
+       "names": [
+        "host",
+        "component",
+        "activation",
+        "host_restarts",
+        "ab",
+        "rollback"
+       ]
+      }
+     }
+    },
+    {
+     "id": "organize",
+     "options": {
+      "indexByName": {
+       "host": 0,
+       "component": 1,
+       "activation": 2,
+       "host_restarts": 3,
+       "ab": 4,
+       "rollback": 5
+      },
+      "renameByName": {
+       "host_restarts": "host restarts",
+       "ab": "A/B bank reported",
+       "rollback": "rollback if it fails"
+      }
+     }
+    },
+    {
+     "id": "sortBy",
+     "options": {
+      "sort": [
+       {
+        "field": "host",
+        "desc": false
+       }
+      ]
+     }
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "noValue": "-",
+     "custom": {
+      "inspect": true
+     }
+    },
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "host"
+      },
+      "properties": [
+       {
+        "id": "links",
+        "value": [
+         {
+          "title": "This host in the pipeline",
+          "url": "/d/lab-pipeline?${pipeline:queryparam}&var-host=${__value.raw}&${__url_time_range}"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "host"
+      },
+      "properties": [
+       {
+        "id": "custom.width",
+        "value": 125
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "component"
+      },
+      "properties": [
+       {
+        "id": "custom.width",
+        "value": 130
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "activation"
+      },
+      "properties": [
+       {
+        "id": "custom.width",
+        "value": 210
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "host restarts"
+      },
+      "properties": [
+       {
+        "id": "custom.width",
+        "value": 140
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "host restarts"
+      },
+      "properties": [
+       {
+        "id": "mappings",
+        "value": [
+         {
+          "type": "value",
+          "options": {
+           "false": {
+            "text": "no: the BMC alone",
+            "index": 0
+           },
+           "true": {
+            "text": "yes: drained first",
+            "index": 1
+           }
+          }
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "A/B bank reported"
+      },
+      "properties": [
+       {
+        "id": "custom.width",
+        "value": 200
+       }
+      ]
+     }
+    ]
+   },
+   "options": {
+    "showHeader": true,
+    "cellHeight": "sm"
+   },
+   "id": 12,
+   "gridPos": {
+    "x": 0,
+    "y": 139,
+    "w": 24,
+    "h": 12
+   },
+   "timeFrom": "15d",
+   "hideTimeOverride": true
+  }
+ ]
+}

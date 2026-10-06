@@ -58,8 +58,8 @@ from rich.rule import Rule
 from rich.table import Column, Table
 from rich.text import Text
 
-from constants import (ACTION_ROW, ACTIONS_ROW, APPLY_TIME, BASELINE, CACHE_CA, DOTTED, FAILED_STATES, FAULTS,
-                       HOST_ROW, IMAGE_CACHE, IMAGES, INVENTORY_FILE, LEFT_OUT_ROW, NEXT_STEP, PLAN_ROW, PREFLIGHT_ROW,
+from constants import (ACTION_ROW, ACTIONS_ROW, APPLY_TIME, BASELINE, CACHE_CA, DOTTED, FAILED_STATES, FAULTS, HOST_ROW,
+                       HOST_STEP, IMAGE_CACHE, IMAGES, INVENTORY_FILE, LEFT_OUT_ROW, NEXT_STEP, PLAN_ROW, PREFLIGHT_ROW,
                        PROPS, REPORT_SCHEMA, RESET_PREFERENCE, ROLLOUT, ROLLOUT_DEFAULTS, ROOT, RUNNING_STATES, RUNS,
                        SCHEDULER_TIMEOUT, SITE, SPOOL, STEP_ROW, STYLE, TASK_TIMEOUT, VERSIONS_ROW, WAVE_ROW)
 from helpers import (block, first_of, first_real, identity, label, link, norm, obj, of, output_options, reason, sample,
@@ -615,6 +615,34 @@ def save_plan(args, servers, results, planned, rollout) -> None:
                      for s, r in zip(servers, results)}}, indent=2))
 
 
+# A pre-flight's checks to Loki, one event each, so a dashboard can lay every check against every host: Loki can't
+# split the list a pre-flight event carries. base: the pre-flight event, its host, pipeline, stage and wave
+def push_checks(base, checks, sending) -> None:
+    for c in checks or []:
+        push_event({**{k: base.get(k) for k in ("at", "host", "pipeline", "stage", "wave")}, "step": "pre-flight check",
+                    "state": "passed" if c["ok"] else "failed", "check": c["check"], "detail": c["detail"]}, sending)
+
+
+# The saved plan to Loki too, if LOKI is set: the policy and the waves, then every host's pre-flight verdict, its wave,
+# versions and reasons, and for its component how the update activates and how it would be rolled back, so the
+# pipeline's dashboard shows the plan before any stage runs
+def push_plan(args, servers, reads, results, planned, rollout) -> None:
+    sending, at = {}, datetime.now(timezone.utc).isoformat(timespec="seconds")
+    plan = {"at": at, "step": "plan", "pipeline": Path(args.save).parent.name, "stage": "plan"}
+    wave_of = {s["host"]: name for name, hosts in planned for s in hosts}
+    push_event({**plan, "host": "-", "state": "saved", "detail": rollout_text(rollout),
+                "waves": {name: [s["host"] for s in hosts] for name, hosts in planned}}, sending)
+    for s, (found, _), r in zip(servers, reads, results):
+        kind, uri = activation(found, r["component"]) if "error" not in found.get(ROOT, {}) else ("-", None)
+        rtype = reset_type(found, kind, uri) if uri else None
+        push_event({**plan, "host": s["host"], "state": r["verdict"], "wave": wave_of.get(s["host"]),
+                    "running": text(r["running"]), "target": r["want"], "detail": "; ".join(r["reasons"]) or None,
+                    "component": r["component"], "rollback": r["rollback"], "ab": r["ab"],
+                    "activation": f"{kind}.Reset {text(rtype)}" if kind not in ("none", "-") else kind,
+                    "host_restarts": kind in ("ComputerSystem", "Chassis")}, sending)
+        push_checks({**plan, "host": s["host"], "wave": wave_of.get(s["host"])}, r["checks"], sending)
+
+
 # Plan: step 1 shown, pre-flight per host and the waves; without a component, a report per host
 def plan(args) -> list:
     step = prepare(args)
@@ -639,6 +667,7 @@ def plan(args) -> list:
                f"Rollout policy ({rollout['file'] or 'defaults'}): {rollout_text(rollout)}")
     if args.save:
         save_plan(args, servers, results, planned, rollout)
+        push_plan(args, servers, reads, results, planned, rollout)
         caption += f" · saved to {args.save}"
         if counts["block"] and not counts["go"]:  # nothing can go because of blocks: the pipeline stops here
             args.exit_code = 1
@@ -656,12 +685,13 @@ _record_lock = threading.Lock()
 
 
 # Append one event to the run's record, runs/<run id>.jsonl: before an action its intent, after it its result
-def record(path, host, step, state, **detail) -> None:
+def record(path, host, step, state, **detail) -> dict:
     event = {"at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "host": host, "step": step,
              "state": state, **detail}
     with _record_lock, open(path, "a") as f:
         f.write(json.dumps(event, default=str) + "\n")
     log.info("%s: %s %s%s", host, step, state, f" · {detail['detail']}" if detail.get("detail") else "")
+    return event
 
 
 # A failed answer as text: the Redfish error's first extended message, else its message, with the status
@@ -1084,12 +1114,23 @@ def run(args) -> list:
     path = RUNS / f"{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}.jsonl"
     pipeline = Path(args.plan).parent.name if args.plan else path.stem
     group, pushing = f"site/{SITE.name}/pipeline/{pipeline}/stage/{args.stage}", {}
+    # the stage's part of the saved plan: a host the run hasn't reached yet takes its versions from the plan
+    # and how many hosts the whole plan has, which a canary that halts never reaches
+    planned_stage = {**saved, "waves": stage, "planned": sum(map(len, saved["waves"].values()))} if saved else None
 
-    # lambda *event, **detail: record one event, then push the run's metrics as they stand
+    wave_of, sending = {h: name for name, hosts in planned for h in (s["host"] for s in hosts)}, {}
+
+    # lambda *event, **detail: record one event, send it to Loki, then push the run's metrics as they stand
     def rec(*event, **detail) -> None:
-        record(path, *event, **detail)
-        push_metrics(path, group, pushing)
+        e = record(path, *event, **detail)
+        sent = {**e, "pipeline": pipeline, "stage": args.stage, "wave": e.get("wave") or wave_of.get(e["host"]),
+                **({"next": NEXT_STEP.get(e["state"])} if e["step"] == "done" else {})}
+        push_event(sent, sending)
+        if e["step"] == "pre-flight":
+            push_checks(sent, e.get("checks"), sending)
+        push_metrics(path, group, pushing, planned_stage)
     rec("-", "run", "start", component=args.component, waves={name: [s["host"] for s in h] for name, h in planned},
+        target=", ".join(sorted({r["want"] for r in results if r["verdict"] == "go" and r["want"]})),
         plan=args.plan, stage=args.stage, halt_at=rollout["halt_at"], rollout=rollout, apply_time=APPLY_TIME,
         faults=policy["faults"])
     last = list(saved["waves"])[-1] if saved else planned[-1][0]
@@ -1123,6 +1164,7 @@ def metrics(doc) -> str:
     # lambda name, value, **labels: add one sample
     add = lambda name, value, **labels: lines.append(sample(name, value, **labels))
 
+    drained = 0
     for w in doc["waves"]:
         for state, n in w["totals"].items():
             add("rollout_hosts", n, wave=w["name"], state=state)
@@ -1132,8 +1174,15 @@ def metrics(doc) -> str:
             add("rollout_gate_tried", g["tried"], wave=w["name"])
             add("rollout_gate_halted", int(g["result"] == "halted"), wave=w["name"])
         for d in w["hosts"]:
+            # drained and not given back: the host is out of service
+            drained += any(s["step"] == "drain" and s.get("result") == "done" for s in d["steps"]) and not any(
+                s["step"] == "undrain" and s.get("result") == "done" for s in d["steps"])
             add("rollout_host_info", 1, wave=w["name"], host=d["host"], state=d["state"], before=text(d["before"]),
                    target=text(d["target"]), after=text(d["after"]))
+            # running: the step it is in (a rollback's steps count as rollback); ended: how
+            step = d["steps"][-1]["step"] if d["steps"] and d["state"] == "running" else d["state"]
+            add("rollout_host_step", HOST_STEP.get("rollback" if step.startswith("rollback") else step, 0),
+                wave=w["name"], host=d["host"])
             if d["seconds"] is not None:
                 add("rollout_host_seconds", d["seconds"], wave=w["name"], host=d["host"])
             for s in d["steps"]:
@@ -1143,6 +1192,9 @@ def metrics(doc) -> str:
                     for c in s.get("checks") or []:
                         add("rollout_check_ok", int(c["ok"]), host=d["host"], step=s["step"], check=c["check"],
                                detail=c["detail"])
+    add("rollout_hosts_drained", drained)
+    if doc["seconds"] is not None:
+        add("rollout_seconds", doc["seconds"])
     add("rollout_running", int(doc["result"] == "running"))
     return "\n".join(lines) + "\n"
 
@@ -1150,15 +1202,36 @@ def metrics(doc) -> str:
 _push_lock = threading.Lock()
 
 
+# Send one event of a run to Loki, if LOKI is set: the record's line with its pipeline, stage and wave, best effort like
+# the metrics. Its labels are only job and site: every other field is in the line, which LogQL's json reads, so Loki
+# keeps one stream per site however many pipelines and hosts there are
+def push_event(event, state) -> None:
+    url = os.environ.get("LOKI")
+    if not url or state.get("off"):
+        return
+    try:
+        # its level, which Grafana colours a line by: what failed, what was rolled back or skipped, the rest
+        bad = ("failed", "Exception", "halted", "needs_attention", "block", "incomplete")
+        level = "error" if event["state"] in bad else "warning" if event["state"] in ("rolled_back", "skip") else "info"
+        stream = {"stream": {"job": "rollout", "site": SITE.name},
+                  "values": [[str(time.time_ns()), json.dumps({**event, "level": level}, default=str)]]}
+        requests.post(f"{url.rstrip('/')}/loki/api/v1/push", json={"streams": [stream]}, timeout=2).raise_for_status()
+    except Exception as e:
+        state["off"] = True
+        log.warning("events: %s; no more sent to Loki this run", reason(str(e)))
+
+
 # Push a run's metrics to the Pushgateway, if PUSHGATEWAY is set: best effort, a rollout never waits on its monitoring.
 # Each push replaces the run's group (pipeline, stage) with the report as the record stands now
-def push_metrics(path, group, state) -> None:
+def push_metrics(path, group, state, plan=None) -> None:
     url = os.environ.get("PUSHGATEWAY")
     if not url or state.get("off"):
         return
     with _push_lock:
         try:
-            body = metrics(pipeline_report(None, events_of([path]), path.stem, [path]))
+            body = metrics(pipeline_report(plan, events_of([path]), path.stem, [path]))
+            if plan and plan.get("planned"):
+                body += sample("rollout_planned_hosts", plan["planned"]) + "\n"
             requests.put(f"{url.rstrip('/')}/metrics/job/rollout/{group}", data=body, timeout=2).raise_for_status()
         except Exception as e: 
             state["off"] = True

@@ -1,5 +1,6 @@
 """Prod's dashboards, made from lab's: dashboards/lab/*.json into dashboards/prod/, the same panels fixed to site prod,
-and on the pipeline a note that production is read-only. Edit the lab dashboards only; make monitor-up runs this."""
+and on the pipeline a note that production is read-only. Not the update details, which document the lab's BMC. Edit
+the lab dashboards only; make monitor-up runs this."""
 import json
 import re
 from pathlib import Path
@@ -25,6 +26,8 @@ def prod(x):
 if __name__ == "__main__":
     (DASHBOARDS / "prod").mkdir(exist_ok=True)
     for lab in sorted((DASHBOARDS / "lab").glob("*.json")):
+        if lab.stem == "details":  # what a lab BMC was checked to do, not a fleet's
+            continue
         doc = prod(json.loads(lab.read_text()))
         if lab.stem == "pipeline":  # nothing pushes from prod: the note on top, every panel below it
             for panel in doc["panels"]:
