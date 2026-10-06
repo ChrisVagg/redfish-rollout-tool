@@ -57,5 +57,5 @@ if [ -f "$out/plan.json" ] && { [ "${#records[@]}" -gt 0 ] || [ "$status" -ne 0 
 fi
 printf '\nPipeline %s. Plan and reports: %s/\n' \
   "$([ "$status" -eq 0 ] && echo passed || echo 'stopped: a stage FAILED')" "$out"
-[ -z "$yes" ] && echo "Every stage was a dry run: nothing was changed. YES=1 (make update) to update."
+[ -z "$yes" ] && echo "Every stage was a dry run: no firmware changes. YES=1 (make update) to update."
 exit "$status"

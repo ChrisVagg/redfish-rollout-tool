@@ -57,7 +57,7 @@ Poller: reads every BMC's Redfish resources, never writes
 
 Rollout: firmware updates, a canary first, then waves, each after a gate
   make plan                pre-flight, read-only: per host, what it can update and how (COMPONENT for its waves)
-  make dry-run             the whole pipeline, nothing written: plan, canary, waves, report
+  make dry-run             plan, canary and wave previews; no firmware changes
   make update              the real update, once make test passes: the lab only
   make report              the latest pipeline's report: the verdict, then every host (HOST=... for its steps)
   make watch               follow a running update from a second terminal

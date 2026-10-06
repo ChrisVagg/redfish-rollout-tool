@@ -1105,7 +1105,7 @@ def run(args) -> list:
     plan_view = [Text(caption), *([legend, block("Actions per host", ACTIONS_ROW, rows)] if rows
                                   else [Text("Nothing to do: no host passes")])]
     if not args.yes:
-        return [*plan_view, Text("\n".join([*skipped, "Dry run: nothing was changed. Add --yes to run it."]))]
+        return [*plan_view, Text("\n".join([*skipped, "Dry run: no firmware changes. Add --yes to run it."]))]
     refused = [s["host"] for name, hosts in planned for s in hosts if s.get("writable") is not True]
     if refused:
         raise SystemExit(f"not writable in {args.inventory}: {', '.join(refused)}. Only hosts marked writable: true "
