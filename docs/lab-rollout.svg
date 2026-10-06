@@ -1,4 +1,4 @@
-<svg viewBox="0 0 900 1554" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="The rollout as rollout.py builds it, the same code on every site with the policy from the site&#x27;s rollout.yaml. Stage 1, plan, read-only and so on production too: every host is read live, in parallel, in a session of about 10 to 30 GETs: the service root, systems, managers and chassis, the UpdateService with its firmware inventory and SimpleUpdate ActionInfo, tasks and jobs, and each reset&#x27;s ActionInfo. The image is fetched once from the site&#x27;s cache into the spool and its sha256 compared with images.yaml. Pre-flight decides go, skip or block, every check recorded: a skip is nothing to do now or busy, try a later wave; a block needs a person: no live read, health not OK, a failed job or task, a downgrade or an order it can&#x27;t tell without --allow-downgrade, Updateable false, under LowestSupportedVersion, no image or a wrong sha256 or size, no image of the running version to reinstall without --accept-no-rollback, a host reset with no drain set, no update service or no way in. The hosts that pass go into a canary per model and waves by cumulative percentage, at most max_per_rack of a rack in a wave; plan.json freezes the inputs&#x27; sha256, the policy, the waves and each verdict with the BMC&#x27;s identity. Each stage then refuses changed inputs, --halt-at and any host not writable, and without --yes is a dry run. Every host of a wave, max_parallel at once: 1 pre-flight again on a fresh read, the BMC the one the plan read; 2 drain, only when the reset restarts the host, by rollout.yaml&#x27;s command, skipped in the lab; 3 update, a multipart push of the spooled file or a SimpleUpdate pull of a URL, with Targets and OperationApplyTime OnReset, the Task followed until it ends; 4 reset, the Manager or ComputerSystem reset that activates it, GracefulRestart first, and a wait until it is back; 5 post-check on a fresh read, the target version, health OK or no worse, no new failed job or task; 6 undrain. A failure before the reset is failed, the old firmware still runs. After it, the rollback reinstalls the version from before with steps 3 to 5; verified is rolled_back, otherwise needs_attention and kept drained. After a wave its updated hosts soak and are post-checked again, then the gate: the canary and the first strict waves halt on any failure, any wave on a soak failure, later waves over halt_at. Every step is recorded twice, intent before and result after, in the run record, sent to Loki and pushed as metrics to the Pushgateway; the report is built from the plan and the records. Not built: a JobService handoff, Activate and staged images, EventService events, an A/B bank switch, host locks and resuming a stopped run.">
+<svg viewBox="0 0 900 1178" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="The lab's firmware update rollout. 01 Plan, rollout.py plan: each BMC is read live: the service root; the Manager with its firmware version, its active software image and its reset types, GracefulRestart and ForceRestart; the UpdateService, push only to its MultipartHttpPushUri; one image in the firmware inventory; the TaskService, and no JobService. The image comes from the store through the cache into lab/spool, its sha256 checked against images.yaml. Pre-flight makes 16 checks per BMC and decides go, skip when already on the target, or block. The waves: canary bmc1, wave 1 bmc2 to bmc4 one per rack and strict, wave 2 bmc5 to bmc10 at most two per rack; halt over 10%, soak 60 seconds, 10 at once. plan.json freezes the inputs, the policy, the waves and each BMC's identity. 02 Canary, then waves, rollout.py run: a changed input or --halt-at is refused. Each BMC of a wave, side by side: 1 pre-flight again on a fresh read, the same BMC as planned; 2 drain skipped, the Manager's reset leaves the host running; 3 a multipart push with Targets the Manager and OperationApplyTime OnReset, its Task followed until it ends, no Job; 4 Manager.Reset GracefulRestart and a wait of up to 900 seconds, the new build running; 5 post-check: the target version, health OK or no worse, no new failed task; 6 undrain skipped. A Task that ends in Exception fails before the reset: the old build runs and nothing waits to apply. After the reset, a failed post-check or a BMC not back in 900 seconds is rolled back by reinstalling the build from before, steps 3 to 5 again: rolled_back when verified, needs_attention otherwise. After each wave a 60 second soak and the post-check again, then the gate: the canary and wave 1 halt on any failure, wave 2 over 10%.">
   <style>
     .lro text { font-family: var(--mono, monospace); }
     .lro .bg { fill: var(--bg-deep, #050708); }
@@ -41,241 +41,171 @@
     <marker id="lro-ev" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path d="M0 0 8 4 0 8z" style="fill: #6f8f97"/></marker>
   </defs>
   <g class="lro">
-    <rect class="bg" x="0" y="0" width="900" height="1554" rx="12"/>
-    <text class="band" x="20" y="24">01 · PLAN · rollout.py plan COMPONENT --save plan.json</text>
-    <rect class="box" x="40" y="48" width="220" height="156" rx="8"/>
-    <rect class="bar g-rf" x="40" y="56" width="3" height="140" rx="1.5"/>
-    <g class="badge"><title>Stage 1: Plan and pre-flight</title><circle cx="59" cy="66" r="8"/><text x="59" y="69.5" text-anchor="middle">1</text></g>
-    <text class="name" x="74" y="70">Live read · 10-30 GETs</text>
-    <text class="sub" x="56" y="88">every host in parallel, in a</text>
-    <text class="sub" x="56" y="101">session: login, then logout</text>
-    <text class="txt" x="56" y="114">ServiceRoot</text>
-    <text class="txt" x="56" y="127">Systems · Managers · Chassis</text>
-    <text class="txt" x="56" y="140">UpdateService</text>
-    <text class="txt" x="68.04" y="153">FirmwareInventory</text>
-    <text class="txt" x="68.04" y="166">SimpleUpdate ActionInfo</text>
-    <text class="txt" x="56" y="179">TaskService · JobService</text>
-    <text class="txt" x="56" y="192">Reset ActionInfo</text>
-    <rect class="box" x="280" y="48" width="380" height="263" rx="8"/>
-    <rect class="bar g-wf" x="280" y="56" width="3" height="247" rx="1.5"/>
-    <text class="name" x="296" y="70">Pre-flight · go, skip or block</text>
-    <text class="sub" x="296" y="88">one host, one component · every check recorded</text>
-    <text class="txt" x="296" y="101">skip: nothing to do now, or busy · a later wave</text>
-    <text class="sub" x="296" y="114">not in the baseline · already on the target</text>
-    <text class="sub" x="296" y="127">an image Staged or Armed · a task or job running</text>
-    <text class="sub" x="296" y="140">HttpPushUriTargetsBusy</text>
-    <text class="txt c-back" x="296" y="153">block: a person has to look</text>
-    <text class="sub" x="296" y="166">no live read · system or BMC health not OK</text>
-    <text class="sub" x="296" y="179">not in the FirmwareInventory · no running version</text>
-    <text class="sub" x="296" y="192">a job or task that failed</text>
-    <text class="sub" x="296" y="205">a downgrade, or an order it can't tell</text>
-    <text class="sub" x="308.04" y="218">unless --allow-downgrade</text>
-    <text class="sub" x="296" y="231">Updateable false · under LowestSupportedVersion</text>
-    <text class="sub" x="296" y="244">no image in images.yaml · its sha256 or size wrong</text>
-    <text class="sub" x="296" y="257">no image of the running version to reinstall</text>
-    <text class="sub" x="308.04" y="270">unless --accept-no-rollback</text>
-    <text class="sub" x="296" y="283">a host reset, and rollout.yaml sets no drain</text>
-    <text class="sub" x="296" y="296">no UpdateService, or no way in: push or pull</text>
-    <rect class="box" x="680" y="48" width="180" height="263" rx="8"/>
-    <rect class="bar g-wf" x="680" y="56" width="3" height="247" rx="1.5"/>
-    <text class="name" x="696" y="70">Waves</text>
-    <text class="sub" x="696" y="88">a canary per model,</text>
-    <text class="sub" x="708.04" y="101">canary: true first</text>
-    <text class="sub" x="696" y="114">then waves to</text>
-    <text class="sub" x="708.04" y="127">cumulative %</text>
-    <text class="sub" x="696" y="140">≤ max_per_rack of a</text>
-    <text class="sub" x="708.04" y="153">rack in a wave</text>
-    <text class="txt" x="696" y="166">plan.json, frozen:</text>
-    <text class="sub" x="696" y="179">the inputs' sha256</text>
-    <text class="sub" x="696" y="192">policy · waves</text>
-    <text class="sub" x="696" y="205">each verdict, and</text>
-    <text class="sub" x="708.04" y="218">the BMC's identity</text>
-    <text class="txt" x="696" y="231">to Loki: every check</text>
-    <text class="sub" x="696" y="244">exit 1: all blocked</text>
-    <rect class="box" x="40" y="220" width="220" height="91" rx="8"/>
-    <rect class="bar g-img" x="40" y="228" width="3" height="75" rx="1.5"/>
-    <text class="name" x="56" y="242">Image</text>
-    <text class="sub" x="56" y="260">cache → &lt;site&gt;/spool/</text>
-    <text class="sub" x="56" y="273">sha256 = images.yaml, else</text>
-    <text class="sub" x="68.04" y="286">deleted: block</text>
-    <text class="sub" x="56" y="299">a URL: the BMC pulls it</text>
-    <path class="edge g-rf" d="M260 108H276" marker-end="url(#lro-rf)"/>
-    <path class="edge g-img" d="M260 260H276" marker-end="url(#lro-img)"/>
-    <path class="edge g-wf" d="M660 108H676" marker-end="url(#lro-wf)"/>
-    <rect class="cut" x="20" y="32" width="860" height="295" rx="10"/>
-    <text class="band" x="20" y="353">02 · CANARY, THEN WAVES · rollout.py run --plan plan.json --stage canary | waves --yes</text>
-    <rect class="box" x="40" y="377" width="820" height="78" rx="8"/>
-    <rect class="bar g-wf" x="40" y="385" width="3" height="62" rx="1.5"/>
-    <text class="name" x="56" y="399">Before any host</text>
-    <text class="sub" x="56" y="417">an input file changed since the plan (sha256), or --halt-at → refused: plan again</text>
-    <text class="sub" x="56" y="430">a host not writable: true in the inventory → refused: production stays read-only</text>
-    <text class="sub" x="56" y="443">without --yes a dry run: the versions, and each host's drain, update, reset and rollback</text>
-    <text class="band" x="40" y="477">EVERY HOST OF THE WAVE, max_parallel AT ONCE</text>
-    <rect class="box" x="40" y="489" width="520" height="78" rx="8"/>
-    <rect class="bar g-wf" x="40" y="497" width="3" height="62" rx="1.5"/>
-    <g class="badge"><title>Stage 1: Plan and pre-flight</title><circle cx="59" cy="507" r="8"/><text x="59" y="510.5" text-anchor="middle">1</text></g>
-    <text class="name" x="74" y="511">Pre-flight again</text>
-    <text class="sub" x="56" y="529">a fresh live read just before the host is touched · the same checks</text>
-    <text class="sub" x="56" y="542">the BMC must be the one the plan read: model, service UUID, serial</text>
-    <text class="sub" x="56" y="555">not go → skipped or blocked, nothing changed</text>
-    <path class="edge g-wf" d="M300 567V580" marker-end="url(#lro-wf)"/>
-    <rect class="box" x="40" y="583" width="520" height="91" rx="8"/>
-    <rect class="bar g-sch" x="40" y="591" width="3" height="75" rx="1.5"/>
-    <g class="badge"><title>Stage 2: Drain</title><circle cx="59" cy="601" r="8"/><text x="59" y="604.5" text-anchor="middle">2</text></g>
-    <text class="name" x="74" y="605">Drain</text>
-    <text class="sub" x="56" y="623">only when the reset that activates it restarts the host</text>
-    <text class="sub" x="56" y="636">rollout.yaml's drain command, {host} {node}: must return once it's empty</text>
-    <text class="sub" x="56" y="649">failed → failed, the firmware untouched</text>
-    <text class="txt" x="56" y="662">lab: skipped, a Manager reset leaves the host running</text>
-    <path class="edge g-wf" d="M300 674V687" marker-end="url(#lro-wf)"/>
-    <rect class="box" x="40" y="690" width="520" height="104" rx="8"/>
-    <rect class="bar g-rf" x="40" y="698" width="3" height="88" rx="1.5"/>
-    <g class="badge"><title>Stage 3: Update</title><circle cx="59" cy="708" r="8"/><text x="59" y="711.5" text-anchor="middle">3</text></g>
-    <text class="name" x="74" y="712">Update</text>
-    <text class="sub" x="56" y="730">POST MultipartHttpPushUri: UpdateParameters + UpdateFile from spool</text>
-    <text class="sub" x="68.04" y="743">or #UpdateService.SimpleUpdate: ImageURI, TransferProtocol</text>
-    <text class="sub" x="56" y="756">Targets · @Redfish.OperationApplyTime OnReset: it waits for step 4</text>
-    <text class="sub" x="56" y="769">202 Accepted → the Task, polled per Retry-After, each change recorded</text>
-    <text class="txt" x="56" y="782">lab: multipart push · Task 0 Completed, 100%, in about 5 s</text>
-    <path class="edge g-wf" d="M300 794V807" marker-end="url(#lro-wf)"/>
-    <rect class="box" x="40" y="810" width="520" height="91" rx="8"/>
-    <rect class="bar g-rf" x="40" y="818" width="3" height="75" rx="1.5"/>
-    <g class="badge"><title>Stage 4: Reset</title><circle cx="59" cy="828" r="8"/><text x="59" y="831.5" text-anchor="middle">4</text></g>
-    <text class="name" x="74" y="832">Reset</text>
-    <text class="sub" x="56" y="850">what activates it: ResetRequiredOnUpdate, else its RelatedItem</text>
-    <text class="sub" x="56" y="863">#Manager.Reset or #ComputerSystem.Reset · GracefulRestart first</text>
-    <text class="sub" x="56" y="876">wait: ServiceRoot down, then 200 · a system: PowerState On, OSRunning</text>
-    <text class="txt" x="56" y="889">lab: #Manager.Reset GracefulRestart, back in about 3 min</text>
-    <path class="edge g-wf" d="M300 901V914" marker-end="url(#lro-wf)"/>
-    <rect class="box" x="40" y="917" width="520" height="78" rx="8"/>
-    <rect class="bar g-rf" x="40" y="925" width="3" height="62" rx="1.5"/>
-    <g class="badge"><title>Stage 5: Post-check</title><circle cx="59" cy="935" r="8"/><text x="59" y="938.5" text-anchor="middle">5</text></g>
-    <text class="name" x="74" y="939">Post-check</text>
-    <text class="sub" x="56" y="957">a fresh live read · the version may take 3 min to be reported</text>
-    <text class="sub" x="56" y="970">running version = target · each system and manager OK, or no worse</text>
-    <text class="sub" x="56" y="983">no new job or task failed or hanging</text>
-    <path class="edge g-wf" d="M300 995V1008" marker-end="url(#lro-wf)"/>
-    <rect class="box" x="40" y="1011" width="520" height="65" rx="8"/>
-    <rect class="bar g-sch" x="40" y="1019" width="3" height="49" rx="1.5"/>
-    <g class="badge"><title>Stage 6: Undrain, or roll back</title><circle cx="59" cy="1029" r="8"/><text x="59" y="1032.5" text-anchor="middle">6</text></g>
-    <text class="name" x="74" y="1033">Undrain</text>
-    <text class="sub" x="56" y="1051">rollout.yaml's undrain command, only when it drained</text>
-    <text class="sub" x="56" y="1064">failed → needs_attention: the firmware may be fine, the host isn't</text>
-    <rect class="box" x="590" y="690" width="270" height="91" rx="8"/>
-    <rect class="bar g-back" x="590" y="698" width="3" height="75" rx="1.5"/>
-    <text class="name" x="606" y="712">Fails before the reset</text>
-    <text class="sub" x="606" y="730">the push refused · the Task in</text>
-    <text class="sub" x="618.04" y="743">Exception, killed, or over 1800 s</text>
-    <text class="sub" x="606" y="756">→ failed: the old firmware runs</text>
-    <text class="sub" x="606" y="769">→ undrain</text>
-    <path class="edge g-back" d="M560 730H586" marker-end="url(#lro-back)"/>
-    <rect class="box" x="590" y="810" width="270" height="185" rx="8"/>
-    <rect class="bar g-back" x="590" y="818" width="3" height="169" rx="1.5"/>
-    <text class="name" x="606" y="832">Roll back</text>
-    <text class="txt" x="606" y="850">fails after the reset: not back,</text>
-    <text class="txt" x="618.04" y="863">or the post-check failed</text>
-    <text class="sub" x="606" y="876">reinstall the version from before:</text>
-    <text class="sub" x="618.04" y="889">its image in images.yaml,</text>
-    <text class="sub" x="618.04" y="902">steps 3 to 5 against it</text>
-    <text class="sub" x="606" y="915">verified → rolled_back → undrain</text>
-    <text class="sub" x="606" y="928">fails, or no image to reinstall</text>
-    <text class="sub" x="618.04" y="941">→ needs_attention, kept drained</text>
-    <path class="edge g-back" d="M560 850H586" marker-end="url(#lro-back)"/>
-    <path class="edge g-back" d="M560 957H586" marker-end="url(#lro-back)"/>
-    <rect class="box" x="590" y="1011" width="270" height="65" rx="8"/>
-    <rect class="bar g-wf" x="590" y="1019" width="3" height="49" rx="1.5"/>
-    <text class="name" x="606" y="1033">Host end states</text>
-    <text class="sub" x="606" y="1051">updated · failed · rolled_back</text>
-    <text class="sub" x="606" y="1064">needs_attention · skipped · blocked</text>
-    <text class="band" x="40" y="1098">AFTER THE WAVE</text>
-    <rect class="box" x="40" y="1108" width="380" height="91" rx="8"/>
-    <rect class="bar g-wf" x="40" y="1116" width="3" height="75" rx="1.5"/>
-    <text class="name" x="56" y="1130">Soak</text>
-    <text class="sub" x="56" y="1148">wait rollout.yaml's soak (lab 60 s, prod 1800 s)</text>
-    <text class="sub" x="56" y="1161">post-check every updated host again</text>
-    <text class="sub" x="56" y="1174">a failure → needs_attention</text>
-    <text class="sub" x="56" y="1187">not after the last wave, nor after a failed one</text>
-    <path class="gate" d="M450 1145.5l8 8-8 8-8-8z"/>
-    <path class="edge g-wf" d="M420 1153.5H441"/>
-    <path class="edge g-wf" d="M459 1153.5H476" marker-end="url(#lro-wf)"/>
-    <rect class="box" x="480" y="1108" width="380" height="78" rx="8"/>
-    <rect class="bar g-back" x="480" y="1116" width="3" height="62" rx="1.5"/>
-    <text class="name" x="496" y="1130">Gate</text>
-    <text class="sub" x="496" y="1148">the canary, the first strict_waves: any failure</text>
-    <text class="sub" x="496" y="1161">a soak failure · later waves: over halt_at failed</text>
-    <text class="txt c-back" x="496" y="1174">halted → exit 1, the waves left don't run</text>
-    <text class="lbl" x="40" y="1217">lab testing · run --fault [HOST=]KIND: unhealthy (the post-check fails) · rejected (cut to 8 MiB)</text>
-    <text class="lbl" x="40" y="1231">  silent-fail (the running version's package) · no-return (a 45 s reset timeout)</text>
-    <rect class="cut" x="20" y="361" width="860" height="882" rx="10"/>
-    <text class="band" x="20" y="1269">03 · EVIDENCE</text>
-    <rect class="box" x="40" y="1283" width="190" height="91" rx="8"/>
-    <rect class="bar g-wf" x="40" y="1291" width="3" height="75" rx="1.5"/>
-    <text class="name" x="56" y="1305">Run record</text>
-    <text class="sub" x="56" y="1323">&lt;site&gt;/runs/&lt;id&gt;.jsonl</text>
-    <text class="sub" x="56" y="1336">each step twice: intent</text>
-    <text class="sub" x="68.04" y="1349">before, result after</text>
-    <text class="sub" x="56" y="1362">every change of a Task</text>
-    <rect class="box" x="250" y="1283" width="190" height="91" rx="8"/>
-    <rect class="bar g-wf" x="250" y="1291" width="3" height="75" rx="1.5"/>
-    <text class="name" x="266" y="1305">Report</text>
-    <text class="sub" x="266" y="1323">from plan.json + records</text>
-    <text class="sub" x="266" y="1336">json · html · passed,</text>
-    <text class="sub" x="278.04" y="1349">halted, blocked</text>
-    <text class="sub" x="266" y="1362">action needed: why, next</text>
-    <rect class="box" x="460" y="1283" width="190" height="91" rx="8"/>
-    <rect class="bar g-ev" x="460" y="1291" width="3" height="75" rx="1.5"/>
-    <text class="name" x="476" y="1305">Loki</text>
-    <text class="sub" x="476" y="1323">every event, and every</text>
-    <text class="sub" x="488.04" y="1336">pre-flight check</text>
-    <text class="sub" x="476" y="1349">labels: job and site;</text>
-    <text class="sub" x="488.04" y="1362">the rest in the line</text>
-    <rect class="box" x="670" y="1283" width="190" height="91" rx="8"/>
-    <rect class="bar g-ev" x="670" y="1291" width="3" height="75" rx="1.5"/>
-    <text class="name" x="686" y="1305">Pushgateway</text>
-    <text class="sub" x="686" y="1323">PUT after every event,</text>
-    <text class="sub" x="698.04" y="1336">per pipeline and stage</text>
-    <text class="sub" x="686" y="1349">hosts, gates, steps and</text>
-    <text class="sub" x="698.04" y="1362">checks · Prometheus</text>
-    <path class="edge g-wf" d="M230 1328.5H246" marker-end="url(#lro-wf)"/>
-    <text class="band" x="20" y="1404">NOT BUILT</text>
-    <rect class="box ghost" x="40" y="1414" width="156" height="40" rx="8"/>
-    <text class="txt" x="118" y="1431" text-anchor="middle">JobService</text>
-    <text class="sub" x="118" y="1445" text-anchor="middle">an apply as a Job</text>
-    <rect class="box ghost" x="206" y="1414" width="156" height="40" rx="8"/>
-    <text class="txt" x="284" y="1431" text-anchor="middle">Activate</text>
-    <text class="sub" x="284" y="1445" text-anchor="middle">Staged → Armed</text>
-    <rect class="box ghost" x="372" y="1414" width="156" height="40" rx="8"/>
-    <text class="txt" x="450" y="1431" text-anchor="middle">EventService</text>
-    <text class="sub" x="450" y="1445" text-anchor="middle">events, not polls</text>
-    <rect class="box ghost" x="538" y="1414" width="156" height="40" rx="8"/>
-    <text class="txt" x="616" y="1431" text-anchor="middle">A/B bank switch</text>
-    <text class="sub" x="616" y="1445" text-anchor="middle">as the way back</text>
-    <rect class="box ghost" x="704" y="1414" width="156" height="40" rx="8"/>
-    <text class="txt" x="782" y="1431" text-anchor="middle">Host locks</text>
-    <text class="sub" x="782" y="1445" text-anchor="middle">resume after a crash</text>
-    <text class="band" x="20" y="1484">CONNECTIONS</text>
-    <path class="edge g-wf" d="M150 1481H172"/>
-    <text class="lbl" x="180" y="1484">Controller: plan, waves, gates</text>
-    <path class="edge g-rf" d="M400 1481H422"/>
-    <text class="lbl" x="430" y="1484">Redfish (BMC)</text>
-    <path class="edge g-sch" d="M560 1481H582"/>
-    <text class="lbl" x="590" y="1484">Scheduler</text>
-    <path class="edge g-img" d="M690 1481H712"/>
-    <text class="lbl" x="720" y="1484">Image</text>
-    <path class="edge g-back" d="M150 1501H172"/>
-    <text class="lbl" x="180" y="1504">Failure, hold, way back</text>
-    <text class="band" x="20" y="1532">ROLLOUT STAGES</text>
-    <g class="badge"><title>Stage 1: Plan and pre-flight</title><circle cx="158" cy="1529" r="8"/><text x="158" y="1532.5" text-anchor="middle">1</text></g>
-    <text class="lbl" x="172" y="1532">Plan and pre-flight</text>
-    <g class="badge"><title>Stage 2: Drain</title><circle cx="312.38" cy="1529" r="8"/><text x="312.38" y="1532.5" text-anchor="middle">2</text></g>
-    <text class="lbl" x="326.38" y="1532">Drain</text>
-    <g class="badge"><title>Stage 3: Update</title><circle cx="382.48" cy="1529" r="8"/><text x="382.48" y="1532.5" text-anchor="middle">3</text></g>
-    <text class="lbl" x="396.48" y="1532">Update</text>
-    <g class="badge"><title>Stage 4: Reset</title><circle cx="458.6" cy="1529" r="8"/><text x="458.6" y="1532.5" text-anchor="middle">4</text></g>
-    <text class="lbl" x="472.6" y="1532">Reset</text>
-    <g class="badge"><title>Stage 5: Post-check</title><circle cx="528.7" cy="1529" r="8"/><text x="528.7" y="1532.5" text-anchor="middle">5</text></g>
-    <text class="lbl" x="542.7" y="1532">Post-check</text>
-    <g class="badge"><title>Stage 6: Undrain, or roll back</title><circle cx="628.9" cy="1529" r="8"/><text x="628.9" y="1532.5" text-anchor="middle">6</text></g>
-    <text class="lbl" x="642.9" y="1532">Undrain, or roll back</text>
+    <rect class="bg" x="0" y="0" width="900" height="1178" rx="12"/>
+    <text class="band" x="20" y="24">01 · PLAN · rollout.py plan</text>
+    <rect class="box" x="40" y="52" width="272" height="142" rx="8"/>
+    <rect class="bar g-wf" x="40" y="60" width="3" height="126" rx="1.5"/>
+    <g class="badge"><title>Stage 1: Plan and pre-flight</title><circle cx="59" cy="70" r="8"/><text x="59" y="73.5" text-anchor="middle">1</text></g>
+    <text class="name" x="74" y="74">Live read · each BMC</text>
+    <text class="txt" x="56" y="91">ServiceRoot</text>
+    <text class="txt" x="56" y="104">Managers/bmc</text>
+    <text class="sub" x="68" y="117">FirmwareVersion · ActiveSoftwareImage</text>
+    <text class="sub" x="68" y="130">Reset: GracefulRestart, ForceRestart</text>
+    <text class="txt" x="56" y="143">UpdateService</text>
+    <text class="sub" x="68" y="156">MultipartHttpPushUri: push only</text>
+    <text class="txt" x="56" y="169">FirmwareInventory: one image</text>
+    <text class="txt" x="56" y="182">TaskService · no JobService</text>
+    <rect class="box" x="40" y="208" width="272" height="77" rx="8"/>
+    <rect class="bar g-img" x="40" y="216" width="3" height="61" rx="1.5"/>
+    <text class="name" x="56" y="230">Image</text>
+    <text class="txt" x="56" y="247">store → cache → lab/spool/</text>
+    <text class="txt" x="56" y="260">sha256 = images.yaml</text>
+    <text class="sub" x="68" y="273">else the copy is deleted: block</text>
+    <rect class="box" x="328" y="52" width="320" height="181" rx="8"/>
+    <rect class="bar g-wf" x="328" y="60" width="3" height="165" rx="1.5"/>
+    <text class="name" x="344" y="74">Pre-flight · 16 checks per BMC</text>
+    <text class="txt" x="344" y="91">live read · baseline · update target</text>
+    <text class="txt" x="344" y="104">running version · needs the update</text>
+    <text class="txt" x="344" y="117">direction · Updateable · nothing staged</text>
+    <text class="txt" x="344" y="130">image in the catalog · sha256 · size</text>
+    <text class="txt" x="344" y="143">rollback path: the running build's</text>
+    <text class="sub" x="356" y="156">package in images.yaml, to reinstall</text>
+    <text class="txt" x="344" y="169">update service · push allowed</text>
+    <text class="txt" x="344" y="182">health OK · no failed or open task</text>
+    <text class="txt c-wf" x="344" y="195">go: into the canary or a wave</text>
+    <text class="sub" x="344" y="208">skip: already on the target</text>
+    <text class="txt c-back" x="344" y="221">block: a person has to look</text>
+    <rect class="box" x="664" y="52" width="196" height="181" rx="8"/>
+    <rect class="bar g-wf" x="664" y="60" width="3" height="165" rx="1.5"/>
+    <text class="name" x="680" y="74">Waves</text>
+    <text class="txt" x="680" y="91">canary: bmc1</text>
+    <text class="txt" x="680" y="104">wave 1: bmc2-4</text>
+    <text class="sub" x="692" y="117">one per rack · strict</text>
+    <text class="txt" x="680" y="130">wave 2: bmc5-10</text>
+    <text class="sub" x="692" y="143">at most 2 per rack</text>
+    <text class="sub" x="680" y="156">halt over 10% · soak 60 s</text>
+    <text class="sub" x="680" y="169">10 at once</text>
+    <text class="txt" x="680" y="182">plan.json freezes</text>
+    <text class="sub" x="692" y="195">the inputs' sha256</text>
+    <text class="sub" x="692" y="208">the policy · the waves</text>
+    <text class="sub" x="692" y="221">each BMC's identity</text>
+    <path class="edge g-wf" d="M312 110H324" marker-end="url(#lro-wf)"/>
+    <path class="edge g-img" d="M312 234H324" marker-end="url(#lro-img)"/>
+    <path class="edge g-wf" d="M648 110H660" marker-end="url(#lro-wf)"/>
+    <rect class="cut" x="20" y="40" width="860" height="259" rx="10"/>
+    <text class="band" x="20" y="325">02 · CANARY, THEN WAVES · rollout.py run</text>
+    <rect class="box" x="40" y="353" width="820" height="51" rx="8"/>
+    <rect class="bar g-wf" x="40" y="361" width="3" height="35" rx="1.5"/>
+    <text class="name" x="56" y="375">Before any BMC</text>
+    <text class="sub" x="56" y="392">an input file changed since the plan, or --halt-at → refused: plan again</text>
+    <text class="band" x="40" y="426">EACH BMC OF A WAVE, SIDE BY SIDE</text>
+    <rect class="box" x="40" y="436" width="500" height="77" rx="8"/>
+    <rect class="bar g-wf" x="40" y="444" width="3" height="61" rx="1.5"/>
+    <g class="badge"><title>Stage 1: Plan and pre-flight</title><circle cx="59" cy="454" r="8"/><text x="59" y="457.5" text-anchor="middle">1</text></g>
+    <text class="name" x="74" y="458">Pre-flight again</text>
+    <text class="sub" x="56" y="475">a fresh read just before the BMC is touched · the same 16 checks</text>
+    <text class="sub" x="56" y="488">the BMC must be the one the plan read: the same service UUID</text>
+    <text class="sub" x="56" y="501">not go → skipped or blocked, nothing written</text>
+    <rect class="box" x="40" y="527" width="500" height="51" rx="8"/>
+    <rect class="bar g-sch" x="40" y="535" width="3" height="35" rx="1.5"/>
+    <g class="badge"><title>Stage 2: Drain</title><circle cx="59" cy="545" r="8"/><text x="59" y="548.5" text-anchor="middle">2</text></g>
+    <text class="name" x="74" y="549">Drain · skipped</text>
+    <text class="sub" x="56" y="566">the reset is the Manager's: the host keeps running</text>
+    <rect class="box" x="40" y="592" width="500" height="116" rx="8"/>
+    <rect class="bar g-rf" x="40" y="600" width="3" height="100" rx="1.5"/>
+    <g class="badge"><title>Stage 3: Update</title><circle cx="59" cy="610" r="8"/><text x="59" y="613.5" text-anchor="middle">3</text></g>
+    <text class="name" x="74" y="614">Update · a multipart push, applied on reset</text>
+    <text class="txt" x="56" y="631">POST /redfish/v1/UpdateService/update-multipart</text>
+    <text class="sub" x="68" y="644">UpdateParameters: Targets /redfish/v1/Managers/bmc</text>
+    <text class="sub" x="80" y="657">@Redfish.OperationApplyTime: OnReset</text>
+    <text class="sub" x="68" y="670">UpdateFile: the spooled package</text>
+    <text class="txt" x="56" y="683">202 Accepted → the Task, followed until it ends · no Job</text>
+    <text class="sub" x="56" y="696">Completed: the old build runs until the reset</text>
+    <rect class="box" x="40" y="722" width="500" height="64" rx="8"/>
+    <rect class="bar g-rf" x="40" y="730" width="3" height="48" rx="1.5"/>
+    <g class="badge"><title>Stage 4: Reset</title><circle cx="59" cy="740" r="8"/><text x="59" y="743.5" text-anchor="middle">4</text></g>
+    <text class="name" x="74" y="744">Reset · the Manager alone</text>
+    <text class="txt" x="56" y="761">#Manager.Reset GracefulRestart on /redfish/v1/Managers/bmc</text>
+    <text class="sub" x="56" y="774">wait until it answers again, up to 900 s: the new build runs</text>
+    <rect class="box" x="40" y="800" width="500" height="90" rx="8"/>
+    <rect class="bar g-rf" x="40" y="808" width="3" height="74" rx="1.5"/>
+    <g class="badge"><title>Stage 5: Post-check</title><circle cx="59" cy="818" r="8"/><text x="59" y="821.5" text-anchor="middle">5</text></g>
+    <text class="name" x="74" y="822">Post-check</text>
+    <text class="sub" x="56" y="839">a fresh read, waiting up to 3 min for the firmware inventory</text>
+    <text class="txt" x="56" y="852">FirmwareVersion = the target</text>
+    <text class="sub" x="56" y="865">Systems/system and Managers/bmc health OK, or no worse</text>
+    <text class="sub" x="56" y="878">no new failed task</text>
+    <rect class="box" x="40" y="904" width="500" height="51" rx="8"/>
+    <rect class="bar g-sch" x="40" y="912" width="3" height="35" rx="1.5"/>
+    <g class="badge"><title>Stage 6: Undrain</title><circle cx="59" cy="922" r="8"/><text x="59" y="925.5" text-anchor="middle">6</text></g>
+    <text class="name" x="74" y="926">Undrain · skipped</text>
+    <text class="sub" x="56" y="943">nothing was drained</text>
+    <path class="edge g-wf" d="M290 513V523" marker-end="url(#lro-wf)"/>
+    <path class="edge g-wf" d="M290 578V588" marker-end="url(#lro-wf)"/>
+    <path class="edge g-wf" d="M290 708V718" marker-end="url(#lro-wf)"/>
+    <path class="edge g-wf" d="M290 786V796" marker-end="url(#lro-wf)"/>
+    <path class="edge g-wf" d="M290 890V900" marker-end="url(#lro-wf)"/>
+    <rect class="box" x="560" y="592" width="300" height="77" rx="8"/>
+    <rect class="bar g-back" x="560" y="600" width="3" height="61" rx="1.5"/>
+    <text class="name" x="576" y="614">Fails before the reset</text>
+    <text class="sub" x="576" y="631">the Task ends Exception: the image refused</text>
+    <text class="txt" x="576" y="644">→ failed: the old build runs</text>
+    <text class="sub" x="576" y="657">nothing waits to apply: nothing to Cancel</text>
+    <rect class="box" x="560" y="722" width="300" height="116" rx="8"/>
+    <rect class="bar g-back" x="560" y="730" width="3" height="100" rx="1.5"/>
+    <text class="name" x="576" y="744">Roll back</text>
+    <text class="sub" x="576" y="761">the post-check failed, or not back in 900 s</text>
+    <text class="txt" x="576" y="774">reinstall the build from before</text>
+    <text class="sub" x="588" y="787">its package from images.yaml</text>
+    <text class="sub" x="588" y="800">steps 3 to 5 again</text>
+    <text class="txt c-wf" x="576" y="813">verified → rolled_back</text>
+    <text class="txt c-back" x="576" y="826">fails → needs_attention</text>
+    <rect class="box" x="560" y="852" width="300" height="64" rx="8"/>
+    <rect class="bar g-wf" x="560" y="860" width="3" height="48" rx="1.5"/>
+    <text class="name" x="576" y="874">Where each BMC ends</text>
+    <text class="sub" x="576" y="891">updated · failed · rolled_back</text>
+    <text class="sub" x="576" y="904">needs_attention · skipped · blocked</text>
+    <path class="edge g-back" d="M540 626H556" marker-end="url(#lro-back)"/>
+    <path class="edge g-back" d="M540 756H556" marker-end="url(#lro-back)"/>
+    <path class="edge g-back" d="M540 834H550V782H556" marker-end="url(#lro-back)"/>
+    <text class="band" x="40" y="977">AFTER THE WAVE</text>
+    <rect class="box" x="40" y="987" width="400" height="64" rx="8"/>
+    <rect class="bar g-wf" x="40" y="995" width="3" height="48" rx="1.5"/>
+    <text class="name" x="56" y="1009">Soak · 60 s</text>
+    <text class="sub" x="56" y="1026">then the post-check again on each BMC the wave updated</text>
+    <text class="sub" x="56" y="1039">a failure → needs_attention · not after the last wave</text>
+    <rect class="box" x="500" y="987" width="360" height="77" rx="8"/>
+    <rect class="bar g-back" x="500" y="995" width="3" height="61" rx="1.5"/>
+    <text class="name" x="516" y="1009">Gate</text>
+    <text class="sub" x="516" y="1026">the canary, wave 1: any failure halts</text>
+    <text class="sub" x="516" y="1039">wave 2: halts over 10% failed · a soak failure halts</text>
+    <text class="txt c-back" x="516" y="1052">halted: the waves left don't run</text>
+    <path class="edge g-back" d="M440 1017H496" marker-end="url(#lro-back)"/>
+    <path class="gate" d="M468 1009l8 8-8 8-8-8z"/>
+    <rect class="cut" x="20" y="341" width="860" height="737" rx="10"/>
+    <text class="band" x="20" y="1104">CONNECTIONS</text>
+    <path class="edge g-wf" d="M150 1101H172"/>
+    <text class="lbl" x="180" y="1104">Controller: plan, waves, gates</text>
+    <path class="edge g-rf" d="M400 1101H422"/>
+    <text class="lbl" x="430" y="1104">Redfish (BMC)</text>
+    <path class="edge g-sch" d="M560 1101H582"/>
+    <text class="lbl" x="590" y="1104">Scheduler</text>
+    <path class="edge g-img" d="M690 1101H712"/>
+    <text class="lbl" x="720" y="1104">Image</text>
+    <path class="edge g-back" d="M150 1121H172"/>
+    <text class="lbl" x="180" y="1124">Failure, hold, way back</text>
+    <text class="band" x="20" y="1152">ROLLOUT STAGES</text>
+    <g class="badge"><title>Stage 1: Plan and pre-flight</title><circle cx="158" cy="1149" r="8"/><text x="158" y="1152.5" text-anchor="middle">1</text></g>
+    <text class="lbl" x="172" y="1152">Plan and pre-flight</text>
+    <g class="badge"><title>Stage 2: Drain</title><circle cx="312.38" cy="1149" r="8"/><text x="312.38" y="1152.5" text-anchor="middle">2</text></g>
+    <text class="lbl" x="326.38" y="1152">Drain</text>
+    <g class="badge"><title>Stage 3: Update</title><circle cx="382.48" cy="1149" r="8"/><text x="382.48" y="1152.5" text-anchor="middle">3</text></g>
+    <text class="lbl" x="396.48" y="1152">Update</text>
+    <g class="badge"><title>Stage 4: Reset</title><circle cx="458.6" cy="1149" r="8"/><text x="458.6" y="1152.5" text-anchor="middle">4</text></g>
+    <text class="lbl" x="472.6" y="1152">Reset</text>
+    <g class="badge"><title>Stage 5: Post-check</title><circle cx="528.7" cy="1149" r="8"/><text x="528.7" y="1152.5" text-anchor="middle">5</text></g>
+    <text class="lbl" x="542.7" y="1152">Post-check</text>
+    <g class="badge"><title>Stage 6: Undrain</title><circle cx="628.9" cy="1149" r="8"/><text x="628.9" y="1152.5" text-anchor="middle">6</text></g>
+    <text class="lbl" x="642.9" y="1152">Undrain</text>
   </g>
 </svg>
