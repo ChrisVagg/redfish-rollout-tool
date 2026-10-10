@@ -1,4 +1,4 @@
-<svg viewBox="0 0 900 628" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="The lab today, drawn on the production firmware-update system's layout: only what the lab implements is drawn, each part where the production system has it. Supply chain: lab/download-fw-images.sh downloads the two newest GB200 NVL builds from OpenBMC's Jenkins; lab/promote-fw-images.sh checks each package's signatures against OpenBMC's development key pinned in the repository, records its sha256, and approves the newer as is; uploads both into the approved store, a SeaweedFS bucket that keeps the only copy and allows reads only, and deletes its downloads. Control plane: the make targets are the CLI, YES=1 the approval; no API yet; pipeline.sh and rollout.py are the workflow engine, reading the firmware catalog, baseline.yaml and images.yaml, and lab/inventory.yaml; the run records, runs/*.jsonl, are the rollout state, without host locks; the BMC logins are static, OpenBMC's public default set in the Makefile; no Vault. Each site: rollout.py run is the site agent; it fetches each image from the image cache, nginx over HTTPS on port 8443, which fetches it from the store once and caches it, and pushes it to the BMCs, ten emulated in QEMU, with update, tasks and reset over Redfish. Observability, metrics and events: rollout.py run pushes every run's metrics to the Pushgateway on port 9091, PUT /metrics/job/rollout, and sends every event of its run record to Loki on port 3100, POST /loki/api/v1/push; exporter-lab, poller.py exporter on port 9101 beside the BMCs, reads every BMC over Redfish every 10 seconds; Prometheus on port 9090 scrapes GET /metrics from the Pushgateway every 5 seconds and from exporter-lab every 10; Grafana on port 3000 has Prometheus and Loki as its data sources. Numbered badges mark where each rollout stage happens: 0 ingest, 1 plan and pre-flight, 3 update, a push, then 4 reset and 5 post-check, with the rollback when it fails, at the BMCs; 2 drain and 6 undrain need a scheduler, which the lab doesn't have.">
+<svg viewBox="0 0 900 628" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="The lab today, drawn on the production firmware-update system's layout: only what the lab implements is drawn, each part where the production system has it. Supply chain: lab/download-fw-images.sh downloads the two newest GB200 NVL builds from OpenBMC's Jenkins; lab/promote-fw-images.sh checks each package's signatures against OpenBMC's development key pinned in the repository, records its sha256, and approves the newer as is; uploads both into the approved store, a SeaweedFS bucket that serves as the source for cached copies and allows anonymous S3 reads only; the ingest script enforces signatures, not the store, and deletes its downloads. Control plane: the make targets are the CLI, YES=1 the approval; no API yet; pipeline.sh and rollout.py are the local pipeline controller, reading the firmware catalog, baseline.yaml and images.yaml, and lab/inventory.yaml; the run records, runs/*.jsonl, are the rollout state, without host locks or resume; the BMC logins are static, OpenBMC's public default set in the Makefile; no Vault. Each site: rollout.py run is the site agent; it fetches each image from the image cache, nginx over HTTPS on port 8443, which fetches it from the store on cache misses, and pushes it to the BMCs, ten emulated in QEMU, with update, tasks and reset over Redfish. Observability, metrics and events: rollout.py run pushes every run's metrics to the Pushgateway on port 9091, PUT /metrics/job/rollout, and sends every event of its run record to Loki on port 3100, POST /loki/api/v1/push; exporter-lab, poller.py exporter on port 9101 beside the BMCs, reads every BMC over Redfish every 10 seconds; Prometheus on port 9090 scrapes GET /metrics from the Pushgateway every 5 seconds and from exporter-lab every 10; Grafana on port 3000 has Prometheus and Loki as its data sources. Numbered badges mark where each rollout stage happens: 0 ingest, 1 plan and pre-flight, 3 update, a push, then 4 reset and 5 post-check, with the rollback when it fails, at the BMCs; 2 drain and 6 undrain need a scheduler, which the lab doesn't have.">
   <style>
     .pl text { font-family: var(--mono, monospace); }
     .pl .bg { fill: var(--bg-deep, #050708); }
@@ -35,7 +35,7 @@
   </defs>
   <g class="pl">
     <rect class="bg" x="0" y="0" width="900" height="628" rx="12"/>
-    <!-- every box sits where production-system.svg has it; a part the lab doesn't have leaves its place empty -->
+    <!-- every box sits where prod-solution-architecture.svg has it; a part the lab doesn't have leaves its place empty -->
     <text class="band hi" x="880" y="24" text-anchor="end">THE LAB TODAY</text>
     <text class="band hi" x="20" y="24">SUPPLY CHAIN · BEFORE ANY ROLLOUT</text>
     <rect class="cut" x="20" y="30" width="860" height="74" rx="10"/>
@@ -47,7 +47,7 @@
     <text class="name" x="765" y="64" text-anchor="middle">Approved store</text><text class="sub" x="765" y="80" text-anchor="middle">SeaweedFS bucket</text>
     <path class="edge g-img" d="M230 67H246" marker-end="url(#pl-img)"/>
     <path class="edge g-img" d="M440 67H666" marker-end="url(#pl-img)"/>
-    <text class="elabel" x="555" y="62" text-anchor="middle">signatures verified</text>
+    <text class="elabel" x="555" y="62" text-anchor="middle">signatures · public dev key</text>
     <text class="band hi" x="20" y="124">CONTROL PLANE</text>
     <rect class="cut" x="20" y="130" width="610" height="200" rx="10"/>
     <rect class="box" x="40" y="140" width="170" height="46" rx="8"/><rect class="bar g-wf" x="40" y="148" width="3" height="30" rx="1.5"/>
@@ -55,11 +55,11 @@
     <rect class="box" x="40" y="206" width="170" height="46" rx="8"/><rect class="bar g-inv" x="40" y="214" width="3" height="30" rx="1.5"/>
     <text class="name" x="125" y="226" text-anchor="middle">Firmware catalog</text><text class="sub" x="125" y="242" text-anchor="middle">baseline · images.yaml</text>
     <rect class="box" x="40" y="266" width="170" height="46" rx="8"/><rect class="bar g-inv" x="40" y="274" width="3" height="30" rx="1.5"/>
-    <text class="name" x="125" y="286" text-anchor="middle">Inventory / CMDB</text><text class="sub" x="125" y="302" text-anchor="middle">lab/inventory.yaml</text>
+    <text class="name" x="125" y="286" text-anchor="middle">Inventory file</text><text class="sub" x="125" y="302" text-anchor="middle">lab/inventory.yaml</text>
     <rect class="box" x="260" y="206" width="170" height="46" rx="8"/><rect class="bar g-wf" x="260" y="214" width="3" height="30" rx="1.5"/>
-    <text class="name" x="345" y="226" text-anchor="middle">Workflow engine</text><text class="sub" x="345" y="242" text-anchor="middle">pipeline.sh · rollout.py</text>
+    <text class="name" x="345" y="226" text-anchor="middle">Pipeline controller</text><text class="sub" x="345" y="242" text-anchor="middle">pipeline.sh · rollout.py</text>
     <rect class="box" x="450" y="206" width="170" height="46" rx="8"/><rect class="bar g-wf" x="450" y="214" width="3" height="30" rx="1.5"/>
-    <text class="name" x="535" y="226" text-anchor="middle">Rollout state DB</text><text class="sub" x="535" y="242" text-anchor="middle">runs/*.jsonl · no locks</text>
+    <text class="name" x="535" y="226" text-anchor="middle">Run records</text><text class="sub" x="535" y="242" text-anchor="middle">JSONL · no locks/resume</text>
     <rect class="box" x="450" y="266" width="170" height="46" rx="8"/><rect class="bar g-sec" x="450" y="274" width="3" height="30" rx="1.5"/>
     <text class="name" x="535" y="286" text-anchor="middle">Secrets</text><text class="sub" x="535" y="302" text-anchor="middle">static logins · no Vault</text>
     <path class="edge g-wf" d="M210 163H235V218H256" marker-end="url(#pl-wf)"/>
@@ -68,17 +68,21 @@
     <path class="edge g-wf" d="M434 229H446" marker-end="url(#pl-wf)" marker-start="url(#pl-wf)"/>
     <text class="band hi" x="650" y="124">OBSERVABILITY</text>
     <rect class="cut" x="650" y="130" width="230" height="200" rx="10"/>
-    <rect class="box" x="666" y="144" width="198" height="40" rx="8"/><rect class="bar g-obs" x="666" y="150" width="3" height="28" rx="1.5"/>
-    <text class="name" x="765" y="160" text-anchor="middle">Pushgateway · Loki</text><text class="sub" x="765" y="175" text-anchor="middle">:9091 metrics · :3100 events</text>
+    <rect class="box" x="666" y="144" width="96" height="40" rx="8"/><rect class="bar g-obs" x="666" y="150" width="3" height="28" rx="1.5"/>
+    <text class="name" x="714" y="160" text-anchor="middle" style="font-size:11px">Pushgateway</text><text class="sub" x="714" y="175" text-anchor="middle">:9091 metrics</text>
+    <rect class="box" x="774" y="144" width="90" height="40" rx="8"/><rect class="bar g-obs" x="774" y="150" width="3" height="28" rx="1.5"/>
+    <text class="name" x="819" y="160" text-anchor="middle">Loki</text><text class="sub" x="819" y="175" text-anchor="middle">:3100 events</text>
     <rect class="box" x="666" y="210" width="198" height="40" rx="8"/><rect class="bar g-obs" x="666" y="216" width="3" height="28" rx="1.5"/>
     <text class="name" x="765" y="226" text-anchor="middle">Prometheus</text><text class="sub" x="765" y="241" text-anchor="middle">:9090</text>
     <rect class="box" x="666" y="276" width="198" height="40" rx="8"/><rect class="bar g-obs" x="666" y="282" width="3" height="28" rx="1.5"/>
     <text class="name" x="765" y="292" text-anchor="middle">Grafana</text><text class="sub" x="765" y="307" text-anchor="middle">:3000 · Prometheus and Loki</text>
-    <!-- Prometheus scrapes the Pushgateway; Grafana reads Prometheus, its data source -->
+    <!-- Metrics: Pushgateway to Prometheus to Grafana. Events: Loki directly to Grafana. -->
     <path class="edge g-obs" d="M690 184V206" marker-end="url(#pl-obs)"/>
     <text class="elabel" x="698" y="200">GET /metrics · 5 s</text>
     <path class="edge g-obs" d="M690 250V272" marker-end="url(#pl-obs)"/>
-    <text class="elabel" x="698" y="266">data source · /api/v1/query</text>
+    <text class="elabel" x="698" y="266">PromQL</text>
+    <path class="edge g-obs" d="M846 184V194H878V260H846V272" marker-end="url(#pl-obs)"/>
+    <text class="elabel" x="800" y="266">LogQL</text>
     <text class="band hi" x="20" y="356">EACH SITE</text>
     <rect class="cut" x="20" y="362" width="860" height="170" rx="10"/>
     <rect class="box" x="260" y="390" width="170" height="46" rx="8"/><rect class="bar g-wf" x="260" y="398" width="3" height="30" rx="1.5"/>
@@ -94,13 +98,15 @@
     <path class="edge g-sec" d="M530 312V372H400V386" marker-end="url(#pl-sec)"/>
     <text class="elabel" x="465" y="367" text-anchor="middle">static login</text>
     <path class="edge g-img" d="M860 67H872V413H868" marker-end="url(#pl-img)"/>
-    <text class="elabel" x="866" y="381" text-anchor="end">fetched once, cached</text>
+    <text class="elabel" x="866" y="381" text-anchor="end">fetch on miss, cache</text>
     <path class="edge g-rf" d="M345 436V458H530V466" marker-end="url(#pl-rf)"/>
     <text class="elabel" x="438" y="454" text-anchor="middle">Redfish: update · tasks · reset</text>
     <path class="edge g-img" d="M666 428H434" marker-end="url(#pl-img)"/>
     <text class="elabel" x="548" y="424" text-anchor="middle">file, to push it</text>
     <path class="edge g-obs" d="M430 404H640V164H662" marker-end="url(#pl-obs)"/>
     <text class="elabel" x="535" y="400" text-anchor="middle">PUT /metrics/job/rollout</text>
+    <path class="edge g-obs" d="M430 414H634V194H816V188" marker-end="url(#pl-obs)"/>
+    <text class="elabel" x="535" y="416" text-anchor="middle">POST /loki/api/v1/push</text>
     <path class="edge g-rf" d="M620 493H662" marker-end="url(#pl-rf)"/>
     <path class="edge g-obs" d="M690 470V452H648V230H662" marker-end="url(#pl-obs)"/>
     <text class="elabel" x="698" y="462">GET /metrics · 10 s</text>

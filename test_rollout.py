@@ -468,6 +468,26 @@ def test_plan_to_loki():
         "Manager.Reset GracefulRestart", False, "reinstall 1.0 from bmc/1.0.tar"), events[1]
 
 
+# A plan that blocks every host stops the pipeline before any stage: it still ends in Loki and pushes its blocked hosts
+# and the halt, so the dashboard lists it (its pipeline list reads the Pushgateway) and shows it HALTED, blocked
+def test_blocked_plan_to_grafana():
+    sent, pushed = [], []
+
+    class Ok:
+        def raise_for_status(self) -> None:
+            pass
+    args = type("Args", (), {"save": "lab/runs/pipeline-p/plan.json"})()
+    with (patch.dict(os.environ, {"LOKI": "http://loki", "PUSHGATEWAY": "http://pushgateway"}),
+          patch.object(rollout.requests, "post", lambda url, json, timeout: sent.append(json) or Ok()),
+          patch.object(rollout.requests, "put", lambda url, data, timeout: pushed.append((url, data)) or Ok())):
+        rollout.push_blocked(args, 10, "every host to update is blocked")
+    end = json.loads(sent[0]["streams"][0]["values"][0][1])
+    assert (end["pipeline"], end["stage"], end["step"], end["state"]) == ("pipeline-p", "plan", "run", "end"), end
+    url, body = pushed[0]
+    assert url == f"http://pushgateway/metrics/job/rollout/site/{rollout.SITE.name}/pipeline/pipeline-p/stage/plan"
+    assert 'rollout_hosts{wave="plan",state="blocked"} 10' in body and 'rollout_gate_halted{wave="plan"} 1' in body
+
+
 # The exporter's samples are one series each: two sensors of one name (iLO 4's power supplies) stay two series.
 # Thresholds take DMTF's Sensor names and their reading's unit, a Fan's too (its schema gives them none)
 def test_exposition():

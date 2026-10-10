@@ -643,6 +643,24 @@ def push_plan(args, servers, reads, results, planned, rollout) -> None:
         push_checks({**plan, "host": s["host"], "wave": wave_of.get(s["host"])}, r["checks"], sending)
 
 
+# A plan that stops the pipeline, as a stage's end would be: its end to Loki, its blocked hosts and the halt to the
+# Pushgateway, so the pipeline's dashboard lists it and says how it ended though no stage ran. Best effort, like both
+def push_blocked(args, blocked, detail) -> None:
+    pipeline = Path(args.save).parent.name
+    push_event({"at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "host": "-", "step": "run",
+                "state": "end", "pipeline": pipeline, "stage": "plan", "detail": detail}, {})
+    url = os.environ.get("PUSHGATEWAY")
+    if not url:
+        return
+    try:
+        body = (sample("rollout_hosts", blocked, wave="plan", state="blocked") + "\n" +
+                sample("rollout_gate_halted", 1, wave="plan") + "\n")
+        requests.put(f"{url.rstrip('/')}/metrics/job/rollout/site/{SITE.name}/pipeline/{pipeline}/stage/plan",
+                     data=body, timeout=2).raise_for_status()
+    except Exception as e:
+        log.warning("metrics: %s", reason(str(e)))
+
+
 # Plan: step 1 shown, pre-flight per host and the waves; without a component, a report per host
 def plan(args) -> list:
     step = prepare(args)
@@ -672,6 +690,7 @@ def plan(args) -> list:
         if counts["block"] and not counts["go"]:  # nothing can go because of blocks: the pipeline stops here
             args.exit_code = 1
             caption += " · every host to update is blocked: a person has to look"
+            push_blocked(args, counts["block"], "every host to update is blocked: a person has to look")
     return [Text(caption),
             *(block(f"Pre-flight · {args.component} · {vendor}", PREFLIGHT_ROW, rows)
               for vendor, rows in sorted(by_vendor.items())),

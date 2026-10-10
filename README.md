@@ -6,7 +6,7 @@ only, no vendor Oem code.
 
 | Site | What it is | Status |
 |---|---|---|
-| **Lab**, [LAB.md](LAB.md) | 10 emulated OpenBMC BMCs (QEMU in Docker), a store that takes only signed images, an HTTPS image cache | every update so far ran here |
+| **Lab**, [LAB.md](LAB.md) | 10 emulated OpenBMC BMCs (QEMU in Docker), an image store fed by a signature-checking ingest script, an HTTPS image cache | every update so far ran here |
 | **Production**, [PROD.md](PROD.md) | ASUS, Dell, HPE, Gigabyte and Supermicro servers | read-only: monitoring, plans, dry runs |
 
 `make update` refuses production; `rollout.py` writes only to hosts marked `writable: true`, and only with `--yes`.
@@ -31,7 +31,8 @@ only, no vendor Oem code.
 2. **canary**: a host per hardware model. Any failure halts.
 3. **waves**: growing, spread across racks, a soak between them. The first halts on any failure, later ones over
    `halt_at`.
-4. **report**: terminal, HTML and `report.json`.
+4. **report**: terminal, HTML and `report.json` after execution or a blocked plan; a successful dry run saves
+   stage previews only.
 
 Every host goes through six steps; the hosts of a wave run in parallel:
 
@@ -74,7 +75,8 @@ make collect      # read every BMC; then make health, make firmware, ...
 make dry-run      # plan, canary, waves; no firmware changes
 make update       # a canary of 1 BMC, then waves of 3 and 6
 make report       # the latest pipeline's verdict
-make lab-reset    # wipe the BMCs' flash: they boot the older build again
+make lab-reset    # stop the lab and wipe the BMCs' flash
+make lab-up       # boot the older build again; the image store is preserved
 ```
 
 A dry run still reads the BMCs, writes `plan.json` and the stages' HTML files, and can publish the plan and its
@@ -87,7 +89,7 @@ the lab back, swap the commented line in `lab/baseline.yaml` and run `make updat
 
 | Command | What it checks |
 |---|---|
-| `make test` | 21 tests in about a second, no BMC: pre-flight, post-check, rollback, gates, the frozen plan, the ingest gate, the image cache, on recorded Redfish data. `make update` runs it first |
+| `make test` | 22 tests, no BMC: pre-flight, post-check, rollback, gates, the frozen plan, the ingest gate, the image cache, on recorded Redfish data. `make update` runs it first |
 | `make mutations` | breaks 27 safety rules one at a time; every break fails a test |
 | `make fault SCENARIO=…` | the real pipeline on the lab, with a fault injected |
 

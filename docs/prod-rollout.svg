@@ -42,7 +42,7 @@
   </defs>
   <g class="pro">
     <rect class="bg" x="0" y="0" width="900" height="1431" rx="12"/>
-    <text class="band" x="20" y="24">01 · ROLLOUT CONTROLLER</text>
+    <text class="band" x="20" y="24">01 · ROLLOUT CONTROLLER · TARGET DESIGN</text>
     <rect class="box" x="40" y="48" width="260" height="184" rx="8"/>
     <rect class="bar g-wf" x="40" y="56" width="3" height="168" rx="1.5"/>
     <g class="badge"><title>Stage 1: Plan and pre-flight</title><circle cx="59" cy="66" r="8"/><text x="59" y="69.5" text-anchor="middle">1</text></g>

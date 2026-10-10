@@ -6,13 +6,14 @@ fleet, the update as Redfish resources, the fleet in Grafana, what isn't built y
 into at fleet scale, with how this repository maps onto it. Every update so far ran on [the lab](LAB.md), which also
 has [the rollout step by step](LAB.md#how-the-rollout-works).
 
-## Approach in production IT Equipment
+## Current production setup
 
 ![Production](docs/prod-stack.svg)
 
-Equipment running production services runs the same tools, the same pipeline and the same six steps with `SITE=prod`; only the inventory, the credentials and the policy change.
+`SITE=prod` selects the real fleet's inventory, credentials and policy. The current setup uses the read-only
+commands; the six-step update flow has been exercised only on the lab's BMCs.
 
-Production (**ASUS**, **Dell**, **HPE**, **Gigabyte**, **Supermicro**) has been used **read-only**: `make collect SITE=prod`, the views (`make health SITE=prod`, `make firmware SITE=prod`...), `make plan SITE=prod`, `make dry-run SITE=prod`, and `exporter-prod`, every 5 minutes. They read only, plus a Redfish session login and logout. `make update` and `make fault` refuse `SITE=prod`, and no production host is marked `writable`. The runner underneath can write: `rollout.py run --yes` updates a host the inventory marks `writable: true`, which is how a change window would run ([To run it](#to-run-it)). The Supermicro has no row in `prod/baseline.yaml` yet, so the plan skips it as not in the baseline.
+Production (**ASUS**, **Dell**, **HPE**, **Gigabyte**, **Supermicro**) has been used **read-only**: `make collect SITE=prod`, the views (`make health SITE=prod`, `make firmware SITE=prod`...), `make plan SITE=prod`, `make dry-run SITE=prod`, and `exporter-prod`, configured with a 30-second polling interval. They read only, plus a Redfish session login and logout. `make update` and `make fault` refuse `SITE=prod`, and no production host is marked `writable`. The runner underneath can write: `rollout.py run --yes` updates a host the inventory marks `writable: true`, which is how a change window would run ([Before enabling production writes](#before-enabling-production-writes)). The Supermicro has no row in `prod/baseline.yaml` yet, so the plan skips it as not in the baseline.
 
 [prod/inventory.example.yaml](prod/inventory.example.yaml)
 
@@ -30,7 +31,8 @@ DELL_REDFISH_USERNAME=...
 DELL_REDFISH_PASSWORD=...
 ```
 
-How a production rollout is built, from the whole fleet down to one host:
+The proposed production rollout, from the whole fleet down to one host (rings and scheduler integration are not
+implemented here):
 
 1. **Rings, one at a time.** The lab's emulated BMCs first, then internal or spare nodes, then production region by
    region. A bad image that reaches every region at once can't be contained; the same pipeline runs at each ring.
@@ -38,7 +40,9 @@ How a production rollout is built, from the whole fleet down to one host:
    rest. The baseline says the target per hardware model, and the catalog has the image for each.
 3. **Group by what fails together.** The canary covers every hardware model the update touches, because firmware
    faults follow the model. Each wave spreads across racks, with at most `max_per_rack` hosts of one rack in a wave,
-   so no rack loses more capacity than it can spare; PDUs and InfiniBand pods need the same limit, which isn't built.
+   which limits concurrent disruption by host count, not measured spare capacity. The canary prefers this limit but
+   can exceed it when a model has no candidate in another rack; PDUs, InfiniBand pods and capacity need additional
+   admission checks, which are not built.
    Idle and spare nodes go first; the scheduler drains busy ones before a reset that restarts the host.
 4. **Waves that grow, gates that start strict**, as [the rollout](LAB.md#how-the-rollout-works) does everywhere, with
    production's policy: canary, then 5%, 25% and the rest; the first wave strict, later ones halting over 2%; 30
@@ -46,10 +50,11 @@ How a production rollout is built, from the whole fleet down to one host:
 5. **Evidence.** The plan, the run records and the report in `prod/runs/` are the change's record: `report.json` for
    the services that track fleet state, the report for the people who approve the next ring.
 
-### To run it
+### Before enabling production writes
 
 - **Accounts**: keep the poller on a ReadOnly role. Give the rollout its own account whose role can update firmware
-  and reset the BMC (`ConfigureComponents` and `ConfigureManager`, Administrator on most BMCs).
+  and perform the required reset; verify the privileges on each BMC. The local inventory's `writable` flag is an
+  application gate, not proof of the account's Redfish role.
 - **Scope**: mark hosts `writable: true` only for the change window, give each its `rack`, and mark a few
   representative spare hosts per model `canary: true`.
 - **Scheduler hooks**: `drain` and `undrain` are not configured in `prod/rollout.yaml`, and no integration with a real
@@ -78,16 +83,18 @@ while its BMC continues to answer. See [availability and resource health](LAB.md
 
 What the exporter does differently from a one-off `collect`, because it never stops:
 
-- **One Redfish session per BMC, kept across reads while the BMC keeps it.** A login per read adds an entry to each
-  BMC's own log (iDRAC's Lifecycle Log, iLO's security log): 288 a day at 5 minutes. Dell and Supermicro keep a session
-  30 minutes (`SessionService.SessionTimeout`); AMI (ASUS, Gigabyte) 30 seconds, so there the exporter logs out right
-  after each read and frees the slot. A session the BMC ends anyway (a reset) gets a new login and the read again. On
-  `docker stop` it logs out of every session: a BMC allows only a handful.
+- **One Redfish session per BMC, reused while valid.** A login per read adds entries to the BMC's own logs. The
+  exporter logs out after a read when the reported `SessionService.SessionTimeout` is shorter than the configured
+  polling interval. At the current 30-second interval, a timeout of exactly 30 seconds does not meet that condition;
+  a session that expires gets a new login when the next read returns 401. On shutdown it logs out of held sessions.
 - **A refused login stops that host.** A 401 on a fresh login is not retried until a restart, since BMCs lock the
   account after a few failures; `redfish_login_refused` says so.
-- **Prod every 5 minutes.** A full read of an iDRAC 8 takes about 2 minutes, one GET at a time, so a read every 5 minutes
-  leaves the BMC free most of the time. Each BMC has its own loop: a slow one never delays the others, and a scrape
-  always gets the latest finished read.
+- **Prod targets a read every 30 seconds.** [Compose](observability/docker-compose.yaml) sets `--interval 30`;
+  Prometheus scrapes the exporter every 10 seconds. Each BMC has its own loop: if a crawl takes longer than the
+  interval, the next starts immediately after it. The crawl budget is three intervals (90 seconds here), or a
+  shorter inventory deadline, checked between requests. A full iDRAC 8 crawl previously took about two minutes, so
+  this setting can produce partial reads and leave little idle time. Reassess the interval against complete crawl
+  times before expanding the fleet. A scrape serves the latest finished read; it does not trigger a new crawl.
 - **Units and thresholds from the standards.** A reading's unit comes from the BMC's `MetricDefinition`, else the
   DMTF schema of its resource (`ReadingCelsius` is `Cel`), else its `ReadingUnits`, else the unit DMTF's newest Sensor
   schema gives its `ReadingType` (a Gigabyte's v1.0 Sensors report none). Thresholds take the Sensor schema's names
@@ -119,8 +126,8 @@ is a starting point for evaluating a receiver.
 
 ## The update, resource by resource
 
-The same update in production, as Redfish resources, with every flow a production BMC may need;
-[Not built yet](README.md#not-built-yet) lists what the rollout doesn't do yet.
+The diagram is the target production design, including capability-dependent flows that the current runner does
+not implement. It is not evidence of production updates; [Not built yet](#not-built-yet) lists the gaps.
 
 ![The production rollout as Redfish resources: plan, pre-flight, drain, update, activation, reset, verify, recover](docs/prod-rollout.svg)
 
@@ -147,6 +154,13 @@ firmware, the health of every component, and every reading against its threshold
 ![Prod · Host: the BMC and its Redfish service](docs/grafana/prod/supermicro-details-2.png)
 
 ## Not built yet
+
+- **Production activation validation**: the runner requests `OnReset`; it does not negotiate apply times or drive a
+  Task-to-Job handoff. Validate the supported apply time, reset and recovery procedure per model before enabling
+  writes. Only the lab's OpenBMC update path has been exercised end to end.
+- **Complete promotion checks**: blocked/skipped hosts are excluded from the failure-rate denominator, so a passed
+  gate does not prove every planned host updated. A soak failure halts but does not drain again or roll back;
+  workload health and capacity checks need a real scheduler and host integration.
 - **Other update flows**: switching to the other A/B bank as a rollback (pre-flight doesn't count a bank as a way
   back), an `Activate` action, a staged image, an apply scheduled as a Job. The rollout uses an upload applied at
   reset, its own reset, and a reinstall of the version before as the way back.
@@ -157,7 +171,8 @@ firmware, the health of every component, and every reading against its threshold
   database ([a production system](#a-production-system---scaling-for-a-large-fleet)).
 - **Limits beyond racks**: per PDU, fabric pod or remaining capacity.
 - **Pull integrity**: a pulled image is never seen by the agent, so its sha256 isn't checked against the catalog;
-  it relies on the URL pointing at the store's copy, which never changes, and the BMC's own signature check.
+  it requires a trusted image URL, enforced store immutability and a validated BMC signature check. The lab store
+  does not enforce immutability, and the lab BMCs do not support pull.
 - Rolling out ring by ring or region by region.
 - **A rollout API**: an operator starts and approves a rollout only from the CLI (`make`, `YES=1`).
 - **BMC events into Loki**: an event receiver, Redfish subscriptions and forwarding of `Event` payloads, validated
@@ -178,11 +193,12 @@ At fleet scale the rollout becomes a distributed system. The figure is the targe
   it. It holds every host's state at every step, so a stopped rollout shows where each host was, and a rerun knows what
   is left. The engine keeps its own store too: its workflow history (each activity's inputs and outputs, the timers
   of a soak, the approval signals), which it replays to continue after a crash.
-- **Each site**: a site agent, the Redfish worker that runs the update steps (`rollout.py run` here), takes the work of each wave, gets short-lived BMC credentials
-  from Vault, drains hosts through a validated scheduler integration and drives the update over Redfish. Images
-  come from a cache in the site, so each file crosses the WAN once per site: a BMC that offers `SimpleUpdate` pulls
-  it, and for a push-only BMC the agent reads it from the cache and pushes it. The poller isn't the agent: it runs
-  beside it as the site's exporter, read-only, on its own ReadOnly account, so a bug in it can never write.
+- **Each site**: a site agent, the Redfish worker that runs the update steps (`rollout.py run` here), takes the work
+  of each wave, gets BMC credentials from Vault, drains hosts through a validated scheduler integration and drives the update over Redfish. Images
+  come from a cache in the site, reducing repeated WAN transfers while entries remain cached: a BMC that offers
+  `SimpleUpdate` pulls it, and for a push-only BMC the agent reads it from the cache and pushes it. The poller isn't the agent: it runs
+  beside it as the site's exporter on an account restricted to ReadOnly operations. [Vault KV](https://developer.hashicorp.com/vault/docs/secrets/kv) can store BMC passwords;
+  automatic rotation or short-lived BMC accounts require a separate, validated integration, not just installing Vault.
 - **Observability**: the agents and the engine send metrics to Prometheus and rollout events to Loki. A separate
   event receiver would subscribe to each BMC's Redfish `EventService` and forward its notifications to Loki
   ([future work](#future-work-bmc-events-into-loki)); Grafana reads both stores, and a halt or a quarantined host would
@@ -193,8 +209,10 @@ every host goes through, as in [the rollout](LAB.md#how-the-rollout-works). The 
 the database records intent and observations, and a host is read again over Redfish before anything acts on it.
 
 **Firmware images: the catalog says what, the cache holds the bytes.** The firmware catalog lists, per hardware model
-and component, the approved version with its file and sha256 (today `baseline.yaml` and `images.yaml`, reviewed in
-git). An image gets in only after its checksum and signature are checked and it has passed on lab hosts of that model;
+and component, the approved version with its file and sha256 (today `baseline.yaml` and `images.yaml`). Only
+`prod/baseline.yaml` is tracked here; the lab catalog and baseline are generated and git-ignored. A production
+approval process must version and review its catalog. In the target design an image gets in only after its checksum
+and signature are checked and it has passed on lab hosts of that model;
 it is then promoted into the approved store, and each site's HTTPS cache serves it from there. Pull and push both read
 the catalog and both take the bytes from the site's cache, never from a vendor at update time; they differ in who
 downloads:
@@ -203,19 +221,20 @@ downloads:
 |---|---|---|
 | Who downloads the image | the BMC, from the cache URL the site agent hands it | the site agent, from the same cache |
 | Checked before it is flashed | its sha256 when it was promoted; the vendor's signature by the BMC. Nothing compares what the BMC downloads with the catalog | its sha256 by the agent, against the catalog, before it pushes; the signature by the BMC |
-| What keeps it the approved image | the URL: a path in the store under the image's sha256, which never serves other bytes | the agent's check: a copy that doesn't match is deleted, never pushed |
+| What keeps it the approved image | a digest-addressed URL plus enforced immutability/write restrictions in the store; the path alone does not enforce it | the agent's check: a copy that doesn't match is deleted, never pushed |
 | The path | cache → BMC | cache → agent → BMC |
 | For | a BMC that allows the URL's protocol and target | a BMC that can't pull, like the lab's GB200 build |
 
-Everything a rollout may install, the rollback's image of the running version too, is in the site's cache before the
-canary starts. The lab runs the push column for real ([The lab stack](LAB.md#the-lab-stack)).
+The target design should prewarm and verify every required image, including rollback images, before the canary.
+Today pre-flight fetches required push images on demand and verifies the local copies; it does not prewarm pull URLs.
+The lab runs the push column for real ([The lab stack](LAB.md#the-lab-stack)).
 
 The catalog and the caches meet on one key, the image's path. A catalog entry names its image by a path in the approved
-store, best under its sha256 (`bmc/<sha256>.tar`), so a path can never serve other bytes; every site's cache serves the
-store's files under the same paths. A site's configuration holds only its cache's address, so one catalog serves every
-site: the agent joins the two, `https://cache.<site>/` and the entry's path, then pushes that file or hands that URL to
-the BMC. Promotion writes the file first and the catalog entry after it, so the catalog never names an image a cache
-can't serve.
+store, preferably under its sha256 (`bmc/<sha256>.tar`), with storage policy preventing replacement; every
+site's cache serves the store's files under the same paths. A site's configuration holds only its cache's address, so one catalog serves every
+site. The current runner joins `IMAGE_CACHE` with relative paths for push; pull entries must already contain the full
+cache URL. Constructing site-specific pull URLs from a shared catalog is future work. Promotion writes the
+file first and the catalog entry after it; cache and store availability must still be checked before execution.
 
 **Tools for the inventory and the rollout state.**
 
@@ -229,8 +248,8 @@ How this repository maps onto it:
 
 | In the system | In this repository today | Next |
 |---|---|---|
-| Approved store, site cache | the lab's store, a SeaweedFS bucket that takes only packages whose signatures verify, and nginx over HTTPS caching it: `rollout.py` fetches each image into `lab/spool/`, checks its sha256 against `images.yaml` and pushes it. A URL in `images.yaml` is handed to `SimpleUpdate` where the BMC allows it | the approved store on S3 or Artifactory, and the same nginx cache in each site |
-| Firmware catalog | `baseline.yaml` and `images.yaml`, reviewed in git | the same |
+| Approved store, site cache | the lab's store, a SeaweedFS bucket populated by the signature-checking ingest script, and nginx over HTTPS caching it: `rollout.py` fetches each image into `lab/spool/`, checks its sha256 against `images.yaml` and pushes it. A URL in `images.yaml` is handed to `SimpleUpdate` where the BMC allows it | the approved store on S3 or Artifactory, and the same nginx cache in each site |
+| Firmware catalog | `prod/baseline.yaml` is tracked; lab baseline and images catalog are generated and git-ignored | version and review the approved catalog |
 | Inventory / CMDB | `inventory.yaml`; the poller's snapshots are the observed versions, and `make firmware SITE=prod` shows drift from the baseline | generate the inventory from NetBox or Nautobot |
 | Rollout API and CLI | the CLI only: the `make` targets and `pipeline.sh`; `YES=1` is the approval | an API, and an approval between the canary and wave 1 |
 | Workflow engine | `pipeline.sh`'s stages and `rollout.py run`: waves, gates, soak | a service that resumes a stopped rollout |
@@ -238,5 +257,5 @@ How this repository maps onto it:
 | Engine store | none: a rerun plans again, and pre-flight skips the hosts already on the target | the engine's own |
 | Site agent | `rollout.py run` on an admin host | one per site |
 | Scheduler | Optional `drain` and `undrain` hooks; neither site configures them, and no integration with a real scheduler has been validated | implement and validate the site's commands, including waiting for the node to become empty |
-| Secrets | `prod/.env` and `observability/grafana/.grafana.env`, git-ignored | Vault, short-lived credentials |
+| Secrets | `prod/.env` and `observability/grafana/.grafana.env`, git-ignored | Vault-backed storage; validate account rotation separately |
 | Observability | the report: terminal, HTML and `report.json`; an exporter per site with every BMC's telemetry, health and firmware, the rollout's metrics pushed live, its events in Loki, and Grafana dashboards in a folder per site ([Observability](LAB.md#observability)) | paging the on-call on a halt or a host left for a person; an exporter and a Pushgateway in each site; an event receiver that subscribes to Redfish `EventService` and forwards BMC events to Loki |
