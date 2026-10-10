@@ -37,6 +37,8 @@ IMAGES = SITE / "images.yaml"  # the firmware image files kept per model, compon
 # needs into SPOOL, checks its sha256, and pushes it from there. Without one, the files are next to images.yaml
 IMAGE_CACHE = os.environ.get("IMAGE_CACHE")
 SPOOL = SITE / "spool"
+# Lab testing: the bad-update scenario a pipeline runs (lab/scenario.sh sets it), a label on its metrics; none otherwise
+SCENARIO = os.environ.get("SCENARIO") or "none"
 CACHE_CA = SITE / "cache" / "tls.crt"  # the cache's certificate when it is self-signed, as the lab's
 RUNS = SITE / "runs"  # the record of each rollout run: runs/<run id>.jsonl, one line per event
 ROLLOUT = SITE / "rollout.yaml"  # how firmware rolls out on the site: canary, waves, gates

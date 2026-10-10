@@ -63,7 +63,7 @@ fi
 printf '\n━━━ scenario %s: %s → %s%s ━━━\n' "$scenario" "$running" "$target" \
   "${faults[$scenario]:+ · ${faults[$scenario]}}"
 status=0
-YES=1 RUN_ARGS="${faults[$scenario]}" ./pipeline.sh "Manager (BMC)" --baseline lab/scenario/baseline.yaml \
+YES=1 SCENARIO=$scenario RUN_ARGS="${faults[$scenario]}" ./pipeline.sh "Manager (BMC)" --baseline lab/scenario/baseline.yaml \
   --images "$catalog" "$@" || status=$?
 
 # How each host ended: its done event; blocked or skipped at pre-flight; untouched when the run never reached it

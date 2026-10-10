@@ -486,6 +486,7 @@ def test_blocked_plan_to_grafana():
     url, body = pushed[0]
     assert url == f"http://pushgateway/metrics/job/rollout/site/{rollout.SITE.name}/pipeline/pipeline-p/stage/plan"
     assert 'rollout_hosts{wave="plan",state="blocked"} 10' in body and 'rollout_gate_halted{wave="plan"} 1' in body
+    assert f'rollout_scenario{{scenario="{rollout.SCENARIO}"}} 1' in body  # which bad update, for the dashboard
 
 
 # The exporter's samples are one series each: two sensors of one name (iLO 4's power supplies) stay two series.

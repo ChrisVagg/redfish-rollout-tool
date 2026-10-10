@@ -61,7 +61,7 @@ from rich.text import Text
 from constants import (ACTION_ROW, ACTIONS_ROW, APPLY_TIME, BASELINE, CACHE_CA, DOTTED, FAILED_STATES, FAULTS, HOST_ROW,
                        HOST_STEP, IMAGE_CACHE, IMAGES, INVENTORY_FILE, LEFT_OUT_ROW, NEXT_STEP, PLAN_ROW, PREFLIGHT_ROW,
                        PROPS, REPORT_SCHEMA, RESET_PREFERENCE, ROLLOUT, ROLLOUT_DEFAULTS, ROOT, RUNNING_STATES, RUNS,
-                       SCHEDULER_TIMEOUT, SITE, SPOOL, STEP_ROW, STYLE, TASK_TIMEOUT, VERSIONS_ROW, WAVE_ROW)
+                       SCENARIO, SCHEDULER_TIMEOUT, SITE, SPOOL, STEP_ROW, STYLE, TASK_TIMEOUT, VERSIONS_ROW, WAVE_ROW)
 from helpers import (block, first_of, first_real, identity, label, link, norm, obj, of, output_options, reason, sample,
                      show, text, uri_of)
 from poller import (allowable, entries, firmware, host_baseline, image_state, load_baseline, load_servers, open_jobs,
@@ -654,7 +654,8 @@ def push_blocked(args, blocked, detail) -> None:
         return
     try:
         body = (sample("rollout_hosts", blocked, wave="plan", state="blocked") + "\n" +
-                sample("rollout_gate_halted", 1, wave="plan") + "\n")
+                sample("rollout_gate_halted", 1, wave="plan") + "\n" +
+                sample("rollout_scenario", 1, scenario=SCENARIO) + "\n")
         requests.put(f"{url.rstrip('/')}/metrics/job/rollout/site/{SITE.name}/pipeline/{pipeline}/stage/plan",
                      data=body, timeout=2).raise_for_status()
     except Exception as e:
@@ -1249,6 +1250,7 @@ def push_metrics(path, group, state, plan=None) -> None:
     with _push_lock:
         try:
             body = metrics(pipeline_report(plan, events_of([path]), path.stem, [path]))
+            body += sample("rollout_scenario", 1, scenario=SCENARIO) + "\n"
             if plan and plan.get("planned"):
                 body += sample("rollout_planned_hosts", plan["planned"]) + "\n"
             requests.put(f"{url.rstrip('/')}/metrics/job/rollout/{group}", data=body, timeout=2).raise_for_status()

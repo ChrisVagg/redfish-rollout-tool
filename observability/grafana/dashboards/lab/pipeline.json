@@ -99,11 +99,68 @@
    "gridPos": {
     "x": 0,
     "y": 0,
-    "w": 15,
+    "w": 12,
     "h": 3
    },
    "timeFrom": "15d",
    "hideTimeOverride": true
+  },
+  {
+   "id": 28,
+   "type": "stat",
+   "title": "Scenario",
+   "description": "The bad update make fault ran (lab/scenario.sh), each named in LAB.md, Bad updates. none: no fault injected, a plain update or rollback.",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "x": 12,
+    "y": 0,
+    "w": 4,
+    "h": 3
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "refId": "A",
+     "instant": true,
+     "range": false,
+     "legendFormat": "{{scenario}}",
+     "expr": "max by (scenario) (rollout_scenario{site=\"$site\",pipeline=\"$pipeline\"})"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "noValue": "-",
+     "color": {
+      "mode": "fixed",
+      "fixedColor": "#a4adbc"
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "values": false,
+     "fields": ""
+    },
+    "textMode": "name",
+    "colorMode": "none",
+    "graphMode": "none",
+    "justifyMode": "center",
+    "wideLayout": true,
+    "text": {
+     "valueSize": 22
+    },
+    "showPercentChange": false
+   }
   },
   {
    "transparent": false,
@@ -163,7 +220,7 @@
    },
    "id": 2,
    "gridPos": {
-    "x": 15,
+    "x": 16,
     "y": 0,
     "w": 4,
     "h": 3
@@ -227,9 +284,9 @@
    },
    "id": 3,
    "gridPos": {
-    "x": 19,
+    "x": 20,
     "y": 0,
-    "w": 5,
+    "w": 4,
     "h": 3
    },
    "timeFrom": "15d",
@@ -1114,14 +1171,14 @@
     "type": "loki",
     "uid": "loki"
    },
-   "description": "The canary and the strict waves halt on any failure; a later wave over its halt_at; a host that failed its soak halts any wave",
+   "description": "Each gate's decision after the canary and each wave. Halts on: any failure for the canary and the first strict waves, else when more than halt_at of the hosts tried failed.",
    "targets": [
     {
      "datasource": {
       "type": "loki",
       "uid": "loki"
      },
-     "expr": "{job=\"rollout\",site=\"$site\"} | json | pipeline=\"$pipeline\" | step=\"gate\"",
+     "expr": "{job=\"rollout\",site=\"$site\"} | json | pipeline=\"$pipeline\" | step=\"gate\" | label_format halts_on=`{{if eq .strict \"true\"}}any failure{{else}}over {{mulf .limit 100}}%{{end}}`",
      "queryType": "range",
      "refId": "A",
      "maxLines": 1000
@@ -1145,8 +1202,7 @@
         "state",
         "failed",
         "tried",
-        "limit",
-        "strict",
+        "halts_on",
         "soak_failed"
        ]
       }
@@ -1160,16 +1216,13 @@
        "state": 1,
        "failed": 2,
        "tried": 3,
-       "limit": 4,
-       "strict": 5,
-       "soak_failed": 6
+       "halts_on": 4,
+       "soak_failed": 5
       },
       "renameByName": {
        "state": "gate",
-       "failed": "failed",
-       "tried": "of tried so far",
-       "limit": "halt over",
-       "strict": "strict",
+       "tried": "tried",
+       "halts_on": "halts on",
        "soak_failed": "soak failures"
       }
      }
@@ -1177,7 +1230,10 @@
    ],
    "fieldConfig": {
     "defaults": {
-     "noValue": "-"
+     "noValue": "-",
+     "custom": {
+      "minWidth": 60
+     }
     },
     "overrides": [
      {
@@ -2829,7 +2885,7 @@
      "type": "prometheus",
      "uid": "prometheus"
     },
-    "hide": 0,
+    "hide": 2,
     "refresh": 2,
     "query": {
      "query": "label_values(rollout_host_info{site=\"$site\",pipeline=\"$pipeline\"}, host)",
@@ -2844,7 +2900,7 @@
  "annotations": {
   "list": [
    {
-    "name": "Gates",
+    "name": "Gate markers",
     "datasource": {
      "type": "loki",
      "uid": "loki"
