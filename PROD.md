@@ -57,7 +57,7 @@ implemented here):
   application gate, not proof of the account's Redfish role.
 - **Scope**: mark hosts `writable: true` only for the change window, give each its `rack`, and mark a few
   representative spare hosts per model `canary: true`.
-- **Scheduler hooks**: `drain` and `undrain` are not configured in `prod/rollout.yaml`, and no integration with a real
+- **Scheduler hooks**: `drain` and `undrain` are not configured in `prod/policy.yaml`, and no integration with a real
   scheduler has been validated here. Before a host-reset update, supply and test commands using `{node}`; the drain
   must return only after the node is empty, its jobs ended. Without a drain, pre-flight blocks updates whose reset
   restarts the host (BIOS, system firmware); a BMC-only reset needs none.

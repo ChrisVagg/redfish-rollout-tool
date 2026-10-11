@@ -119,10 +119,10 @@ fixtures/           the lab BMC as a collect saved it, which the tests read
 constants.py        what to crawl, table columns, rollout constants
 helpers.py          shared helpers
 schemas/            DMTF Redfish JSON Schemas for sensor units, downloaded on first use (git-ignored)
-lab/                the emulated BMCs: Dockerfile, docker-compose.yaml, scenario.sh, inventory.yaml, rollout.yaml;
+lab/                the emulated BMCs: Dockerfile, docker-compose.yaml, scenario.sh, inventory.yaml, policy.yaml;
                     download-fw-images.sh and promote-fw-images.sh, the ingest, with openbmc-dev.pub, the gate's
                     pinned key; store/, the image store's read-only access; cache/, the image cache's nginx config
-prod/               the real fleet: baseline.yaml, rollout.yaml; inventory.yaml and .env stay local
+prod/               the real fleet: baseline.yaml, policy.yaml; inventory.yaml and .env stay local
 observability/      Compose for the exporters, Pushgateway, Loki, Prometheus and Grafana; loki/loki.yaml; a Lab and a
                     Prod dashboard folder;
                     grafana/grafana.ini; grafana/.grafana.env, Grafana's admin account, stays local;

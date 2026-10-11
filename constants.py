@@ -41,8 +41,8 @@ SPOOL = SITE / "spool"
 SCENARIO = os.environ.get("SCENARIO") or "none"
 CACHE_CA = SITE / "cache" / "tls.crt"  # the cache's certificate when it is self-signed, as the lab's
 RUNS = SITE / "runs"  # the record of each rollout run: runs/<run id>.jsonl, one line per event
-ROLLOUT = SITE / "rollout.yaml"  # how firmware rolls out on the site: canary, waves, gates
-# The rollout policy when the site has none, each value overridable in <site>/rollout.yaml or by an option:
+ROLLOUT = SITE / "policy.yaml"  # how firmware rolls out on the site: canary, waves, gates
+# The rollout policy when the site has none, each value overridable in <site>/policy.yaml or by an option:
 #   canary_per_model  hosts of each hardware model that go first (inventory hosts marked canary: true first)
 #   waves             after the canary: the cumulative % of the other hosts done after each wave; it ends with 100
 #   max_per_rack      hosts of one rack in the same wave, at most (0: no limit); the rest wait for a later wave

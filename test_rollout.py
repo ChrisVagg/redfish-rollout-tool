@@ -299,14 +299,14 @@ def test_run_host():
     assert (state, installed) == ("needs_attention", [("", "1755.tar", TARGET)])
 
 
-# A reset that restarts the host needs the scheduler: pre-flight blocks without a drain in rollout.yaml. A drain that
+# A reset that restarts the host needs the scheduler: pre-flight blocks without a drain in policy.yaml. A drain that
 # fails, or runs past its timeout, fails the host before any update; an undrain that fails leaves it for a person, as
 # the host isn't back in service
 def test_drain():
     host_reset = lambda found, component: ("ComputerSystem", "/redfish/v1/Systems/system")
     with patch.object(rollout, "activation", host_reset):
         verdict, reason = preflight()
-        assert verdict == "block" and "restarts the host, and rollout.yaml sets no drain" in reason, reason
+        assert verdict == "block" and "restarts the host, and policy.yaml sets no drain" in reason, reason
         assert preflight(drain="true") == ("go", "")
         state, installed, steps = run_host((True, True, "post-check passed"), drain="false")
         assert (state, installed, ("drain", "failed") in steps) == ("failed", [], True)

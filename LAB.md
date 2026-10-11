@@ -130,7 +130,7 @@ Every host, in the canary and in each wave, goes through six steps; the hosts of
 1. **pre-flight** again, on a fresh read: the host may have changed since the plan, and it must be the BMC the plan
    approved (the same identity: model, service UUID, serial).
 2. **drain**, only when the reset restarts the host (BIOS, system firmware); a BMC reset leaves the host running. The
-   drain command, from the site's `rollout.yaml`, must return only once the node is empty, its jobs ended; one that
+   drain command, from the site's `policy.yaml`, must return only once the node is empty, its jobs ended; one that
    fails, or runs past 24 h, fails the host before any update.
 3. **update**: multipart push of the image, or `SimpleUpdate` from a URL, applied on reset. The BMC runs it as a
    `Task` of its `TaskService`; every change of `TaskState`, `PercentComplete` and `Messages` is recorded, and the
@@ -202,12 +202,12 @@ its `OnReset`, the Task, the Manager's reset, and each host's rollback, which th
 
 ## Rollout policy
 
-Each site has a `rollout.yaml` next to its inventory and baseline. `plan` reads it, an option overrides one value for
+Each site has a `policy.yaml` next to its inventory and baseline. `plan` reads it, an option overrides one value for
 one plan (`--canary`, `--waves`, `--max-per-rack`, `--halt-at`), and the plan and the report record what was used.
-A run only runs a saved plan's stage, with the plan's policy, and refuses a `rollout.yaml` edited since the plan. The
+A run only runs a saved plan's stage, with the plan's policy, and refuses a `policy.yaml` edited since the plan. The
 policy is reviewed like code: it decides how many hosts a bad image can reach before something stops it.
 
-| Setting | [lab](lab/rollout.yaml) | [production](prod/rollout.yaml) | What it does |
+| Setting | [lab](lab/policy.yaml) | [production](prod/policy.yaml) | What it does |
 |---|---|---|---|
 | `canary_per_model` | 1 | 1 | Hosts of each hardware model that go first. A bad image is almost always model-specific, so one canary for the whole fleet proves nothing for the other models. Hosts marked `canary: true` in the inventory go first, and the canaries keep to `max_per_rack` too, unless every host of a model is in a full rack. |
 | `waves` | 33, 100 | 5, 25, 100 | Cumulative % of the other hosts done after each wave: small while the evidence is thin, bigger once gates have passed. |

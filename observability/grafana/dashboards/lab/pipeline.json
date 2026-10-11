@@ -847,7 +847,7 @@
    "transparent": false,
    "type": "stat",
    "title": "Plan: the policy it used",
-   "description": "The plan stage reads every BMC live, pre-flights it, and puts the hosts that pass into the canary and waves by the site's rollout.yaml: this policy. Every later stage runs this plan",
+   "description": "The plan stage reads every BMC live, pre-flights it, and puts the hosts that pass into the canary and waves by the site's policy.yaml, shown here. Every later stage runs this plan",
    "datasource": {
     "type": "loki",
     "uid": "loki"

@@ -426,7 +426,7 @@ def check(found, baselines, key, policy=None) -> dict:
 
 # ---- Plan: First step when we want to update firmware images of resources exposed from BMC ----
 
-# The site's rollout policy (<site>/rollout.yaml over the defaults), each value overridden by its option when given
+# The site's rollout policy (<site>/policy.yaml over the defaults), each value overridden by its option when given
 def load_rollout(args) -> dict:
     path = ROLLOUT
     written = (yaml.safe_load(path.read_text()) or {}) if path.is_file() else {}
@@ -942,7 +942,7 @@ def apply(server, found, key, image, want, before, policy, rec, phase) -> tuple[
 
 # Step 2 and the undrain of step 6: take a host out of the scheduler or give it back; (ok, output)
 def scheduler(command, server) -> tuple[bool, str]:
-    """rollout.yaml's drain or undrain command with {host} and {node} (the inventory's node, else the host) filled in.
+    """policy.yaml's drain or undrain command with {host} and {node} (the inventory's node, else the host) filled in.
     A drain must return only once the node is empty, its jobs ended, not once the scheduler stops sending it new ones;
     one still running after SCHEDULER_TIMEOUT fails. None configured: nothing to do, as in the lab."""
     if not command:

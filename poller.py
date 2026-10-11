@@ -63,33 +63,25 @@ from helpers import (at, block, choose, connection, details, discrete, first_of,
 from redfish import REFUSED, call, login, logout, tunnel
 
 log = logging.getLogger("redfish")
-_schema_lock = threading.Lock()  # one schema file read or downloaded at a time across the host threads
+_schema_lock = threading.Lock()
 
 
-# ---- Discovery: recursive from the service root, each resource once ----
-
-# Every resource a document links to, except SKIP branches and links inside TEMPLATES annotations
+# Every Redfish resource a document links to, outside the SKIP branches and TEMPLATES annotations
 def links(doc) -> list[str]:
-    # lambda kv: a (key, value) pair of the document -> True when the key isn't a template annotation
     resource = dict(filter(lambda kv: kv[0] not in TEMPLATES, doc.items()))
     uris = map(norm, LINKS.findall(json.dumps(resource)))
-    # lambda u: a linked URI -> True when it is a Redfish resource outside the SKIP branches
     return sorted(set(filter(lambda u: u.startswith(ROOT) and not SKIP.search(u), uris)))
 
 
-# Fetch uri, then every resource it links to that isn't in found yet, recursively: {uri: document}
+# Fetch uri and, recursively, every resource it links to that isn't fetched yet: {uri: document}
 def discover(tunnel, uri, found) -> dict:
-    # ponytail: one stack frame per link hop; iterate with an explicit stack if a BMC ever nests ~900 deep
     found[uri] = call(tunnel, uri)
-    # lambda u: a linked URI -> True when it hasn't been fetched yet
     for child in filter(lambda u: u not in found, links(found[uri])):
         discover(tunnel, child, found)
     return found
 
 
-# ---- Schema: the DMTF JSON Schema of a resource type gives each property's unit ----
-
-# A DMTF JSON Schema file: from ./schemas, else downloaded there once; {} when it isn't published (Oem types)
+# A DMTF JSON Schema file from ./schemas, else downloaded there once; {} when it isn't published
 @lru_cache(maxsize=None)
 def schema_file(name) -> dict:
     with _schema_lock:
@@ -105,7 +97,7 @@ def download(name) -> dict:
         r = requests.get(DMTF + name, timeout=15)
         r.raise_for_status()
         doc = r.json()
-    except (requests.RequestException, ValueError) as e:  # a 404 is an Oem type; anything else is worth a warning
+    except (requests.RequestException, ValueError) as e:
         level = logging.DEBUG if isinstance(e, requests.HTTPError) else logging.WARNING
         log.log(level, "schema %s: %s", name, reason(str(e)))
         return {}
@@ -114,23 +106,21 @@ def download(name) -> dict:
     return doc
 
 
-# The newest versioned schema file of a type, as its unversioned file lists them: Sensor -> Sensor.v1_11_0.json
+# The newest versioned schema file of a type: Sensor -> Sensor.v1_11_0.json
 def newest(name) -> str:
     listed = re.findall(rf"{re.escape(name)}\.v\d+_\d+_\d+\.json", json.dumps(schema_file(name + ".json")))
     return listed[-1] if listed else name + ".json"
 
 
-# {property: unit} for every property with a unit in the type's schema
+# {property: unit} from the type's schema; the newest version when the BMC reports none (iLO 4)
 @lru_cache(maxsize=None)
 def schema_units(name, version) -> dict[str, str]:
-    """Without a version (iLO 4): the newest versioned schema the unversioned file lists."""
     schema = schema_file(f"{name}.{version}.json" if version else newest(name))
     return {p: s["units"] for d in (schema.get("definitions") or {}).values()
             for p, s in (obj(d).get("properties") or {}).items() if "units" in obj(s)}
 
 
-# The unit DMTF's newest Sensor schema gives a ReadingType ("The `ReadingUnits` property shall contain `J`", older
-# versions "the ReadingUnits value shall be 'Cel'"); None without one. For sensors that report no ReadingUnits
+# The unit DMTF's Sensor schema gives a ReadingType, for sensors without ReadingUnits; else None
 @lru_cache(maxsize=None)
 def reading_type_unit(reading_type) -> str | None:
     types = obj(obj(schema_file(newest("Sensor")).get("definitions")).get("ReadingType"))
@@ -139,14 +129,11 @@ def reading_type_unit(reading_type) -> str | None:
     return m[1] if m else None
 
 
-# ---- Telemetry: every numeric property with a unit that measures something ----
-
-# (regex, MetricDefinition) per MetricProperties URI, each {wildcard} limited to its Wildcards values
+# (regex, MetricDefinition) per MetricProperties URI, each {wildcard} limited to its values
 def metric_definitions(found) -> list[tuple[re.Pattern, dict]]:
     out = []
     for _, d in of(found, "MetricDefinition"):
         values = {w.get("Name"): w.get("Values") or ["*"] for w in d.get("Wildcards") or []}
-        # lambda m: a {Name} wildcard match -> a regex alternation of its values; "*" matches any one path segment
         sub = lambda m: "(?:%s)" % "|".join("[^/#]+" if v == "*" else re.escape(v) for v in values.get(m[1], ["*"]))
         out += [(re.compile(WILDCARD.sub(sub, re.escape(p))), d) for p in d.get("MetricProperties") or []]
     return out
@@ -154,27 +141,19 @@ def metric_definitions(found) -> list[tuple[re.Pattern, dict]]:
 
 # The MetricDefinition whose MetricProperties match a metric URI; {} when none does
 def definition(definitions, metric) -> dict:
-    # lambda rd: a (regex, definition) pair -> True when the regex matches the whole metric URI
     return next(filter(lambda rd: rd[0].fullmatch(metric), definitions), (None, {}))[1]
 
 
-# A record for one numeric property (keys: kind and FIELDS); kind is None for a number that measures nothing
+# One numeric property as a record with its unit, kind, role and owning sensor; kind None if it measures nothing
 def reading(uri, doc, definitions, path, value) -> dict:
-    """Its unit comes from the BMC's MetricDefinition for it, else the DMTF schema, else a sibling '<Property>Units'
-    (Sensor.ReadingUnits), else the unit DMTF's Sensor schema gives its ReadingType, else, for a threshold without a unit
-    of its own (a Sensor's Thresholds/UpperCritical/Reading, a Fan's UpperThresholdCritical), the unit of the object
-    holding it.
-    What it measures comes from the unit, else from the Sensor's ReadingType; Role says reading or limit. Name, Status
-    and Critical are those of the nearest named object holding it (the sensor, fan or power supply)."""
     keys = path.split("/")
     name, version = rtype(doc)
     md = definition(definitions, f"{uri}#/{path}")
-    # lambda i: a path length, longest first -> True when that much of the path leads to a named object
     i = next(filter(lambda i: named(at(doc, keys[:i])), range(len(keys) - 1, -1, -1)), 0)
     item, prop, last = obj(at(doc, keys[:i])), "/".join(keys[i:]), keys[-1]
     unit = md.get("Units") or schema_units(name, version).get(last) or obj(at(doc, keys[:-1])).get(last + "Units")
     kind = KIND.get(unit)
-    if last == "Reading" or (not unit and "Threshold" in prop):  # a Sensor, a Fan, or a threshold of one
+    if last == "Reading" or (not unit and "Threshold" in prop):
         unit = unit or item.get("ReadingUnits") or reading_type_unit(item.get("ReadingType"))
         kind = kind or KIND.get(unit) or item.get("ReadingType")
     flat = properties(item)
@@ -187,45 +166,35 @@ def reading(uri, doc, definitions, path, value) -> dict:
 
 # Every reading and every limit (threshold, range, capacity...) of one host, as records
 def readings(found) -> list[dict]:
-    """Also those null right now (absent or powered-off sensors); numbers that measure nothing are left out."""
     definitions = metric_definitions(found)
-    # lambda d: a document -> its (path, value) leaf properties whose value is a number or null
-    # lambda pv: a (path, value) pair -> True when the value is a number or null
     numbers = lambda d: filter(lambda pv: type(pv[1]) in (int, float, type(None)), properties(d).items())
-    # lambda r: a record -> True when it measures something (it has a kind)
     return list(filter(lambda r: r["kind"], (reading(u, d, definitions, p, v) for u, d in found.items()
                                              for p, v in numbers(d))))
 
 
-# How far a reading is below its critical threshold; None when either is missing
+# How far a reading is below its critical threshold; None when either is missing or critical is 0
 def margin(r) -> float | None:
-    """A critical of 0 means no threshold (iLO 4 reports 0 for sensors without one)."""
     try:
         return round((r.get("critical") or None) - r.get("value"), 2)
     except TypeError:
         return None
 
 
-# ---- Detail report sections: each returns a list of tables or lines; empty ones are dropped ----
-
 # One Property/Value table per resource of a type; title may use {uri}
 def props(found, title, name, rows) -> list:
-    # lambda h, row: a column header and a (property, value) row -> the property, which styles the value cell
     return [block(title.format(uri=u), PROPS, rows(d), key=lambda h, row: row[0]) for u, d in of(found, name)]
 
 
 # One table of the items of some types, a column per property path ('A|B': A, else B when A isn't real)
 def listing(found, title, sources, columns) -> list:
-    # lambda u, i: an item's URI and document -> its leaf properties, plus the URI as "@resource"
     flat = lambda u, i: {"@resource": u, **properties(i)}
     rows = [[text(f.get(choose(f, c))) for c in columns]
             for s in sources for u, i in items(found, s) for f in [flat(u, i)]]
     return [block(title, ["Resource" if c == "@resource" else c.split("|")[0] for c in columns], rows)]
 
 
-# Vendor extensions: every Oem property, which the Redfish schema doesn't standardize
+# One table of every Oem property: the vendor extensions the Redfish schema doesn't standardize
 def vendor_oem(found, title) -> list:
-    # lambda p: an Oem property path -> (path before Oem, vendor, vendor property)
     split = lambda p: OEM_PATH.fullmatch(p).groups()
     rows = sorted((vendor, u, "/".join(filter(None, (before, prop))) or "-", v)
                   for u, d in found.items() for p, v in details(d, oem=True) for before, vendor, prop in [split(p)])
@@ -235,9 +204,7 @@ def vendor_oem(found, title) -> list:
 
 # One Property/Value table per service: every resource whose type ends in Service
 def services(found) -> list:
-    # lambda ud: a (uri, document) pair -> True when the document's type ends in Service
     offered = filter(lambda ud: rtype(ud[1])[0].endswith("Service"), sorted(found.items()))
-    # lambda h, row: a column header and a (property, value) row -> the property, which styles the value cell
     return [block(f"{rtype(d)[0]} · {u}", PROPS, details(d), key=lambda h, row: row[0]) for u, d in offered]
 
 
@@ -258,7 +225,7 @@ def actions(found, title) -> list:
     return [block(title, ("Resource", "Action", "Target", "Parameters"), rows)]
 
 
-# The parameters of an action and their allowed values, from the action and its ActionInfo: "Param: a, b; ..."
+# An action's parameters and allowed values, from the action and its ActionInfo: 'Param: a, b; ...'
 def parameters(found, action) -> str:
     allowed = {}
     for key, value in action.items():
@@ -270,7 +237,7 @@ def parameters(found, action) -> str:
     return "; ".join(f"{p}: {', '.join(dict.fromkeys(v)) or 'any'}" for p, v in allowed.items()) or "-"
 
 
-# (resource, type, name, health, health rollup, state) for every object that has a Status, values as reported
+# (resource, type, name, health, health rollup, state) for every object that has a Status
 def components(found) -> list[tuple[str, ...]]:
     return [(pointer(u, keys), rtype(d)[0], text(named(item)), *discrete(item))
             for u, d in sorted(found.items())
@@ -284,22 +251,19 @@ def health(found, title) -> list:
     return [Text(f"{title}: {len(comps)} with a status · Health: {tally(c[3] for c in comps)} · "
                  f"State: {tally(c[5] for c in comps)}"),
             block("Components", ("Resource", "Type", "Name", "Health", "HealthRollup", "State"),
-                  # lambda c: a component -> its sort key: Critical, then Warning, then the rest, each by resource
                   sorted(comps, key=lambda c: (SEVERITY.get(c[3], 2), c)))]
 
 
 # Every numeric property with a measuring unit, one table per kind of measurement
 def measurements(found, title) -> list:
     rows = sorted((tuple(map(text, map(r.get, FIELDS))), r["kind"]) for r in readings(found))
-    # lambda rk: a (row, kind) pair -> True when the row is of this table's kind
     return [block(f"{title} · {kind}", READINGS, [row for row, _ in filter(lambda rk: rk[1] == kind, rows)])
             for kind in dict.fromkeys([*KIND.values(), *(k for _, k in rows)])]
 
 
-# The detail report: per part, its sections as (section function, arguments...)
 INVENTORY = (
     (props, "System · {uri}", "ComputerSystem", partial(pick, fields=SYSTEM)),
-    (listing, "Processors", ("Processor",),  # AMI files the CPU name under ProcessorId/EffectiveFamily, not Model
+    (listing, "Processors", ("Processor",),
      ("@resource", "Id", "Manufacturer", "Model|ProcessorId/EffectiveFamily", "ProcessorType", "TotalCores",
       "TotalThreads", "MaxSpeedMHz", "Status/Health", "Status/State")),
     (listing, "Memory", ("Memory",), ("@resource", "Id", "CapacityMiB", "MemoryDeviceType", "OperatingSpeedMhz",
@@ -340,8 +304,8 @@ HEALTH = (
 )
 TELEMETRY = (
     (measurements, "Measurements"),
-    (props, "Metric report definition · {uri}", "MetricReportDefinition", details), # metadata for the metric properties
-    (listing, "Metric reports", ("MetricReport/MetricValues",), # Generated reports
+    (props, "Metric report definition · {uri}", "MetricReportDefinition", details),
+    (listing, "Metric reports", ("MetricReport/MetricValues",),
      ("@resource", "MetricId", "MetricProperty", "MetricValue", "Timestamp")),
     (props, "Trigger · {uri}", "Triggers", details),
 )
@@ -357,11 +321,9 @@ def report(server, found) -> Group:
     return Group(Rule(Text("Host " + " · ".join(label(server)), style="bold")), *filter(None, parts))
 
 
-# ---- Collect: crawl every BMC and snapshot each host ----
-
 # One row of the collect summary: connection, resources, errors and identity of a host
 def summary(server, found, seconds) -> tuple[str, ...]:
-    root = found.get(ROOT, {}) # Root service /redfish/v1
+    root = found.get(ROOT, {})
     errors = [d.get("error", "no @odata.type") for _, d in of(found, "(untyped)")]
     return (*label(server), connection(server), str(len(found)), str(len(errors)), f"{seconds:.1f}",
             text(root.get("RedfishVersion")), *identity(found), rollup(found),
@@ -378,7 +340,7 @@ def overview(rows) -> Table | list:
     return block("Summary", SUMMARY, rows, caption=caption, caption_justify="left")
 
 
-# Crawl one host into ./snapshots/<host>.json; the snapshot before it moves to ./snapshots/previous
+# Crawl one host into its snapshot file; the snapshot before it moves to PREVIOUS for the diff view
 def snapshot(server, tunnel) -> dict:
     found, seconds, stopped = crawl(server, tunnel)
     log.info("%s: %d resources in %.0fs", server["host"], len(found), seconds)
@@ -388,13 +350,12 @@ def snapshot(server, tunnel) -> dict:
     PREVIOUS.mkdir(parents=True, exist_ok=True)
     path = snapshot_path(server["host"])
     if path.exists():
-        path.replace(PREVIOUS / path.name)  # the crawl before, for the diff view
+        path.replace(PREVIOUS / path.name)
     path.write_text(json.dumps(snap))
     return snap
 
 
-# One crawl of a host's tree: (resources found, seconds, why it stopped or None); deadline caps the host's own.
-# keep: the tunnel already holds a session, the crawl neither logs in nor out
+# One crawl of a host: (resources, seconds, why it stopped); keep reuses the tunnel's session
 def crawl(server, tunnel, deadline=None, keep=False) -> tuple[dict, float, str | None]:
     start, found, stopped = time.monotonic(), {}, None
     tunnel[2].update(until=start + min(tunnel[2]["deadline"], deadline or tunnel[2]["deadline"]), failures=0)
@@ -405,7 +366,7 @@ def crawl(server, tunnel, deadline=None, keep=False) -> tuple[dict, float, str |
         finally:
             if location:
                 logout(tunnel, location)
-    except ConnectionAbortedError as e:  # raised by call(): what was found so far is kept, the views say why
+    except ConnectionAbortedError as e:
         stopped = str(e)
         log.warning("%s: %s", server["host"], stopped)
     return found, round(time.monotonic() - start, 1), stopped
@@ -418,24 +379,17 @@ def load_servers(path) -> list[dict]:
     return [{**(cfg.get("defaults") or {}), **server} for server in cfg["servers"]]
 
 
-# Collect - run the poller and create snapshots
+# Crawl every BMC in parallel, snapshot each host and return the summary table
 def collect(args) -> list:
     servers = load_servers(args.config)
-    tunnels = [tunnel(server) for server in servers]  # fails on missing credentials before any request
+    tunnels = [tunnel(server) for server in servers]
     with ThreadPoolExecutor(len(servers)) as pool:
         snaps = list(pool.map(snapshot, servers, tunnels))
-    # lambda s: a snapshot -> its summary row
     return [overview(per_host(lambda s: summary(s, s["resources"], s["seconds"]), snaps))]
 
 
-# ---- Updates: what Redfish can update on a host and how an image can reach it; rollout.py's pre-flight and the
-# exporter read the same ----
-
-# The firmware inventory entries a component's update touches, so pre-flight can check them
+# The firmware inventory entries a component's update touches; for BIOS and BMC, those linked to it
 def entries(found, component) -> list[dict]:
-    """An inventory row's own entries. For System BIOS and Manager (BMC): the entries a manager lists in
-    Links.SoftwareImages, or whose RelatedItem points at the system's BIOS or at the manager, together with the other
-    images of the same component (same SoftwareId), such as a staged one that carries no links."""
     groups = inventory_groups(found)
     if component in groups:
         return [d for _, d in groups[component]]
@@ -449,17 +403,14 @@ def entries(found, component) -> list[dict]:
     return [d for u, d in inventory if u in linked or d.get("SoftwareId") in ids]
 
 
-# A SimpleUpdate parameter's AllowableValues, from the action itself or its ActionInfo; None when the BMC lists none
+# A SimpleUpdate parameter's AllowableValues, from the action or its ActionInfo; None when unlisted
 def allowable(found, action, name) -> list | None:
     info = found.get(norm(action.get("@Redfish.ActionInfo") or "")) or {}
     listed = [p.get("AllowableValues") for p in info.get("Parameters") or [] if p.get("Name") == name]
     return action.get(f"{name}@Redfish.AllowableValues") or next(filter(None, listed), None)
 
 
-# How this BMC takes an image: multipart push, SimpleUpdate with its transfer protocols, the older HttpPushUri
-# How a component's image can reach the BMC: (push, pull), each "yes · …", "no: why" or "not verified: …". Push
-# sends the file to MultipartHttpPushUri; pull has the BMC fetch a URL with SimpleUpdate, whose Targets and
-# TransferProtocol must be in their AllowableValues when the BMC lists them. url: the catalog's image when it's a URL
+# How a component's image can reach the BMC: (push, pull), each 'yes · …', 'no: why' or 'not verified: …'
 def ways_in(found, component, url=None) -> tuple[str, str]:
     update = first_of(found, "UpdateService")
     targets = update_targets_of(found, component)
@@ -484,18 +435,11 @@ def ways_in(found, component, url=None) -> tuple[str, str]:
 
 # What an update can target on this BMC: System BIOS, Manager (BMC) and every firmware inventory row
 def update_targets(found) -> set[str]:
-    """The firmware view's other rows (drives, controllers, NICs, PSUs read from their own resources) only report a
-    version: Redfish updates what the BMC lists in its firmware inventory."""
     return {"System BIOS", "Manager (BMC)", *inventory_groups(found)}
 
 
 # Whether Redfish can update a component on this host, and why not: the Updateable column
 def updatable(found, component) -> str:
-    """Redfish has no reason field; the reasons are the schema's meaning of the properties. No: the component isn't in
-    the firmware inventory (its version comes from another resource), an entry of it is WriteProtected ("cannot be
-    altered or overwritten"), or its entries have Updateable false ("the service cannot update this software, it is
-    for reporting purposes only"). Not verified: no inventory entry is linked to it (System BIOS and Manager (BMC)
-    on BMCs without RelatedItem), or its entries don't report Updateable."""
     if component not in update_targets(found):
         return "no: not in the firmware inventory"
     touched = entries(found, component)
@@ -511,17 +455,14 @@ def updatable(found, component) -> str:
     return "not verified: Updateable not reported"
 
 
-# The targets of an update: the component's RelatedItem, else its inventory entries; [] lets the BMC decide
+# The targets of an update: the component's RelatedItem, else its entries; [] lets the BMC decide
 def update_targets_of(found, component) -> list[str]:
     touched = entries(found, component)
     related = {u for d in touched for u in map(uri_of, d.get("RelatedItem") or []) if u}
     return sorted(related or {u for u in map(uri_of, touched) if u})
 
 
-# ---- Exporter: every BMC's telemetry as Prometheus metrics, read again every interval ----
-
-# A threshold property's name in DMTF's Sensor schema: UpperThresholdNonCritical and Thresholds/UpperCaution/Reading
-# are both UpperCaution; None for any other property
+# A threshold property's DMTF Sensor name (UpperThresholdNonCritical -> UpperCaution); else None
 def threshold(prop) -> str | None:
     m = THRESHOLD.search(prop)
     if not m:
@@ -530,12 +471,7 @@ def threshold(prop) -> str | None:
     return side + ("Caution" if level == "NonCritical" else level)
 
 
-# One host's crawl as Prometheus samples, all from standard properties: what the equipment is (the inventory's vendor,
-# project and rack, the BMC's Manufacturer and Model; "-" until it answers), whether it answered, how long the crawl
-# took and how many of its GETs failed (what they would have read is missing from this read); every reading with its unit, its thresholds and how far past them it is (0 within, 1 caution, 2 critical,
-# 3 fatal, upper or lower); the health of every object with a Status (-1: none reported); each firmware
-# component with its running version, whether Redfish can update it and how an image gets in (push, pull), as
-# rollout.py plan reports it; the BMC's own memory, storage and uptime (ManagerDiagnosticData) and its last reset
+# One host's crawl as Prometheus samples: identity, readings, thresholds, health, firmware, BMC resources
 def exposition(server, found, seconds) -> list[str]:
     host = server["host"]
     up = bool(found) and "error" not in found.get(ROOT, {})
@@ -548,19 +484,18 @@ def exposition(server, found, seconds) -> list[str]:
     if not up:
         return out
     records = readings(found)
-    limits = {}  # (object, kind) -> {threshold: value}: an object's thresholds apply to its readings of that kind
+    limits = {}
     for r in records:
         name = r["role"] == "limit" and threshold(r["property"])
-        if name and isinstance(r["value"], (int, float)) and r["value"]:  # 0: none set (iLO 4, AMI's lower ones)
+        if name and isinstance(r["value"], (int, float)) and r["value"]:
             limits.setdefault((r["resource"], r["kind"]), {})[name] = r["value"]
     for r in records:
         if r["role"] == "reading" and isinstance(r["value"], (int, float)):
             labels = {"host": host, "kind": r["kind"], "resource": r["resource"], "sensor": r["name"] or "-",
-                      "property": r["property"], "unit": r["unit"] or "-"}  # resource: names repeat (iLO 4's PSUs)
+                      "property": r["property"], "unit": r["unit"] or "-"}
             out.append(sample("redfish_reading", r["value"], **labels))
             th, v = limits.get((r["resource"], r["kind"]), {}), r["value"]
             out += [sample("redfish_reading_threshold", t, **labels, threshold=name) for name, t in th.items()]
-            # lambda level: True when the reading is at or past that level's upper or lower threshold
             past = lambda level: v >= th.get("Upper" + level, inf) or v <= th.get("Lower" + level, -inf)
             if th:
                 out.append(sample("redfish_reading_crossed", next(
@@ -587,30 +522,24 @@ def exposition(server, found, seconds) -> list[str]:
     return out
 
 
-# poller.py exporter: crawl every BMC each interval, in parallel, and serve the latest metrics on /metrics. Prometheus
-# scrapes them; the crawl runs on its own cycle, so a slow BMC never makes a scrape wait
+# Crawl every BMC each interval, one session kept per BMC, and serve the latest metrics on /metrics
 def exporter(args) -> list:
-    # A fresh clone has no prod/inventory.yaml: serve no BMC and stay up, so the stack starts the same everywhere
     servers = load_servers(args.config) if Path(args.config).exists() else []
     if not servers:
         log.warning("exporter: no BMC in %s, nothing to read", args.config)
     for server in servers:
-        tunnel(server)  # fails on missing credentials before any request
-    parts = {server["host"]: [] for server in servers}  # host -> the samples of its latest read
-    # One Redfish session per BMC, kept across reads: a login per read would fill the BMC's own log (iDRAC's
-    # Lifecycle Log, iLO's security log) with one entry per read
-    sessions = {}  # host -> (tunnel, session URI)
-    refused = set()  # hosts whose fresh login got a 401: never asked again, a BMC locks the account after a few
-    stopping = threading.Event()  # set on the way out: no read starts, so none logs in again after the logout
+        tunnel(server)
+    parts = {server["host"]: [] for server in servers}
+    sessions = {}
+    refused = set()
+    stopping = threading.Event()
 
-    # One host's samples: a crawl of at most 3 intervals; a payload that breaks them counts as the host not answering
+    # One host's samples; a 401 on a kept session logs in again, on a fresh login the host isn't asked again
     def read(server) -> list[str]:
         host = server["host"]
         if host in refused:
             return [sample("redfish_up", 0, host=host), sample("redfish_login_refused", 1, host=host)]
         try:
-            # A 401 on a kept session: the BMC ended it (a reset, an update's), so log in again and read once more. A
-            # 401 on a fresh login: the credentials, never asked again
             for fresh in (host not in sessions, True):
                 if fresh:
                     bmc = tunnel(server)
@@ -624,19 +553,17 @@ def exporter(args) -> list:
                     log.error("%s: login refused, not asked again until a restart: check its credentials", host)
                     break
                 log.info("%s: the BMC ended its session, logging in again", host)
-            # A session the BMC would end before the next read (SessionService.SessionTimeout: AMI's is 30 s) is
-            # logged out now, freeing its slot; no session, Basic auth: a new connection next read
             timeout = first_of(found, "SessionService").get("SessionTimeout")
             if host in sessions and (not sessions[host][1] or isinstance(timeout, int) and timeout < args.interval):
                 bmc, location = sessions.pop(host)
                 if location:
                     logout(bmc, location)
             return exposition(server, found, seconds)
-        except Exception:  # BMC payloads are untrusted: one odd host must not stop the others
+        except Exception:
             log.exception("%s: left out of this read", host)
             return [sample("redfish_up", 0, host=host)]
 
-    # Each BMC on its own loop: a slow one (a full iDRAC 8 crawl takes minutes) never holds up the others
+    # Read one BMC every interval on its own thread, so a slow one never holds up the others
     def watch(server) -> None:
         while not stopping.is_set():
             start = time.monotonic()
@@ -644,6 +571,7 @@ def exporter(args) -> list:
             time.sleep(max(0.0, args.interval - (time.monotonic() - start)))
 
     class Metrics(BaseHTTPRequestHandler):
+        # Serve the latest samples of every host on /metrics, 404 elsewhere
         def do_GET(self) -> None:
             body = "".join(x + "\n" for part in list(parts.values()) for x in part).encode()
             self.send_response(200 if self.path == "/metrics" else 404)
@@ -651,17 +579,18 @@ def exporter(args) -> list:
             self.end_headers()
             self.wfile.write(body if self.path == "/metrics" else b"")
 
-        def log_message(self, *args) -> None:  # a scrape every 10 s isn't news
+        # No access log: a scrape every interval isn't news
+        def log_message(self, *args) -> None:
             pass
 
     for server in servers:
         threading.Thread(target=watch, args=(server,), daemon=True).start()
     address, port = args.listen.rsplit(":", 1)
     log.info("exporter: %d BMCs every %ss, metrics on http://%s/metrics", len(servers), args.interval, args.listen)
-    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))  # docker stop: log out below
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
     try:
         ThreadingHTTPServer((address, int(port)), Metrics).serve_forever()
-    finally:  # a session left open holds one of the BMC's few slots until it times out
+    finally:
         stopping.set()
         log.info("stopping: logging out of %d BMCs; a read still running ends on a 401, not a credentials problem",
                  len(sessions))
@@ -671,29 +600,19 @@ def exporter(args) -> list:
     return []
 
 
-# ---- Views: each reads the snapshots and returns what it shows ----
-
-# View health of exposed components
+# View health: counts per host, then what is not OK, jobs to check and failed requests
 def view_health(args) -> list:
-    """Per host a count of every Health value reported, then every component whose Health is Warning or Critical
-    and every failed request across the fleet. Values exactly as the BMCs report them."""
     snaps = load()
-    # lambda s: a snapshot -> (host, its components, each prefixed with the host)
     comps = dict(per_host(lambda s: (s["host"], [(s["host"], *c) for c in components(s["resources"])]), snaps))
-    # lambda v: a Health value -> its sort key: Critical, Warning, then the others alphabetically
     values = sorted({c[4] for cs in comps.values() for c in cs}, key=lambda v: (-SEVERITY.get(v, -1), v))
-    # lambda s: a snapshot -> (host, its jobs to check, each prefixed with the host)
     jobs = dict(per_host(lambda s: (s["host"], [(s["host"], *j) for j in open_jobs(s["resources"])]), snaps))
-    # lambda s: a snapshot -> its row: label, connection, identity, rollup, a count per Health value, jobs, failures
     hosts = per_host(lambda s: (*label(s), connection(s), *identity(s["resources"]), rollup(s["resources"]),
                                 *(str(Counter(c[4] for c in comps.get(s["host"], []))[v]) for v in values),
                                 str(len(jobs.get(s["host"], []))), str(len(of(s["resources"], "(untyped)"))),
                                 s["collected"]), snaps)
-    # lambda c: a component -> True when its Health is Critical or Warning; the key sorts Critical first
     problems = sorted((c for cs in comps.values() for c in filter(lambda c: c[4] in SEVERITY, cs)),
                       key=lambda c: (SEVERITY[c[4]], c))
     failed = [(s["host"], u, d.get("error", "-")) for s in snaps for u, d in of(s["resources"], "(untyped)")]
-    # lambda s: a snapshot -> True when its crawl was stopped
     failed += [(s["host"], "(crawl stopped)", s["stopped"]) for s in filter(lambda s: s.get("stopped"), snaps)]
     return [
         block("Health by host", ("Host", "Vendor", "Project", "Connection", "Manufacturer", "Model", "HealthRollup",
@@ -705,18 +624,14 @@ def view_health(args) -> list:
         block("Failed requests", ("Host", "Resource", "Error"), failed) or Text("Failed requests: none")]
 
 
-# Jobs and tasks that haven't ended, or ended badly: (resource, name, state, status, message, time), as reported
+# Jobs and tasks not Completed, or with a Warning or Critical status or message, worst message shown
 def open_jobs(found) -> list[tuple[str, ...]]:
-    """Any JobState or TaskState but Completed (New, Pending, Running, Exception, Killed, Cancelled...), a Warning or
-    Critical JobStatus or TaskStatus, or a message with a Warning or Critical MessageSeverity (Severity before
-    Message v1_1). The message shown is the most severe one. A rollout's pre-flight skips a host that has any."""
     rows = []
     for u, d in sorted(found.items()):
         if rtype(d)[0] not in JOB_TYPES:
             continue
         state, status = d.get("JobState") or d.get("TaskState"), d.get("JobStatus") or d.get("TaskStatus")
         messages = [m for m in d.get("Messages") or [] if isinstance(m, dict)]
-        # lambda m: a message -> its rank: Critical 0, Warning 1, anything else 2, so min() is the most severe
         worst = min(messages, key=lambda m: SEVERITY.get(m.get("MessageSeverity") or m.get("Severity"), 2), default={})
         severity = worst.get("MessageSeverity") or worst.get("Severity")
         if state != "Completed" or status in SEVERITY or severity in SEVERITY:
@@ -725,15 +640,12 @@ def open_jobs(found) -> list[tuple[str, ...]]:
     return rows
 
 
-# {component: (version, note)} for one host; the note describes the component's other images
+# {component: (version, note)} for one host: BIOS, BMC, firmware inventory, drives, NICs, PSUs...
 def firmware(found) -> dict[str, tuple[str | None, str]]:
-    """BIOS and BMC as the System and Manager report them, every entry of the firmware inventory (AMI lists BIOS there
-    without a version), and the firmware of drives, controllers, NICs and PSUs per model."""
     parts = {}
     for prefix, source, model, version in FW_PARTS:
         for _, item in items(found, source):
             flat = properties(item)
-            # lambda pv: a (path, value) pair -> True when the path is this part's version property
             for v in filter(real, (v for p, v in filter(lambda pv: re.fullmatch(version, pv[0]), flat.items()))):
                 parts.setdefault(f"{prefix} {text(flat.get(choose(flat, model)))}", set()).add(text(v))
     return {"System BIOS": (first_of(found, "ComputerSystem").get("BiosVersion"), ""),
@@ -747,10 +659,8 @@ def images(found) -> dict[str, tuple[str | None, str]]:
     return dict(component(group) for group in inventory_groups(found).values())
 
 
-# {name: images} per firmware component: the inventory entries sharing a SoftwareId, as (linked as active, entry)
+# {name: [(linked as active, entry)]} per firmware component, grouped by SoftwareId, else Name
 def inventory_groups(found) -> dict[str, list[tuple[bool, dict]]]:
-    """Entries without a SoftwareId are grouped by Name. A manager's Links.ActiveSoftwareImage marks its running image
-    for BMCs that don't report Active on the entries."""
     linked = {obj(obj(d.get("Links")).get("ActiveSoftwareImage")).get("@odata.id") for _, d in of(found, "Manager")}
     groups = {}
     for u, d in of(found, "SoftwareInventory"):
@@ -765,10 +675,8 @@ def software_ids(found) -> dict[str, str]:
     return {name: sid for name, sid in ids.items() if sid}
 
 
-# A model's baseline for one host: a line keyed SoftwareId:<id> applies to the row whose entries carry that id
+# A model's baseline for one host: a SoftwareId:<id> line applies to the row carrying that id
 def host_baseline(baseline, ids) -> dict[str, str]:
-    """A SoftwareId stays the same across hosts and firmware versions where a Name may not (some BMCs put a port's MAC
-    address in a NIC's name). A line under the row's own name wins; a SoftwareId line no row carries stays as it is."""
     out = {k: v for k, v in baseline.items() if not k.startswith("SoftwareId:")}
     matched = set()
     for name, sid in ids.items():
@@ -779,12 +687,8 @@ def host_baseline(baseline, ids) -> dict[str, str]:
     return {**out, **{k: v for k, v in baseline.items() if k.startswith("SoftwareId:") and k not in matched}}
 
 
-# One component's (name, (running version, note)) from its images, as (linked as active, entry) pairs
+# One component's (name, (running version, note)) from its (linked as active, entry) images
 def component(group) -> tuple[str, tuple[str | None, str]]:
-    """The running image has Active true or ImageState Active (SoftwareInventory v1_12, v1_15), or is a manager's
-    ActiveSoftwareImage. Without one, a component whose images all carry one version runs that version; with several
-    versions which one runs isn't reported, so the version is None and the note lists them. The note also names each
-    other image by its state, and gives the LowestSupportedVersion: the oldest version a rollback can go to."""
     running, rest = [], []
     for linked, d in group:
         (running if linked or d.get("Active") is True or d.get("ImageState") == "Active" else rest).append(d)
@@ -799,7 +703,7 @@ def component(group) -> tuple[str, tuple[str | None, str]]:
     return text((running or [group[0][1]])[0].get("Name")), (version, " · ".join(notes))
 
 
-# The state of a firmware image that isn't running: ImageState (v1_15), Staged or Armed, Inactive when Active is false
+# The state of an image that isn't running: ImageState, Staged, Armed, Inactive when Active is false
 def image_state(d) -> str | None:
     if d.get("ImageState"):
         return d["ImageState"]
@@ -810,10 +714,6 @@ def image_state(d) -> str | None:
 
 # Components x hosts of one model, checked against the model's baseline, or else against each other
 def matrix(title, rows) -> Table:
-    """rows: ((host, vendor, project), {component: (version, note)}, that host's baseline). A component in a baseline
-    gets its approved version in the Baseline column and each host's version green when it matches, red when not; any
-    other component highlights a version that differs from the most common one. Notes (the component's other images)
-    go under the version."""
     baseline = {c: want for _, _, bl in rows for c, want in bl.items()}
     components = list(dict.fromkeys([*(c for _, fw, _ in rows for c in fw), *baseline]))
     cells = {c: [(*fw.get(c, (None, "")), bl.get(c)) for _, fw, bl in rows] for c in components}
@@ -832,7 +732,7 @@ def matrix(title, rows) -> Table:
     return t
 
 
-# One host's version of a component: green on baseline, red off it, yellow when it differs from the most common one
+# One host's version: green on baseline, red off it, yellow when it differs from the most common
 def version_cell(version, note, want, common) -> Text:
     if want is not None:
         style = "green" if version == want else "bold red"
@@ -844,7 +744,7 @@ def version_cell(version, note, want, common) -> Text:
     return cell
 
 
-# One row of the compliance table: how many baseline components a host has at the approved version, and the rest
+# One compliance row: how many baseline components a host has at the approved version, and the rest
 def compliance(host, model, fw, baseline) -> tuple[str, ...]:
     have = {c: text(fw.get(c, (None, ""))[0]) for c in baseline}
     reported = {c: have[c] if fw.get(c, (None, ""))[0] is not None else "not reported" for c in baseline}
@@ -852,7 +752,7 @@ def compliance(host, model, fw, baseline) -> tuple[str, ...]:
     return (*host, model, f"{len(baseline) - len(needs)}/{len(baseline)}", "\n".join(needs) or "-")
 
 
-# {model: {component: approved version}} from baseline.yaml, every value read as text (2.20 stays 2.20); {} without
+# {model: {component: approved version}} from baseline.yaml, values as text (2.20 stays 2.20)
 def load_baseline(path=BASELINE) -> dict[str, dict[str, str]]:
     try:
         return yaml.load(Path(path).read_text(), Loader=yaml.BaseLoader) or {}
@@ -860,10 +760,9 @@ def load_baseline(path=BASELINE) -> dict[str, dict[str, str]]:
         return {}
 
 
-# View firmware - baseline compliance per host, then one matrix per hardware model
+# View firmware: baseline compliance per host, then one matrix per hardware model
 def view_firmware(args) -> list:
     baselines, groups = load_baseline(), {}
-    # lambda s: a snapshot -> (its model, (its label, its firmware, its baseline))
     for model, row in per_host(lambda s: firmware_row(s, baselines), reachable()):
         groups.setdefault(model, []).append(row)
     checked = [compliance(host, model, fw, bl)
@@ -876,7 +775,7 @@ def view_firmware(args) -> list:
             *(matrix(model, rows) for model, rows in sorted(groups.items()))]
 
 
-# One host of the firmware view: (its model, (its label, its firmware, its baseline with SoftwareId lines applied))
+# One host of the firmware view: (its model, (its label, its firmware, its baseline))
 def firmware_row(snap, baselines) -> tuple[str, tuple]:
     found = snap["resources"]
     model = " ".join(identity(found))
@@ -888,19 +787,15 @@ def inventory(snap) -> tuple[str, ...]:
     found = snap["resources"]
     system = properties(first_of(found, "ComputerSystem"))
     processors = [properties(d) for _, d in of(found, "Processor")]
-    # lambda p: a processor -> True when it is a CPU (or has no type); the next one: True when it is a GPU
     cpus = list(filter(lambda p: p.get("ProcessorType") in (None, "CPU"), processors))
     gpus = list(filter(lambda p: p.get("ProcessorType") == "GPU", processors))
     cpu = next(filter(real, [system.get("ProcessorSummary/Model"),
                              *(p.get(choose(p, "Model|ProcessorId/EffectiveFamily")) for p in cpus)]), None)
     dimms = [d.get("CapacityMiB") or 0 for _, d in of(found, "Memory")]
     sizes = (d.get("CapacityBytes") or 0 for _, d in of(found, "Drive"))
-    # lambda b: a drive size in bytes -> True from 1 GB up: leaves out virtual media (AMI's virtual CD-ROM)
     disks = list(filter(lambda b: b >= 1e9, sizes))
     psus = [i for _, i in items(found, "PowerSupply") + items(found, "Power/PowerSupplies")]
-    # lambda u: an EthernetInterface URI -> True when it belongs to the host (not to the BMC)
     host_nics = filter(lambda u: u.startswith(ROOT + "/Systems/"), dict(of(found, "EthernetInterface")))
-    # lambda i: a power supply -> True when it is present (State isn't Absent)
     present = list(filter(lambda i: obj(i.get("Status")).get("State") != "Absent", psus))
     return (*label(snap), *identity(found), first_real(found, "SerialNumber"), text(system.get("UUID")),
             f"{system.get('ProcessorSummary/Count') or len(cpus)} × {text(cpu)}",
@@ -912,7 +807,7 @@ def inventory(snap) -> tuple[str, ...]:
             f"{len(present)}/{len(psus)}")
 
 
-# View inventory - one row per reachable host
+# View inventory: one row per reachable host
 def view_inventory(args) -> list:
     snaps, hosts = reachable(), [s["host"] for s in load()]
     missing = ", ".join(sorted(set(hosts) - {s["host"] for s in snaps})) or "none"
@@ -920,33 +815,27 @@ def view_inventory(args) -> list:
                   caption=f"{len(snaps)} of {len(hosts)} hosts · not (fully) collected: {missing}")]
 
 
-# Telemetry per host: readings count, hottest temperature against its critical threshold, highest power reading
+# Telemetry per host: readings count, hottest temperature against its critical threshold, highest power
 def hotspot(snap, rs) -> tuple[str, ...]:
-    # lambda r: a record -> True when it is a reading (not a limit)
     rs = list(filter(lambda r: r["role"] == "reading", rs))
-    # lambda kind: a kind -> the readings of that kind with a numeric value (the inner lambda r tests one reading)
     numeric = lambda kind: filter(lambda r: r["kind"] == kind and type(r["value"]) in (int, float), rs)
-    # lambda r: a reading -> its value, to find the highest
     hot = max(numeric("Temperature"), key=lambda r: r["value"], default={})
     power = max((r["value"] for r in numeric("Power")), default=None)
-    # lambda r: a reading -> True when its Health is Critical or Warning
     not_ok = list(filter(lambda r: r["health"] in SEVERITY, rs))
     return (*label(snap), str(len(rs)), text(hot.get("name")), text(hot.get("value")), text(hot.get("critical")),
             text(margin(hot)), text(power), str(len(not_ok)))
 
 
-# One row per sensor reading: every kind, with or without a threshold (Critical and Margin are "-" without one)
+# One row per sensor reading or limit; Critical and Margin are '-' without a threshold
 def sensor_row(r) -> tuple[str, ...]:
-    headroom = margin(r) if r["role"] == "reading" else None  # a margin only means something for a reading
+    headroom = margin(r) if r["role"] == "reading" else None
     return (text(r["kind"]), r["resource"], text(r["name"]), r["property"], r["role"], text(r["value"]),
             text(r["unit"]), text(r["critical"]), text(headroom), text(r["health"]), text(r["state"]), r["source"])
 
 
-# View telemetry - per host the hottest temperature and highest power, then every sensor of every host
+# View telemetry: per host the hottest temperature and highest power, then every sensor
 def view_telemetry(args) -> list:
-    # lambda s: a snapshot -> (the snapshot, its reading records)
     host_readings = per_host(lambda s: (s, readings(s["resources"])), reachable())
-    # lambda r: a record -> its sort key: kind, resource, the reading before its limits, property
     order = lambda r: (text(r["kind"]), r["resource"], r["role"] != "reading", r["property"])
     return [block("Telemetry by host", TELEMETRY_ROW, [hotspot(s, rs) for s, rs in host_readings]),
             *filter(None, (block(f"Sensors · {' · '.join(label(s))}", SENSORS,
@@ -958,10 +847,8 @@ def capabilities(model, snaps) -> tuple[str, ...]:
     snap = snaps[0]
     found = snap["resources"]
     types = sorted({rtype(d)[0] for d in found.values()})
-    # lambda t: a resource type -> True when it is a service
     offered = ", ".join(t.removesuffix("Service") for t in filter(lambda t: t.endswith("Service"), types))
     acts = action_list(found)
-    # lambda k: a (resource, action) key -> True for SimpleUpdate; the map's lambda k -> that action's parameters
     simple = map(lambda k: parameters(found, acts[k]), filter(lambda k: k[1] == "#UpdateService.SimpleUpdate", acts))
     update = first_of(found, "UpdateService")
     telemetry = (f"{len(of(found, 'MetricDefinition'))} metric, {len(of(found, 'MetricReportDefinition'))} report "
@@ -972,7 +859,7 @@ def capabilities(model, snaps) -> tuple[str, ...]:
             telemetry if first_of(found, "TelemetryService") else "-", str(len(of(found, "Sensor"))))
 
 
-# View capabilities - one row per hardware model
+# View capabilities: one row per hardware model
 def view_capabilities(args) -> list:
     groups = {}
     for snap in reachable():
@@ -981,33 +868,26 @@ def view_capabilities(args) -> list:
                   [capabilities(model, snaps) for model, snaps in sorted(groups.items())])]
 
 
-# {(resource, property): value} without what changes on every crawl
+# {(resource, property): value} without annotations, numbers, clocks and metric reports
 def stable(found) -> dict[tuple[str, str], Any]:
-    """Left out: annotations, numbers (readings, counters), clocks, and the metric reports."""
-    # lambda pv: a (path, value) pair -> True when it is no annotation, no number and no clock
     keep = lambda pv: "@" not in pv[0] and type(pv[1]) not in (int, float) and not VOLATILE.search(pv[0])
-    # lambda ud: a (uri, document) pair -> True when the document isn't a metric report
     docs = filter(lambda ud: rtype(ud[1])[0] != "MetricReport", found.items())
     return {(u, p): v for u, d in docs for p, v in filter(keep, properties(d).items())}
 
 
-# (resource, property, before, after) between two crawls of one host
+# (resource, property, before, after) between two crawls: resources added or removed, then properties
 def changes(old, new) -> list[tuple[str, str, str, str]]:
-    """Resources that came or went, then every property that changed on the resources both crawls have."""
     both = new.keys() & old.keys()
     before, after = (stable({u: f[u] for u in both}) for f in (old, new))
-    # lambda k: a (resource, property) key -> True when its value differs between the crawls
     changed = filter(lambda k: before.get(k) != after.get(k), sorted(before.keys() | after.keys()))
     return ([(u, "(resource)", "-", "added") for u in sorted(new.keys() - old.keys())]
             + [(u, "(resource)", "present", "removed") for u in sorted(old.keys() - new.keys())]
             + [(u, p, text(before.get((u, p))), text(after.get((u, p)))) for u, p in changed])
 
 
-# View diff - what changed since the previous collect
+# View diff: what changed on each host since the previous collect
 def view_diff(args) -> list:
-    # lambda s: a snapshot -> (the snapshot, the one before it or {})
     pairs = per_host(lambda s: (s, previous(s["host"])), load())
-    # lambda sp: a (snapshot, previous) pair -> True when there is a previous one
     compared = list(filter(lambda sp: sp[1], pairs))
     rows = [(s["host"], *c) for s, old in compared for c in changes(old["resources"], s["resources"])]
     since = f"{len(compared)} of {len(pairs)} hosts compared with their previous collect"
@@ -1015,7 +895,7 @@ def view_diff(args) -> list:
                   caption_justify="left") or Text(f"No changes · {since}")]
 
 
-# View detail - the full report of one host
+# View detail: the full report of one host
 def view_detail(args) -> list:
     try:
         snap = json.loads(snapshot_path(args.host).read_text())
@@ -1029,7 +909,6 @@ def main() -> None:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     output = output_options()
     commands = p.add_subparsers(dest="command", required=True, metavar="command")
-    # lambda name, run, help: add a view command `name` that runs the function `run`
     command = lambda name, run, help: commands.add_parser(name, parents=[output], help=help).set_defaults(run=run)
     c = commands.add_parser("collect", parents=[output], help="crawl every BMC in the inventory, snapshot each host")
     c.add_argument("config", nargs="?", default=INVENTORY_FILE, help="the BMCs [<site>/inventory.yaml]")
@@ -1049,10 +928,10 @@ def main() -> None:
     d.add_argument("host")
     d.set_defaults(run=view_detail)
     args = p.parse_args()
-    logging.Formatter.converter = time.gmtime  # log times in UTC, like rollout.py
+    logging.Formatter.converter = time.gmtime
     logging.basicConfig(level=logging.INFO, format="%(asctime)s UTC %(levelname)s %(message)s")
-    logging.getLogger("urllib3").setLevel(logging.ERROR)  # retries end up in the summary instead
-    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning) # by default disabled
+    logging.getLogger("urllib3").setLevel(logging.ERROR)
+    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
     show(args.run(args), args)
 
 

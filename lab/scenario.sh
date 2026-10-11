@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Bad firmware updates on the lab, to see what the rollout does with them: the pipeline for real, to the build the lab
 # doesn't run, with faults injected where real ones would show (rollout.py run --fault [HOST=]KIND). The script then
-# checks how each host ended. lab/rollout.yaml plans a canary (127.0.0.1:2441), then waves of 3, then 6.
+# checks how each host ended. lab/policy.yaml plans a canary (127.0.0.1:2441), then waves of 3, then 6.
 #
 #   silent-fail   The BMC takes the image and reports Completed, but the firmware doesn't change: it got the running
 #                 version's package as the target's. Post-check fails, the rollback reinstalls the version before.
