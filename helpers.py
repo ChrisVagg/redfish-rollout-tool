@@ -1,7 +1,6 @@
 """Helpers of the Redfish poller: reading Redfish documents, finding resources in a crawl, tables, snapshot files
 and output files."""
 import argparse
-import csv
 import json
 import logging
 import re
@@ -270,46 +269,32 @@ def table_data(t) -> dict:
             "rows": [dict(zip(columns, row)) for row in zip(*cells)]}
 
 
-# One CSV file per table, numbered in print order: DIR/01_Health_by_host.csv, DIR/02_Not_OK.csv, ...
-def write_csv(directory, tables) -> None:
-    directory.mkdir(parents=True, exist_ok=True)
-    for n, table in enumerate(tables, 1):
-        name = re.sub(r"[^\w.-]+", "_", table["title"]).strip("_")
-        with open(directory / f"{n:02d}_{name}.csv", "w", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=table["columns"])
-            writer.writeheader()
-            writer.writerows(table["rows"])
-
-
-# --json FILE: every table and note line of the output; --csv DIR: one CSV per table
+# --json FILE: every table and note line of the output
 def export(renderables, args) -> None:
     shown = flatten(renderables)
     tables = [table_data(t) for t in shown if isinstance(t, Table)]
     notes = [t.plain for t in shown if isinstance(t, Text)]
-    if args.json:
-        Path(args.json).write_text(json.dumps(
-            {"command": args.command, "generated": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-             "tables": tables, "notes": notes}, indent=2, ensure_ascii=False))
-    if args.csv:
-        write_csv(Path(args.csv), tables)
+    Path(args.json).write_text(json.dumps(
+        {"command": args.command, "generated": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+         "tables": tables, "notes": notes}, indent=2, ensure_ascii=False))
 
 
 # The options every command takes: files written besides the terminal output
 def output_options() -> argparse.ArgumentParser:
     output = argparse.ArgumentParser(add_help=False)
     output.add_argument("--json", metavar="FILE", help="also write every table as JSON")
-    output.add_argument("--csv", metavar="DIR", help="also write one CSV file per table into DIR")
     output.add_argument("--html", metavar="FILE", help="also write the output as HTML, colors included")
     output.add_argument("--svg", metavar="FILE", help="also write the output as an SVG terminal screenshot")
     return output
 
 
-# Print what a command returns, then write the files asked for with --json, --csv, --html and --svg
+# Print what a command returns, then write the files asked for with --json, --html and --svg
 def show(renderables, args) -> None:
     console = Console(record=True)
     for r in renderables:  # one print each: printed together, consecutive Texts would join on one line
         console.print(r)
-    export(renderables, args)
+    if args.json:
+        export(renderables, args)
     if args.html:
         console.save_html(args.html, clear=False)
     if args.svg:

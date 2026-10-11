@@ -24,7 +24,7 @@ BREAKS = [  # (what a careless edit does, the line as it is, the line broken, th
      "test_preflight_image"),
     ("no rollback path accepted", 'test("rollback path", result["rollback"] != "none" or policy["accept_no_rollback"],',
      'test("rollback path", True,', "test_preflight_rollback"),
-    ("unhealthy BMC updated", 'test("health", health == "OK",', 'test("health", True,', "test_preflight_host"),
+    ("unhealthy BMC updated", 'test("health", h == "OK",', 'test("health", True,', "test_preflight_host"),
     ("failed task only skipped", "defer=state in RUNNING_STATES)", "defer=True)", "test_preflight_host"),
     ("Updateable false ignored", 'test("Updateable", not can.startswith("no:"),', 'test("Updateable", True,',
      "test_preflight_host"),

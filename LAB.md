@@ -203,10 +203,9 @@ its `OnReset`, the Task, the Manager's reset, and each host's rollback, which th
 ## Rollout policy
 
 Each site has a `rollout.yaml` next to its inventory and baseline. `plan` reads it, an option overrides one value for
-one plan (`--canary`, `--waves`, `--max-per-rack`), and the plan and the report record what was used. The
-pipeline's stages run the plan's policy, and refuse a change to it (`--halt-at` with a saved plan, or a `rollout.yaml`
-edited since the plan). Set `halt_at` in `rollout.yaml` before planning; `--halt-at` is available only for a run
-without a saved plan. The policy is reviewed like code: it decides how many hosts a bad image can reach before something stops it.
+one plan (`--canary`, `--waves`, `--max-per-rack`, `--halt-at`), and the plan and the report record what was used.
+A run only runs a saved plan's stage, with the plan's policy, and refuses a `rollout.yaml` edited since the plan. The
+policy is reviewed like code: it decides how many hosts a bad image can reach before something stops it.
 
 | Setting | [lab](lab/rollout.yaml) | [production](prod/rollout.yaml) | What it does |
 |---|---|---|---|
@@ -373,7 +372,7 @@ touching the BMCs:
 | `make diff` | what changed since the previous collect |
 
 `make detail HOST=…` shows everything about one host, and `make views` writes every view into `<site>/reports/` as
-HTML, JSON and CSV. Standard Redfish properties only, read the same way on every vendor. Run without stopping, the
+HTML and JSON. Standard Redfish properties only, read the same way on every vendor. Run without stopping, the
 same crawl is the exporters of [Observability](#observability), which serve each read as Prometheus metrics.
 
 ## Observability

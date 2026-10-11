@@ -103,10 +103,10 @@ SENSORS = ("Kind", "Resource", "Name", "Property", "Role", "Value", "Units", "Cr
            "Source")
 COMPLIANCE_ROW = ("Host", "Vendor", "Project", "Model", "On baseline", "Needs")
 JOBS_ROW = ("Host", "Resource", "Name", "State", "Status", "Message", "Time")
-PREFLIGHT_ROW = ("Host", "Project", "Model", "Updateable", "A/B bank", "Rollback", "Running", "Baseline", "Direction",
+PREFLIGHT_ROW = ("Host", "Project", "Model", "Updateable", "A/B bank", "Rollback", "Running", "Target", "Direction",
                  "Verdict", "Reasons", "Update methods")
 PLAN_ROW = ("Wave", "Hosts", "Members")
-HOST_ROW = ("Component", "SoftwareId", "Running", "Baseline", "Direction", "Updateable", "Push", "Pull", "A/B bank",
+HOST_ROW = ("Component", "SoftwareId", "Running", "Target", "Direction", "Updateable", "Push", "Pull", "A/B bank",
             "Rollback", "Verdict", "Reasons")
 # Job and task states of work still going on: pre-flight skips the host for now. Any other state but Completed
 # (Exception, Killed, Cancelled, Interrupted, UserIntervention...) blocks it until a person looks.
@@ -140,9 +140,6 @@ RESET_PREFERENCE = {"Manager": ("GracefulRestart", "ForceRestart"),
 FAILED_STATES = {"failed", "rolled_back", "needs_attention"}
 CAPABILITIES_ROW = ("Model", "Hosts", "Sample", "Redfish", "Types", "Services", "Actions", "SimpleUpdate",
                     "Push update", "Telemetry", "Sensors")
-# Pseudo-column "@resource": the resource URI (with a JSON pointer for an item of an inline array). Other columns are
-# headed by their property path.
-HEADERS = {"@resource": "Resource"}
 STYLE = {"OK": "green", "Enabled": "green", "Connected": "green", "Warning": "yellow", "Critical": "bold red",
          "Failed": "bold red", "Stopped": "bold red",
          "go": "green", "skip": "yellow", "block": "bold red",  # pre-flight verdicts

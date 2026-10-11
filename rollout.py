@@ -21,15 +21,15 @@ unless --allow-downgrade, and a component without a rollback path unless --accep
                     the wave's gate; the hosts the plan left out. --details adds every host's steps with their
                     evidence, --host one host's; --save FILE writes it all as JSON (rollout-report/1) for services.
 
-In a pipeline: plan --save plan.json, then run --plan plan.json --stage canary, then --stage waves. The saved plan
-decides the component, files, options, policy and waves; a stage refuses to start when a file changed since the plan,
-and blocks a host whose BMC isn't the one the plan read. Each stage exits 1 when its gate fails, so the next one
-doesn't run.
-  run COMPONENT     Steps 2 to 6 on the hosts that pass, wave by wave; each host is read and pre-flighted again right
-                    before it is touched. Without --yes a dry run: what each host would get. With --yes only hosts
-                    marked writable: true in the inventory are updated (the lab); every step is recorded, its intent
-                    before it and its result after, in <site>/runs/<run id>.jsonl. A failing canary, or a failure rate
-                    over --halt-at, stops the run before the next wave.
+  run --plan FILE --stage canary|waves
+                    Steps 2 to 6 on the hosts of a plan saved by plan --save, wave by wave; each host is read and
+                    pre-flighted again right before it is touched. The saved plan decides the component, files,
+                    options, policy and waves; a stage refuses to start when a file changed since the plan, and blocks
+                    a host whose BMC isn't the one the plan read. Without --yes a dry run: what each host would get.
+                    With --yes only hosts marked writable: true in the inventory are updated (the lab); every step is
+                    recorded, its intent before it and its result after, in <site>/runs/<run id>.jsonl. A gate that
+                    fails (a failing canary or strict wave, or a failure rate over halt_at) exits 1, so the next stage
+                    doesn't run. pipeline.sh runs plan, the canary stage, then the waves stage.
 
 The site is the fleet: SITE=prod (the default) or SITE=lab, a folder with the inventory (inventory.yaml), the
 baseline (baseline.yaml), the image catalog (images.yaml, its files relative to the folder) and the run records."""
@@ -286,10 +286,7 @@ def rollback_path(found, component, images, model, running) -> str:
 
 # The reset types an action accepts, from its AllowableValues or its ActionInfo; None when neither lists them
 def allowed_resets(found, doc, action) -> list[str] | None:
-    act = obj(obj(doc.get("Actions")).get(action))
-    info = found.get(norm(act.get("@Redfish.ActionInfo") or "")) or {}
-    listed = [p.get("AllowableValues") for p in info.get("Parameters") or [] if p.get("Name") == "ResetType"]
-    return act.get("ResetType@Redfish.AllowableValues") or next(iter(listed), None)
+    return allowable(found, obj(obj(doc.get("Actions")).get(action)), "ResetType")
 
 
 # The reset types an action accepts and its apply times, as text for the readiness table
@@ -415,9 +412,8 @@ def check(found, baselines, key, policy=None) -> dict:
 
     for kind in ("ComputerSystem", "Manager"):
         for u, d in of(found, kind):
-            status = obj(d.get("Status"))
-            health = status.get("HealthRollup") or status.get("Health")
-            test("health", health == "OK", f"{u}: {'not reported' if health is None else health}")
+            h = health(d)
+            test("health", h == "OK", f"{u}: {'not reported' if h == '-' else h}")
     jobs = open_jobs(found)
     for u, name, state, status, message, _ in jobs:
         # still running: try again in a later wave; ended badly or needs a person: block
@@ -754,10 +750,10 @@ def handover(found, image) -> dict:
     return {}
 
 
-# Step 3: hand the image to the BMC, to install at the apply time asked; ((task monitor, task), error), None if none
-def start_update(tunnel, found, component, image, apply_time, cut=None) -> tuple[tuple, str | None]:
+# Step 3: hand the image to the BMC, to install at the next reset; ((task monitor, task), error), None if none
+def start_update(tunnel, found, component, image, cut=None) -> tuple[tuple, str | None]:
     file, targets, how = image.get("file", ""), update_targets_of(found, component), handover(found, image)
-    params = {**({"Targets": targets} if targets else {}), "@Redfish.OperationApplyTime": apply_time}
+    params = {**({"Targets": targets} if targets else {}), "@Redfish.OperationApplyTime": APPLY_TIME}
     if how.get("method") == "push":
         with open(image_path(file), "rb") as f:
             # urllib3 applies the first timeout while it sends the body, so it has to cover the whole upload
@@ -915,14 +911,14 @@ def apply(server, found, key, image, want, before, policy, rec, phase) -> tuple[
     fault = policy.get("fault")
     noted = lambda *kinds: {"fault": f"{fault}: {FAULTS[fault]}"} if fault in kinds else {}  # where a fault acts
     rec(host, f"{phase}update", "start", **handover(found, image), image={k: image.get(k) for k in ("file", "sha256")},
-        target=want, apply_time=policy["apply_time"], targets=update_targets_of(found, component),
+        target=want, apply_time=APPLY_TIME, targets=update_targets_of(found, component),
         **noted("silent-fail", "rejected") if not phase else {})
     cut = 8 * 2**20 if fault == "rejected" and not phase else None
-    (monitor, task_uri), error = start_update(link_, found, component, image, policy["apply_time"], cut)
+    (monitor, task_uri), error = start_update(link_, found, component, image, cut)
     # lambda task: the task as just read -> one record event, so the record follows it through every change
     changed = lambda task: rec(host, f"{phase}update", "task", task=task, detail=task_line(task))
     state, message, task = (("failed", error, {}) if error
-                            else follow_task(link_, monitor, task_uri, policy["task_timeout"], changed))
+                            else follow_task(link_, monitor, task_uri, TASK_TIMEOUT, changed))
     rec(host, f"{phase}update", state, detail=message, task=task)
     if location and state != "gone":
         logout(link_, location)
@@ -1033,7 +1029,7 @@ def actions(server, found, r, policy, letter) -> tuple[str, ...]:
     targets = ", ".join(update_targets_of(found, component)) or "BMC decides"
     back = r["rollback"]
     return (server["host"], component, f"{letter[text(r['running'])]} → {letter[r['want']]}", drain,
-            f"{how['method']} · {policy['apply_time']} · to {targets}" if how else "no way to hand it over",
+            f"{how['method']} · {APPLY_TIME} · to {targets}" if how else "no way to hand it over",
             f"{kind}.Reset {text(rtype)}" if kind != "none" else "none needed",
             f"reinstall {letter[text(r['running'])]}" if back.startswith("reinstall") else back)
 
@@ -1081,37 +1077,31 @@ def gate(wave, states, soured, rollout) -> dict:
     return {"halted": halted, "failed": len(failed), "tried": len(tried), "strict": strict}
 
 
-# Run: step 1, then steps 2 to 6 wave by wave; without --yes, the dry run
+# Run: one stage of a saved plan, the canary or the waves after it: step 1 again, then steps 2 to 6 wave by wave;
+# without --yes, the dry run
 def run(args) -> list:
-    """With --plan the saved plan decides the component, files, options, rollout policy and waves, and --stage runs the
-    canary or the waves after it. args.exit_code is 1 when a gate fails: a failure in the canary or a strict wave, a
-    soak check that failed, or more than halt_at of the hosts tried failed."""
-    args.exit_code, saved = 0, json.loads(Path(args.plan).read_text()) if args.plan else None
-    if saved:
-        if changed := changed_inputs(saved):
-            raise SystemExit(f"changed since the plan was approved: {', '.join(changed)}. A run does only what its "
-                             "plan approved: plan again")
-        if args.halt_at is not None:
-            raise SystemExit("--halt-at changes the approved plan's policy: plan again with it")
-        for key in ("component", "inventory", "baseline", "images", "allow_downgrade", "accept_no_rollback"):
-            setattr(args, key, saved[key])
-        stage = {name: hosts for name, hosts in saved["waves"].items()
-                 if args.stage == "all" or (name == "canary") == (args.stage == "canary")}
-        args.hosts = [h for hosts in stage.values() for h in hosts]
-        if not args.hosts:
-            return [Text(f"Nothing to do: the plan has no host for the {args.stage} stage")]
-    if not args.component:
-        raise SystemExit("run needs a component, or --plan with a saved plan")
+    """The saved plan decides the component, files, options, rollout policy and waves. args.exit_code is 1 when a gate
+    fails: a failure in the canary or a strict wave, a soak check that failed, or more than halt_at of the hosts tried
+    failed."""
+    args.exit_code, saved = 0, json.loads(Path(args.plan).read_text())
+    if changed := changed_inputs(saved):
+        raise SystemExit(f"changed since the plan was approved: {', '.join(changed)}. A run does only what its "
+                         "plan approved: plan again")
+    for key in ("component", "inventory", "baseline", "images", "allow_downgrade", "accept_no_rollback"):
+        setattr(args, key, saved[key])
+    stage = {name: hosts for name, hosts in saved["waves"].items() if (name == "canary") == (args.stage == "canary")}
+    args.hosts = [h for hosts in stage.values() for h in hosts]
+    if not args.hosts:
+        return [Text(f"Nothing to do: the plan has no host for the {args.stage} stage")]
     step = prepare(args)
-    servers, reads, results, planned, baselines, policy, rollout = (
-        step[k] for k in ("servers", "reads", "results", "planned", "baselines", "policy", "rollout"))
-    if saved:
-        rollout = saved["rollout"]
-        by_host = {s["host"]: s for s in servers}
-        planned = [(name, [by_host[h] for h in hosts if h in by_host]) for name, hosts in stage.items()]
-    policy.update(faults=dict(args.fault or []), apply_time=APPLY_TIME, drain=rollout["drain"],
-                  undrain=rollout["undrain"], task_timeout=TASK_TIMEOUT, reset_timeout=args.reset_timeout,
-                  identities={h: v.get("identity") for h, v in saved["verdicts"].items()} if saved else {})
+    servers, reads, results, baselines, policy = (
+        step[k] for k in ("servers", "reads", "results", "baselines", "policy"))
+    rollout = saved["rollout"]
+    by_host = {s["host"]: s for s in servers}
+    planned = [(name, [by_host[h] for h in hosts if h in by_host]) for name, hosts in stage.items()]
+    policy.update(faults=dict(args.fault or []), drain=rollout["drain"], undrain=rollout["undrain"],
+                  reset_timeout=args.reset_timeout,
+                  identities={h: v.get("identity") for h, v in saved["verdicts"].items()})
     counts = Counter(r["verdict"] for r in results)
     faults = f"\nFaults injected: {', '.join(f'{h}={k}' for h, k in args.fault)}" if args.fault else ""
     caption = (f"{len(servers)} hosts read live from {step['read_at']} · {counts['go']} go · {counts['skip']} "
@@ -1132,11 +1122,11 @@ def run(args) -> list:
                          "are updated; production stays read-only.")
     RUNS.mkdir(exist_ok=True)
     path = RUNS / f"{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}.jsonl"
-    pipeline = Path(args.plan).parent.name if args.plan else path.stem
+    pipeline = Path(args.plan).parent.name
     group, pushing = f"site/{SITE.name}/pipeline/{pipeline}/stage/{args.stage}", {}
     # the stage's part of the saved plan: a host the run hasn't reached yet takes its versions from the plan
     # and how many hosts the whole plan has, which a canary that halts never reaches
-    planned_stage = {**saved, "waves": stage, "planned": sum(map(len, saved["waves"].values()))} if saved else None
+    planned_stage = {**saved, "waves": stage, "planned": sum(map(len, saved["waves"].values()))}
 
     wave_of, sending = {h: name for name, hosts in planned for h in (s["host"] for s in hosts)}, {}
 
@@ -1153,7 +1143,7 @@ def run(args) -> list:
         target=", ".join(sorted({r["want"] for r in results if r["verdict"] == "go" and r["want"]})),
         plan=args.plan, stage=args.stage, halt_at=rollout["halt_at"], rollout=rollout, apply_time=APPLY_TIME,
         faults=policy["faults"])
-    last = list(saved["waves"])[-1] if saved else planned[-1][0]
+    last = list(saved["waves"])[-1]
     outcomes, halted = [], None
     for name, hosts in planned:
         with ThreadPoolExecutor(min(len(hosts), rollout["max_parallel"] or len(hosts))) as pool:
@@ -1287,9 +1277,6 @@ def steps_of(events) -> list[dict]:
     steps, open_ = [], {}
     for e in events:
         fields = {k: v for k, v in e.items() if k not in ("at", "host", "step", "state")}
-        if isinstance(obj(fields.get("task")).get("messages"), list):  # records before the messages were named
-            fields["task"] = {**fields["task"], "messages": [m if isinstance(m, dict) else dict(zip(
-                ("severity", "message_id", "message"), m)) for m in fields["task"]["messages"]]}
         if e["state"] == "task":
             if e["step"] in open_:
                 open_[e["step"]].setdefault("progress", []).append(
@@ -1338,7 +1325,7 @@ def outcome(host, wave, events, seen, live=False) -> dict:
 def gate_rule(gate) -> str:
     if gate.get("soak_failed"):
         return f"{gate['soak_failed']} hosts failed the soak check"
-    if gate.get("strict", gate["wave"] == "canary"):
+    if gate["strict"]:
         return f"{gate['wave']} may not have a failure"
     return f"no more than {gate['limit']:.0%} of the hosts tried may fail"
 
@@ -1425,8 +1412,8 @@ def task_line(task) -> str:
 # The task an update ran as: its URI, how it ended and when, then every message it gave, repeats counted
 def task_detail(task) -> list[str]:
     times = " → ".join(t[11:19] for t in (task.get("start"), task.get("end")) if t)
-    lines = [f"task {task['uri']}: " + ", ".join(filter(None, (task.get("state"), task.get("status"),
-             f"{task['percent']}%" if task.get("percent") is not None else None, times and f"{times} UTC")))]
+    head = task_line({**task, "messages": []})  # state, status and percent, without the last message
+    lines = [f"task {task['uri']}: " + ", ".join(filter(None, (head, times and f"{times} UTC")))]
     runs = []  # [severity, id, message, count]: a message the BMC repeats (progress) counts once
     for severity, mid, message in (m.values() for m in task.get("messages") or []):
         if runs and runs[-1][1] == mid:
@@ -1531,8 +1518,7 @@ def host_tables(d) -> list:
                   caption=caption, caption_justify="left") or Text(f"{title}: no steps recorded · {caption}")]
 
 
-# The latest pipeline that did something (a dry run leaves no record): its plan and records, (None, the latest record)
-# without any
+# The latest pipeline that did something (a dry run leaves no record): its plan and records; (None, []) without any
 def latest_pipeline() -> tuple[Path | None, list[Path]]:
     for d in sorted(RUNS.glob("pipeline-*"), reverse=True):
         plan, listed = d / "plan.json", d / "records.txt"
@@ -1542,18 +1528,16 @@ def latest_pipeline() -> tuple[Path | None, list[Path]]:
                    else sorted(p for p in RUNS.glob("*.jsonl") if p.stat().st_mtime >= plan.stat().st_mtime))
         if records or (d / "report.json").is_file():
             return plan, records
-    return None, sorted(RUNS.glob("*.jsonl"))[-1:]
+    return None, []
 
 
-# Report: a pipeline's report from its plan and records (the latest pipeline by default), or a run's from its record
+# Report: a pipeline's report from its plan and records, the latest pipeline's by default
 def report(args) -> list:
-    plan, records = (Path(args.plan), [Path(r) for r in args.record]) if args.plan or args.record \
-        else latest_pipeline()
+    plan, records = (Path(args.plan), [Path(r) for r in args.record]) if args.plan else latest_pipeline()
     missing = [str(p) for p in [*records, *([plan] if plan else [])] if not p.is_file()]
-    if missing or not (plan or records):
-        raise SystemExit(f"nothing to report: {', '.join(missing) or 'no pipeline or run record in ' + str(RUNS)}")
-    name = plan.parent.name if plan else records[-1].stem
-    doc = pipeline_report(json.loads(plan.read_text()) if plan else None, events_of(records), name, records)
+    if missing or not plan:
+        raise SystemExit(f"nothing to report: {', '.join(missing) or 'no pipeline in ' + str(RUNS)}")
+    doc = pipeline_report(json.loads(plan.read_text()), events_of(records), plan.parent.name, records)
     if args.save:
         Path(args.save).write_text(json.dumps(doc, indent=2, ensure_ascii=False) + "\n")
     return render(doc, details=args.details, host=args.host)
@@ -1580,6 +1564,8 @@ def main() -> None:
     c.add_argument("--waves", type=lambda v: [float(w) for w in v.split(",")], metavar="PCT,…",
                    help="cumulative %% of the other hosts done after each wave, e.g. 5,25,100 [policy]")
     c.add_argument("--max-per-rack", type=int, help="hosts of one rack in a wave, at most; 0 no limit [policy]")
+    c.add_argument("--halt-at", type=float, help="after the strict waves, stop when more than this share failed "
+                                                 "[policy]")
     c.add_argument("--allow-downgrade", action="store_true",
                    help="also plan a downgrade, and an update whose direction can't be told")
     c.add_argument("--accept-no-rollback", action="store_true",
@@ -1589,15 +1575,12 @@ def main() -> None:
                                                  '(BMC)", or SoftwareId:<id>; without one, a report per host')
     pl.add_argument("--save", metavar="FILE", help="save the plan for run --plan, e.g. in a pipeline")
     pl.set_defaults(run=plan)
-    r = commands.add_parser("run", parents=[output_options(), c], help="steps 1 to 6; a dry run without --yes")
-    r.add_argument("component", nargs="?", help='a row name of the firmware view and baseline.yaml, or '
-                                                'SoftwareId:<id>; with --plan, the plan\'s')
-    r.add_argument("--plan", metavar="FILE", help="run a plan saved by plan --save: its component, files and waves")
-    r.add_argument("--stage", default="all", choices=("all", "canary", "waves"),
-                   help="with --plan: the canary, the waves after it, or all [all]")
+    r = commands.add_parser("run", parents=[output_options()], help="steps 1 to 6 of a saved plan's stage; a dry run "
+                                                                     "without --yes")
+    r.add_argument("--plan", metavar="FILE", required=True,
+                   help="a plan saved by plan --save: its component, files, policy and waves")
+    r.add_argument("--stage", required=True, choices=("canary", "waves"), help="the canary, or the waves after it")
     r.add_argument("--yes", action="store_true", help="really update the hosts that pass (only writable ones)")
-    r.add_argument("--halt-at", type=float, help="after the strict waves, stop when more than this share failed "
-                                                 "[policy]; not with --plan, whose policy is approved")
     r.add_argument("--reset-timeout", type=int, default=900, help="seconds for a reset to come back [900]")
     r.add_argument("--fault", action="append", type=fault_spec, metavar="[HOST=]KIND",
                    help="lab testing: inject a fault into a host's update (every host's without HOST=); may repeat. "
@@ -1605,8 +1588,8 @@ def main() -> None:
     r.set_defaults(run=run)
     rp = commands.add_parser("report", parents=[output_options()],
                              help="a pipeline's report, from its plan and run records [the latest pipeline]")
-    rp.add_argument("record", nargs="*", help="<site>/runs/<run id>.jsonl, several are merged")
-    rp.add_argument("--plan", metavar="FILE", help="the pipeline's plan.json: its waves and the hosts it left out")
+    rp.add_argument("record", nargs="*", help="with --plan: the pipeline's <site>/runs/<run id>.jsonl, merged")
+    rp.add_argument("--plan", metavar="FILE", help="the pipeline's plan.json [the latest pipeline's]")
     rp.add_argument("--save", metavar="FILE", help=f"also write the report as JSON ({REPORT_SCHEMA}), for services")
     rp.add_argument("--details", action="store_true", help="every host's steps, with their evidence")
     rp.add_argument("--host", help="one host's steps only")

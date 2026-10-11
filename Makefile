@@ -53,7 +53,7 @@ Poller: reads every BMC's Redfish resources, never writes
   make capabilities        what each model can do: Redfish version, services, actions, update methods
   make diff                what changed since the previous collect
   make detail HOST=...     everything about one host
-  make views               every view into <site>/reports/ as HTML, JSON and CSV
+  make views               every view into <site>/reports/ as HTML and JSON
 
 Rollout: firmware updates, a canary first, then waves, each after a gate
   make plan                pre-flight, read-only: per host, what it can update and how (COMPONENT for its waves)
@@ -146,8 +146,8 @@ views:
 	@mkdir -p $(SITE)/reports
 	@for v in $(VIEWS); do \
 	  $(ENV) COLUMNS=$(WIDTH) $(PY) poller.py $$v --html $(SITE)/reports/$$v.html --json $(SITE)/reports/$$v.json \
-	    --csv $(SITE)/reports/$$v > /dev/null || exit 1; \
-	  echo "$(SITE)/reports/$$v.html  $(SITE)/reports/$$v.json  $(SITE)/reports/$$v/"; \
+	    > /dev/null || exit 1; \
+	  echo "$(SITE)/reports/$$v.html  $(SITE)/reports/$$v.json"; \
 	done
 
 # ---- Rollout ----

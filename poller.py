@@ -54,7 +54,7 @@ from rich.table import Column, Table
 from rich.text import Text
 
 from constants import (ACTION, ALLOWED, BASELINE, CAPABILITIES_ROW, CHASSIS, COMPLIANCE_ROW, CRITICAL, DMTF, FIELDS,
-                       FW_PARTS, HEADERS, INVENTORY_FILE, INVENTORY_ROW, JOBS_ROW, JOB_TYPES, KIND, LIMIT, LINKS,
+                       FW_PARTS, INVENTORY_FILE, INVENTORY_ROW, JOBS_ROW, JOB_TYPES, KIND, LIMIT, LINKS,
                        MANAGER, OEM_PATH, PREVIOUS, PROPS, READINGS, ROOT, SCHEMAS, SENSORS, SERVICE, SEVERITY, SKIP,
                        STATUS_LEAF, SUMMARY, SYSTEM, TELEMETRY_ROW, TEMPLATES, THRESHOLD, VOLATILE, WILDCARD)
 from helpers import (at, block, choose, connection, details, discrete, first_of, first_real, identity, items, label,
@@ -220,7 +220,7 @@ def listing(found, title, sources, columns) -> list:
     flat = lambda u, i: {"@resource": u, **properties(i)}
     rows = [[text(f.get(choose(f, c))) for c in columns]
             for s in sources for u, i in items(found, s) for f in [flat(u, i)]]
-    return [block(title, [HEADERS.get(c, c.split("|")[0]) for c in columns], rows)]
+    return [block(title, ["Resource" if c == "@resource" else c.split("|")[0] for c in columns], rows)]
 
 
 # Vendor extensions: every Oem property, which the Redfish schema doesn't standardize
