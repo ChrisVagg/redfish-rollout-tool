@@ -3,6 +3,7 @@
 #   rollout.py      updates firmware: pre-flight, a canary, then waves, each after a gate (pipeline.sh runs the stages)
 #   lab/            10 emulated OpenBMC BMCs, QEMU in Docker: the only BMCs the rollout updates
 #   observability/  exporter-lab, exporter-prod, Pushgateway, Loki, Prometheus and Grafana, in Docker
+#   netbox/         NetBox, the lab inventory's source of truth, in Docker
 # Every target runs on the lab unless SITE=prod: the real fleet in prod/, read-only.
 
 SITE      ?= lab
@@ -11,13 +12,16 @@ VIEWS     := health firmware inventory telemetry capabilities diff
 WIDTH     := 200
 LAB       := docker compose -f lab/docker-compose.yaml
 MONITOR   := docker compose -f observability/docker-compose.yaml
+NETBOX    := docker compose -f netbox/docker-compose.yaml
+# the tools' read-only NetBox token, from netbox/.netbox.env
+TOKEN      = NETBOX_TOKEN=$$(sed -n 's/^NETBOX_TOKEN=//p' netbox/.netbox.env 2>/dev/null)
 # the firmware dry-run and update work on
 FIRMWARE   = $(or $(COMPONENT),Manager (BMC))
 
 ifeq ($(SITE),lab)
   # OpenBMC's public default account; the rollout pushes its metrics to the Pushgateway and its events to Loki
   ENV       := SITE=lab LAB_USERNAME=root LAB_PASSWORD=0penBmc PUSHGATEWAY=http://127.0.0.1:9091 \
-               LOKI=http://127.0.0.1:3100 IMAGE_CACHE=https://127.0.0.1:8443
+               LOKI=http://127.0.0.1:3100 IMAGE_CACHE=https://127.0.0.1:8443 $(TOKEN)
   # pre-flight can't put OpenBMC versions in order, so the lab allows either direction
   PLAN_ARGS := --allow-downgrade
 else ifeq ($(SITE),prod)
@@ -37,8 +41,13 @@ Setup
   make test                the rollout's decisions on recorded Redfish data, in about a second, no BMC needed
   make mutations           break each safety rule of rollout.py, in a copy: each break must fail a test
 
-Lab: 10 emulated OpenBMC BMCs, QEMU in Docker, on 127.0.0.1:2441-2450, and their HTTPS image cache on :8443
-  make lab-up              start the image store, ingest OpenBMC's two newest builds into it (download, check
+NetBox: the lab's hosts, racks and projects; the tools read them from it
+  make netbox-up           start it on http://127.0.0.1:8000 (admin's password: netbox/.netbox.env) and load
+                           lab/inventory.yaml's servers into it, once
+  make netbox-down         stop it; its data stays in volumes
+
+Lab: 10 emulated OpenBMC BMCs, QEMU in Docker, on 127.1.0.1-10, and their HTTPS image cache on :8443
+  make lab-up              start NetBox and the image store, ingest OpenBMC's two newest builds into it (download, check
                            their signatures, upload), boot the BMCs (about 10 min)
   make lab-down            stop them; each keeps its flash
   make lab-reset           stop them and wipe their flash: they boot the older build again; the store keeps its images
@@ -79,7 +88,7 @@ export HELP
 .DEFAULT_GOAL := help
 .DELETE_ON_ERROR:
 .PHONY: help setup test mutations lab-up lab-down lab-reset lab-clean collect $(VIEWS) detail views plan dry-run update report watch fault \
-        monitor-up monitor-logs monitor-down
+        monitor-up monitor-logs monitor-down netbox-up netbox-down
 
 help:
 	@printf '%s\n' "$$HELP"
@@ -99,7 +108,7 @@ mutations:
 # ---- Lab ----
 # The store first, then the ingest into it: download-fw-images.sh downloads, promote-fw-images.sh checks and uploads. Then
 # every package the catalog names must be in the store, before the BMCs boot from the older build's bmc.mtd
-lab-up: lab/qemu-system-arm lab/cache/tls.crt
+lab-up: lab/qemu-system-arm lab/cache/tls.crt netbox-up
 	$(LAB) up --detach --wait store
 	[ -f lab/images.yaml ] && [ -f lab/baseline.yaml ] && [ -f lab/bmc.mtd ] || \
 	  { ./lab/download-fw-images.sh && ./lab/promote-fw-images.sh lab/staging/*.tar; }
@@ -139,7 +148,7 @@ $(VIEWS):
 	$(ENV) $(PY) poller.py $@ $(ARGS)
 
 detail:
-	$(if $(HOST),,$(error set HOST, e.g. make detail HOST=127.0.0.1:2441))
+	$(if $(HOST),,$(error set HOST, e.g. make detail HOST=127.1.0.1))
 	$(ENV) $(PY) poller.py detail $(HOST) $(ARGS)
 
 views:
@@ -177,10 +186,28 @@ monitor-up:
 	@[ -f observability/grafana/.grafana.env ] || { echo "First create observability/grafana/.grafana.env with" \
 	  "GRAFANA_ADMIN_USERNAME=... and GRAFANA_ADMIN_PASSWORD=...: Grafana's admin account (README, Quick start)"; exit 1; }
 	python3 observability/grafana/prod_dashboards.py
-	$(MONITOR) up --detach --build --wait
+	$(TOKEN) $(MONITOR) up --detach --build --wait
 
 monitor-logs:
 	$(MONITOR) logs --follow exporter-lab exporter-prod
 
 monitor-down:
 	$(MONITOR) down
+
+# ---- NetBox ----
+# Its secrets, random and made once: never shown, read from the file. NETBOX_TOKEN is the tools' read-only API token
+netbox/.netbox.env:
+	@umask 077; python3 -c 'import secrets, string; \
+	r = lambda n: "".join(secrets.choice(string.ascii_letters + string.digits) for _ in range(n)); db = r(32); \
+	print(f"SECRET_KEY={r(60)}\nAPI_TOKEN_PEPPER_1={r(60)}\nDB_PASSWORD={db}\nPOSTGRES_PASSWORD={db}\n" \
+	      f"REDIS_PASSWORD={r(32)}\nSUPERUSER_PASSWORD={r(24)}\nNETBOX_TOKEN=nbt_{r(12)}.{r(40)}")' > $@
+	@echo "Made $@: NetBox's secrets and the admin's password"
+
+# Up, then the seed: the read-only token, and lab/inventory.yaml's servers when NetBox has no lab device yet
+netbox-up: netbox/.netbox.env
+	$(NETBOX) up --detach --wait
+	$(NETBOX) exec -T netbox /opt/netbox/venv/bin/python /opt/netbox/netbox/manage.py shell --no-startup --no-imports \
+	  --interface python < netbox/seed.py
+
+netbox-down:
+	$(NETBOX) down

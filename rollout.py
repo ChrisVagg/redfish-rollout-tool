@@ -28,7 +28,7 @@ unless --allow-downgrade, and a component without a rollback path unless --accep
                     a host whose BMC isn't the one the plan read. Without --yes a dry run: what each host would get.
                     With --yes only hosts marked writable: true in the inventory are updated (the lab); every step is
                     recorded, its intent before it and its result after, in <site>/runs/<run id>.jsonl. A gate that
-                    fails (a failing canary or strict wave, or a failure rate over halt_at) exits 1, so the next stage
+                    fails (a failing canary or strict wave, or failures over failure_rate) exits 1, so the next stage
                     doesn't run. pipeline.sh runs plan, the canary stage, then the waves stage.
 
 The site is the fleet: SITE=prod (the default) or SITE=lab, a folder with the inventory (inventory.yaml), the
@@ -274,6 +274,12 @@ def changed_inputs(saved) -> list[str]:
     return [f for f, sha in saved.get("inputs", {}).items() if sha256_of(f) != sha]
 
 
+# The plan's hosts whose inventory entry changed since it was approved, or is gone: NetBox has no file to pin
+def changed_hosts(saved, servers, hosts) -> list[str]:
+    current = {s["host"]: s for s in servers}
+    return [h for h in hosts if current.get(h) != saved["servers"].get(h)]
+
+
 # How a component goes back to the version it runs now, after an update: the Rollback column. Only a way the rollout
 # carries out counts: an A/B bank the BMC reports isn't one, as switching banks isn't built
 def rollback_path(found, component, images, model, running) -> str:
@@ -434,7 +440,7 @@ def load_rollout(args) -> dict:
     if unknown:
         raise SystemExit(f"{path}: unknown {', '.join(sorted(unknown))}; known: {', '.join(ROLLOUT_DEFAULTS)}")
     policy = {**ROLLOUT_DEFAULTS, **written, "file": os.path.relpath(path) if path.is_file() else None}
-    for key in ("canary_per_model", "waves", "max_per_rack", "halt_at"):
+    for key in ("canary_per_model", "waves", "max_per_rack", "failure_rate"):
         if getattr(args, key, None) is not None:
             policy[key] = getattr(args, key)
     policy["waves"] = sorted({float(w) for w in policy["waves"]} | {100.0})  # the last wave takes every host left
@@ -447,8 +453,9 @@ def load_rollout(args) -> dict:
 def rollout_text(policy) -> str:
     cap = f"≤{policy['max_per_rack']} per rack" if policy["max_per_rack"] else "no rack limit"
     return (f"canary {policy['canary_per_model']} per model, waves to {', '.join(f'{w:g}' for w in policy['waves'])}%"
-            f" of the rest, {cap}, the first {policy['strict_waves']} strict then halt over {policy['halt_at']:.0%}"
-            f" failed, {policy['max_parallel'] or 'all'} at once, soak {took(policy['soak'])}")
+            f" of the rest, {cap}, the first {policy['strict_waves']} strict then halt over"
+            f" {policy['failure_rate']:.0%} failed, {policy['max_parallel'] or 'all'} at once,"
+            f" soak {took(policy['soak'])}")
 
 
 # The plan's waves: a canary of each hardware model first, then waves that grow as the policy's cumulative percentages
@@ -595,9 +602,9 @@ def prepare(args) -> dict:
 
 # Save the plan for a pipeline's later stages: what to update, from which files, with which options, in which waves
 def save_plan(args, servers, results, planned, rollout) -> None:
-    """run --plan takes all of it from here, so the stages run what was planned: the files' sha256, so a run refuses
-    files changed since, and each host's verdict with its identity, so a run blocks a host that isn't the one
-    approved."""
+    """run --plan takes all of it from here, so the stages run what was planned: the files' sha256 and each host's
+    inventory entry, so a run refuses either changed since, and each host's verdict with its identity, so a run blocks
+    a host that isn't the one approved."""
     Path(args.save).write_text(json.dumps({
         "created": datetime.now(timezone.utc).isoformat(timespec="seconds"), "component": args.component,
         "inventory": os.path.relpath(args.inventory), "baseline": os.path.relpath(args.baseline),
@@ -606,6 +613,7 @@ def save_plan(args, servers, results, planned, rollout) -> None:
                                                                rollout["file"]) if f},
         "allow_downgrade": args.allow_downgrade, "accept_no_rollback": args.accept_no_rollback, "rollout": rollout,
         "waves": {name: [s["host"] for s in hosts] for name, hosts in planned},
+        "servers": {s["host"]: s for s in servers},  # as the inventory had them: NetBox has no file to pin
         "verdicts": {s["host"]: {"verdict": r["verdict"], "running": r["running"], "target": r["want"],
                                  "reasons": r["reasons"], "checks": r["checks"], "identity": r.get("identity")}
                      for s, r in zip(servers, results)}}, indent=2))
@@ -1068,12 +1076,12 @@ def soak(done, key, wait, rec) -> list[dict]:
 
 
 # The gate after a wave: any failure halts the canary, a strict wave, or a wave with a host that failed its soak; a
-# later wave halts when more than halt_at of the hosts tried so far failed. states: every host so far, every wave
+# later wave halts when more than failure_rate of the hosts tried so far failed. states: every host so far, every wave
 def gate(wave, states, soured, rollout) -> dict:
     strict = wave == "canary" or wave in {f"wave {n}" for n in range(1, rollout["strict_waves"] + 1)}
     tried = [s for s in states if s not in ("skipped", "blocked")]
     failed = [s for s in tried if s in FAILED_STATES]
-    halted = bool(failed) and (strict or soured > 0 or len(failed) / len(tried) > rollout["halt_at"])
+    halted = bool(failed) and (strict or soured > 0 or len(failed) / len(tried) > rollout["failure_rate"])
     return {"halted": halted, "failed": len(failed), "tried": len(tried), "strict": strict}
 
 
@@ -1081,8 +1089,8 @@ def gate(wave, states, soured, rollout) -> dict:
 # without --yes, the dry run
 def run(args) -> list:
     """The saved plan decides the component, files, options, rollout policy and waves. args.exit_code is 1 when a gate
-    fails: a failure in the canary or a strict wave, a soak check that failed, or more than halt_at of the hosts tried
-    failed."""
+    fails: a failure in the canary or a strict wave, a soak check that failed, or more than failure_rate of the hosts
+    tried failed."""
     args.exit_code, saved = 0, json.loads(Path(args.plan).read_text())
     if changed := changed_inputs(saved):
         raise SystemExit(f"changed since the plan was approved: {', '.join(changed)}. A run does only what its "
@@ -1093,6 +1101,9 @@ def run(args) -> list:
     args.hosts = [h for hosts in stage.values() for h in hosts]
     if not args.hosts:
         return [Text(f"Nothing to do: the plan has no host for the {args.stage} stage")]
+    if changed := changed_hosts(saved, load_servers(args.inventory), args.hosts):
+        raise SystemExit(f"changed in the inventory since the plan was approved: {', '.join(changed)}. A run does "
+                         "only what its plan approved: plan again")
     step = prepare(args)
     servers, reads, results, baselines, policy = (
         step[k] for k in ("servers", "reads", "results", "baselines", "policy"))
@@ -1141,7 +1152,7 @@ def run(args) -> list:
         push_metrics(path, group, pushing, planned_stage)
     rec("-", "run", "start", component=args.component, waves={name: [s["host"] for s in h] for name, h in planned},
         target=", ".join(sorted({r["want"] for r in results if r["verdict"] == "go" and r["want"]})),
-        plan=args.plan, stage=args.stage, halt_at=rollout["halt_at"], rollout=rollout, apply_time=APPLY_TIME,
+        plan=args.plan, stage=args.stage, failure_rate=rollout["failure_rate"], rollout=rollout, apply_time=APPLY_TIME,
         faults=policy["faults"])
     last = list(saved["waves"])[-1]
     outcomes, halted = [], None
@@ -1155,7 +1166,7 @@ def run(args) -> list:
         outcomes += [(name, o) for o in done]
         g = gate(name, [o["state"] for _, o in outcomes], len(soured), rollout)
         rec("-", "gate", "halted" if g["halted"] else "passed", wave=name, failed=g["failed"], tried=g["tried"],
-            limit=rollout["halt_at"], strict=g["strict"], soak_failed=len(soured))
+            limit=rollout["failure_rate"], strict=g["strict"], soak_failed=len(soured))
         if g["halted"]:
             halted = f"halted after {'the ' * (name == 'canary')}{name}: {g['failed']} of {g['tried']} hosts failed"
             args.exit_code = 1
@@ -1375,7 +1386,7 @@ def pipeline_report(plan, events, name, records) -> dict:
         "targets": sorted({d["target"] for d in everyone if d["target"]}),
         "plan": {k: plan.get(k) for k in ("created", "inventory", "baseline", "images", "allow_downgrade",
                                           "accept_no_rollback", "rollout")} if plan else None,
-        "run": {"halt_at": first.get("halt_at"), "apply_time": first.get("apply_time"),
+        "run": {"failure_rate": first.get("failure_rate"), "apply_time": first.get("apply_time"),
                 "faults": first.get("faults") or {}},
         "records": [Path(r).name for r in records], "started": started, "ended": ended,
         "seconds": seconds(started, ended), "result": result,
@@ -1564,8 +1575,8 @@ def main() -> None:
     c.add_argument("--waves", type=lambda v: [float(w) for w in v.split(",")], metavar="PCT,…",
                    help="cumulative %% of the other hosts done after each wave, e.g. 5,25,100 [policy]")
     c.add_argument("--max-per-rack", type=int, help="hosts of one rack in a wave, at most; 0 no limit [policy]")
-    c.add_argument("--halt-at", type=float, help="after the strict waves, stop when more than this share failed "
-                                                 "[policy]")
+    c.add_argument("--failure-rate", type=float, help="after the strict waves, stop when more than this share failed "
+                                                      "[policy]")
     c.add_argument("--allow-downgrade", action="store_true",
                    help="also plan a downgrade, and an update whose direction can't be told")
     c.add_argument("--accept-no-rollback", action="store_true",

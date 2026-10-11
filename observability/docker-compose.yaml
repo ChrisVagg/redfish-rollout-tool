@@ -15,7 +15,7 @@ services:
   exporter-lab:
     <<: *exporter
     command: [--listen, "127.0.0.1:9101", --interval, "10"]
-    environment: [SITE=lab, LAB_USERNAME=root, LAB_PASSWORD=0penBmc]  # default credentials
+    environment: [SITE=lab, LAB_USERNAME=root, LAB_PASSWORD=0penBmc, NETBOX_TOKEN]  # default credentials; make's token
   exporter-prod:
     <<: *exporter
     command: [--listen, "127.0.0.1:9102", --interval, "30"]

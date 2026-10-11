@@ -771,7 +771,12 @@
    "options": {
     "showHeader": true,
     "cellHeight": "sm",
-    "sortBy": []
+    "sortBy": [
+     {
+      "displayName": "Redfish",
+      "desc": false
+     }
+    ]
    },
    "transparent": true
   },

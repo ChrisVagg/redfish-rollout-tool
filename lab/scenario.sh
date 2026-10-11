@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Bad firmware updates on the lab, to see what the rollout does with them: the pipeline for real, to the build the lab
 # doesn't run, with faults injected where real ones would show (rollout.py run --fault [HOST=]KIND). The script then
-# checks how each host ended. lab/policy.yaml plans a canary (127.0.0.1:2441), then waves of 3, then 6.
+# checks how each host ended. lab/policy.yaml plans a canary (127.1.0.1), then waves of 3, then 6.
 #
 #   silent-fail   The BMC takes the image and reports Completed, but the firmware doesn't change: it got the running
 #                 version's package as the target's. Post-check fails, the rollback reinstalls the version before.
@@ -14,7 +14,7 @@
 #                 reinstalls the version before, but its reset times out too, so nothing is verified:
 #                 needs_attention, left for a person. The BMC comes back later, unverified.
 #   hybrid        Good and bad updates in one rollout: the canary passes its soak, then wave 1 has a good host and two
-#                 bad ones (2443 unhealthy, 2444 rejected). Wave 1 is strict, so any failure halts: wave 2 (6 BMCs)
+#                 bad ones (bmc3 unhealthy, bmc4 rejected). Wave 1 is strict, so any failure halts: wave 2 (6 BMCs)
 #                 never starts, and the fleet is left on two builds for a person to look at.
 #
 #   make fault SCENARIO=<name>
@@ -25,18 +25,18 @@ export SITE=lab
 declare -A expect=(
   [silent-fail]="canary=rolled_back" [unhealthy]="canary=rolled_back" [rejected]="canary=failed"
   [bad-checksum]="canary=blocked" [no-return]="canary=needs_attention"
-  [hybrid]="127.0.0.1:2441=updated 127.0.0.1:2442=updated 127.0.0.1:2443=rolled_back 127.0.0.1:2444=failed
-            127.0.0.1:2445=untouched 127.0.0.1:2446=untouched 127.0.0.1:2447=untouched 127.0.0.1:2448=untouched
-            127.0.0.1:2449=untouched 127.0.0.1:2450=untouched")
+  [hybrid]="127.1.0.1=updated 127.1.0.2=updated 127.1.0.3=rolled_back 127.1.0.4=failed
+            127.1.0.5=untouched 127.1.0.6=untouched 127.1.0.7=untouched 127.1.0.8=untouched
+            127.1.0.9=untouched 127.1.0.10=untouched")
 declare -A faults=(
   [silent-fail]="--fault silent-fail" [unhealthy]="--fault unhealthy" [rejected]="--fault rejected"
   [no-return]="--fault no-return" [bad-checksum]=""
-  [hybrid]="--fault 127.0.0.1:2443=unhealthy --fault 127.0.0.1:2444=rejected")
+  [hybrid]="--fault 127.1.0.3=unhealthy --fault 127.1.0.4=rejected")
 scenario=${1:-none}
 [ -n "${expect[$scenario]:-}" ] || { sed -n '2,/^#   make/p' "$0" | cut -c3-; exit 2; }  # the scenarios above
 shift
 : "${LAB_USERNAME:?the lab login: run it through make fault}" "${LAB_PASSWORD:?}"
-bmc=127.0.0.1:2441  # every lab BMC runs the same build between scenarios: this one tells which
+bmc=127.1.0.1  # every lab BMC runs the same build between scenarios: this one tells which
 
 # What the lab runs now, and the catalog's other version: the target
 get() { curl -sfk -m 30 -u "$LAB_USERNAME:$LAB_PASSWORD" "https://$bmc$1"; }

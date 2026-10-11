@@ -30,7 +30,7 @@ only, no vendor Oem code.
    the inputs and each BMC's identity; a later stage refuses a changed input.
 2. **canary**: a host per hardware model. Any failure halts.
 3. **waves**: growing, spread across racks, a soak between them. The first halts on any failure, later ones over
-   `halt_at`.
+   `failure_rate`.
 4. **report**: terminal, HTML and `report.json` after execution or a blocked plan; a successful dry run saves
    stage previews only.
 
@@ -69,7 +69,7 @@ GRAFANA_ADMIN_PASSWORD=...
 ```sh
 make setup        # venv
 make test         # the unit tests, no BMC needed
-make lab-up       # the image store, OpenBMC's two newest builds, 10 BMCs (~10 min)
+make lab-up       # NetBox, the image store, OpenBMC's two newest builds, 10 BMCs (~10 min)
 make monitor-up   # exporters, Pushgateway, Loki, Prometheus, Grafana on http://127.0.0.1:3000
 make collect      # read every BMC; then make health, make firmware, ...
 make dry-run      # plan, canary, waves; no firmware changes
@@ -123,11 +123,14 @@ lab/                the emulated BMCs: Dockerfile, docker-compose.yaml, scenario
                     download-fw-images.sh and promote-fw-images.sh, the ingest, with openbmc-dev.pub, the gate's
                     pinned key; store/, the image store's read-only access; cache/, the image cache's nginx config
 prod/               the real fleet: baseline.yaml, policy.yaml; inventory.yaml and .env stay local
+netbox/             Compose for NetBox, the lab inventory's source of truth; seed.py loads lab/inventory.yaml into
+                    it once; .netbox.env, its secrets and the tools' read-only token, stays local
 observability/      Compose for the exporters, Pushgateway, Loki, Prometheus and Grafana; loki/loki.yaml; a Lab and a
                     Prod dashboard folder;
                     grafana/grafana.ini; grafana/.grafana.env, Grafana's admin account, stays local;
                     grafana/prod_dashboards.py makes the prod dashboards from the lab ones
 docs/               the diagrams: the rollout, the lab, production today, a production system, the lab on its
-                    layout, one update as resources; grafana/, a screenshot of every panel
+                    layout, one update as resources; grafana/, a screenshot of every panel; netbox/, the
+                    lab's inventory in NetBox
 docs/runs/          reports of real lab runs: the update and every bad-update scenario
 ```

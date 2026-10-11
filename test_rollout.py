@@ -10,6 +10,7 @@ from collections import Counter
 from pathlib import Path
 from unittest.mock import patch
 
+import poller
 import rollout
 from rollout import waves
 
@@ -318,9 +319,15 @@ def test_drain():
         assert not ok and "timed out" in output, output
 
 
-# A run does what its plan approved: an input file changed or gone since the plan stops it, and a host whose BMC
-# isn't the one the plan read (another identity at its address) is blocked, not updated
+# A run does what its plan approved: an input file changed or gone since the plan stops it, as does a host whose
+# inventory entry changed or is gone (NetBox has no file to pin), and a host whose BMC isn't the one the plan read
+# (another identity at its address) is blocked, not updated
 def test_frozen_plan():
+    entry = {"host": "127.0.0.1:2441", "rack": "r1"}
+    assert rollout.changed_hosts({"servers": {entry["host"]: entry}}, [entry], [entry["host"]]) == []
+    assert rollout.changed_hosts({"servers": {entry["host"]: entry}}, [{**entry, "rack": "r2"}], [entry["host"]]) == [
+        entry["host"]]
+    assert rollout.changed_hosts({"servers": {entry["host"]: entry}}, [], [entry["host"]]) == [entry["host"]]
     d = Path(tempfile.mkdtemp())
     for name in ("baseline.yaml", "images.yaml"):
         (d / name).write_text("approved\n")
@@ -339,7 +346,7 @@ def test_frozen_plan():
 # The gate after each wave, the lab's policy: the canary and wave 1 strict, later waves halt over 10% failed.
 # states: every host tried so far, every wave up to this one
 def test_gate():
-    policy = {"strict_waves": 1, "halt_at": 0.1}
+    policy = {"strict_waves": 1, "failure_rate": 0.1}
     ok = ["updated"]
     cases = [  # (wave, states, soak failures) → halted
         (("canary", ["failed"], 0), True),
@@ -356,6 +363,31 @@ def test_gate():
     # Blocked and skipped hosts were never tried: 1 failed of 2 tried is 50%
     assert rollout.gate("wave 2", ["updated", "failed", "blocked", "skipped"], 0, policy) == {
         "halted": True, "failed": 1, "tried": 2, "strict": False}
+
+
+# NetBox's devices as inventory.yaml lists servers, page after page: a device without an out-of-band IP isn't read
+def test_netbox_inventory():
+    device = {"display": "bmc1", "name": "bmc1", "oob_ip": {"address": "127.1.0.1/32"}, "tenant": {"name": "lab"},
+              "device_type": {"manufacturer": {"name": "NVIDIA"}}, "rack": {"name": "r1"}, "tags": [{"slug": "canary"}]}
+    bare = {**device, "name": "127.1.0.2", "oob_ip": {"address": "127.1.0.2/32"}, "tenant": None, "rack": None,
+            "tags": []}
+    pages = {"http://nb/api/dcim/devices/?site=lab&limit=1000": {"results": [device], "next": "http://nb/2"},
+             "http://nb/2": {"results": [bare, {**device, "display": "spare", "oob_ip": None}], "next": None}}
+
+    class Answer:  # one page of NetBox's answer
+        def __init__(self, url, **_):
+            self.body = pages[url]
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return self.body
+
+    with patch.dict(os.environ, {"NETBOX_TOKEN": "nbt_key.token"}), patch("poller.requests.get", Answer):
+        assert poller.netbox_servers("http://nb/", "lab") == [
+            {"host": "127.1.0.1", "vendor": "NVIDIA", "project": "lab", "rack": "r1", "canary": True, "node": "bmc1"},
+            {"host": "127.1.0.2", "vendor": "NVIDIA"}]
 
 
 # ---- Update methods, metrics, the exporter ----
@@ -383,7 +415,8 @@ def test_ways_in():
 def test_metrics_mid_run():
     at = lambda s: f"2026-10-02T18:{s}+00:00"
     events = [
-        {"at": at("00:00"), "host": "-", "step": "run", "state": "start", "waves": {"wave 1": ["h1"]}, "halt_at": 0.1},
+        {"at": at("00:00"), "host": "-", "step": "run", "state": "start", "waves": {"wave 1": ["h1"]},
+         "failure_rate": 0.1},
         {"at": at("00:01"), "host": "h1", "step": "pre-flight", "state": "go", "running": "1.0", "target": "2.0"},
         {"at": at("00:02"), "host": "h1", "step": "update", "state": "start", "method": "push"},
         {"at": at("00:09"), "host": "h1", "step": "update", "state": "Exception", "task": {
@@ -456,7 +489,7 @@ def test_plan_to_loki():
           patch.object(rollout.requests, "post", lambda url, json, timeout: sent.append(json) or Loki())):
         rollout.push_plan(args, servers, [(lab(), 0.0)] * 2, results, [("canary", [servers[0]])],
                           {"canary_per_model": 1, "waves": [100.0], "max_per_rack": 0, "strict_waves": 1,
-                           "halt_at": 0.1, "max_parallel": 0, "soak": 0})
+                           "failure_rate": 0.1, "max_parallel": 0, "soak": 0})
     events = [json.loads(b["streams"][0]["values"][0][1]) for b in sent]
     assert [(e["host"], e["step"], e["state"], e.get("wave")) for e in events] == [
         ("-", "plan", "saved", None), ("h1", "plan", "go", "canary"), ("h1", "pre-flight check", "passed", "canary"),

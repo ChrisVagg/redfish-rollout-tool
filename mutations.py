@@ -38,8 +38,8 @@ BREAKS = [  # (what a careless edit does, the line as it is, the line broken, th
     ("rollback installs the target", 'component, before["version"])\n        if not r["rollback"]',
      'component, want)\n        if not r["rollback"]', "test_run_host"),
     ("rollback before any reset", "if not passed and activated:", "if not passed:", "test_run_host"),
-    ("gate halts at exactly halt_at", 'len(failed) / len(tried) > rollout["halt_at"]',
-     'len(failed) / len(tried) >= rollout["halt_at"]', "test_gate"),
+    ("gate halts at exactly failure_rate", 'len(failed) / len(tried) > rollout["failure_rate"]',
+     'len(failed) / len(tried) >= rollout["failure_rate"]', "test_gate"),
     ("soak failure ignored", "strict or soured > 0 or", "strict or", "test_gate"),
     ("wave 1 not strict", 'range(1, rollout["strict_waves"] + 1)', 'range(1, rollout["strict_waves"])', "test_gate"),
     ("blocked hosts counted as tried", 'if s not in ("skipped", "blocked")]', 'if s != "skipped"]', "test_gate"),
@@ -53,6 +53,8 @@ BREAKS = [  # (what a careless edit does, the line as it is, the line broken, th
      'key=lambda s: (False, s.get("canary") is not True)', "test_canary_racks"),
     ("changed plan inputs ignored", "if sha256_of(f) != sha]", "if False]", "test_frozen_plan"),
     ("another BMC updated", 'if planned and r["verdict"] == "go" and r.get("identity") != planned:', "if False:",
+     "test_frozen_plan"),
+    ("a host changed in the inventory runs", 'if current.get(h) != saved["servers"].get(h)]', "if False]",
      "test_frozen_plan"),
 ]
 

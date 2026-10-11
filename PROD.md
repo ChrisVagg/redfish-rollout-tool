@@ -182,36 +182,52 @@ firmware, the health of every component, and every reading against its threshold
 
 ![A production firmware-update system](docs/prod-solution-architecture.svg)
 
-At fleet scale the rollout becomes a distributed system. The figure is the target, in four parts:
+The target at fleet scale, in four parts. The numbered badges are the rollout's steps where they happen: 0 is ingest,
+before any rollout; 1 to 6 are every host's steps, as in [the rollout](LAB.md#how-the-rollout-works). The BMC stays the
+only truth about what runs: a host is read again over Redfish before anything acts on it.
 
-- **Supply chain**: a vendor image is downloaded, its checksum and signature checked, tested on lab hosts of every
-  model, then promoted into an approved store (S3 or Artifactory).
-- **Control plane**: an operator requests a rollout through an API and CLI, and approves the canary. A workflow engine
-  (Temporal, or Argo) reads the firmware catalog (the **baseline** per model) and the inventory (NetBox or Nautobot), pre-flights,
-  plans the canary and waves, and applies the gates. A rollout state database (PostgreSQL) holds each host's state and
-  wave, a lock per host so two rollouts never touch the same host, and an append-only audit trail; a gate is a query on
-  it. It holds every host's state at every step, so a stopped rollout shows where each host was, and a rerun knows what
-  is left. The engine keeps its own store too: its workflow history (each activity's inputs and outputs, the timers
-  of a soak, the approval signals), which it replays to continue after a crash.
-- **Each site**: a site agent, the Redfish worker that runs the update steps (`rollout.py run` here), takes the work
-  of each wave, gets BMC credentials from Vault, drains hosts through a validated scheduler integration and drives the update over Redfish. Images
-  come from a cache in the site, reducing repeated WAN transfers while entries remain cached: a BMC that offers
-  `SimpleUpdate` pulls it, and for a push-only BMC the agent reads it from the cache and pushes it. The poller isn't the agent: it runs
-  beside it as the site's exporter on an account restricted to ReadOnly operations. [Vault KV](https://developer.hashicorp.com/vault/docs/secrets/kv) can store BMC passwords;
-  automatic rotation or short-lived BMC accounts require a separate, validated integration, not just installing Vault.
-- **Observability**: the agents and the engine send metrics to Prometheus and rollout events to Loki. A separate
-  event receiver would subscribe to each BMC's Redfish `EventService` and forward its notifications to Loki
-  ([future work](#future-work-bmc-events-into-loki)); Grafana reads both stores, and a halt or a quarantined host would
-  page someone through Alertmanager.
+### Supply chain: before any rollout
 
-The numbered badges are the rollout's steps where they happen: 0 is ingest, before any rollout; 1 to 6 are the steps
-every host goes through, as in [the rollout](LAB.md#how-the-rollout-works). The BMC stays the only truth about what runs:
-the database records intent and observations, and a host is read again over Redfish before anything acts on it.
+| Part | Tool | What it does |
+|---|---|---|
+| Ingest | a promote script, as `lab/promote-fw-images.sh` | downloads the vendor package, checks its checksum and its signature against the vendor's pinned key |
+| Lab test | lab hosts of every model | runs the image on each model before it is approved |
+| Approved store | S3 or Artifactory | keeps each approved image under its sha256; the storage policy prevents replacing one |
 
-**Firmware images: the catalog says what, the cache holds the bytes.** The firmware catalog lists, per hardware model
-and component, the approved version with its file and sha256 (today `baseline.yaml` and `images.yaml`). Only
-`prod/baseline.yaml` is tracked here; the lab catalog and baseline are generated and git-ignored. A production
-approval process must version and review its catalog. In the target design an image gets in only after its checksum
+### Control plane
+
+| Part | Tool | What it does |
+|---|---|---|
+| Rollout API and CLI | a service in front of the engine | an operator requests a rollout and approves the canary |
+| Source of truth: inventory, firmware catalog, baseline | **Nautobot** or **NetBox** | Nautobot holds all three: the devices, the image files with their sha256, the validated software per device type. NetBox holds the devices; the catalog and baseline stay YAML reviewed in git, a merged pull request the approval |
+| Workflow engine | Temporal, or Argo Workflows | pre-flight, the canary and waves, the gates and the soak; continues after a crash |
+| Engine store | the engine's own: PostgreSQL or Cassandra for Temporal | its workflow history, which it replays to continue |
+| Rollout state DB | PostgreSQL | each host's state and wave, a lock per host, an append-only audit trail; a gate is a query |
+| Secrets | Vault | the BMC credentials, per site; rotating them needs a separate, validated integration |
+
+### Each site
+
+| Part | Tool | What it does |
+|---|---|---|
+| Site agent | `rollout.py run` here | takes a wave's work, drains the hosts, drives the update over Redfish |
+| Image cache | nginx over HTTPS | serves the store's images inside the site: a BMC that offers `SimpleUpdate` pulls from it, the agent pushes to one that can't |
+| Scheduler | the site's own, as Slurm or Kubernetes | drains and undrains the hosts, through a validated integration |
+| Exporter | `poller.py exporter`, on a ReadOnly account | reads every BMC's health, firmware and telemetry for Prometheus; never the agent |
+| BMCs | each vendor's Redfish service | run the update, its task and the reset; their `EventService` sends their events |
+
+### Observability
+
+| Part | Tool | What it does |
+|---|---|---|
+| Metrics | Prometheus, a Pushgateway per site | scrapes the exporters; the rollout pushes its metrics |
+| Logs | Loki | the rollout's events; the BMCs' events through an event receiver ([future work](#future-work-bmc-events-into-loki)) |
+| Dashboards | Grafana | reads both |
+| Alerts | Alertmanager | pages the on-call on a halt or a host left for a person |
+
+### Firmware images: the catalog says what, the cache holds the bytes
+
+The firmware catalog lists, per hardware model and component, the approved version with its file and sha256 (today
+`baseline.yaml` and `images.yaml`). In the target design an image gets in only after its checksum
 and signature are checked and it has passed on lab hosts of that model;
 it is then promoted into the approved store, and each site's HTTPS cache serves it from there. Pull and push both read
 the catalog and both take the bytes from the site's cache, never from a vendor at update time; they differ in who
@@ -236,21 +252,13 @@ site. The current runner joins `IMAGE_CACHE` with relative paths for push; pull 
 cache URL. Constructing site-specific pull URLs from a shared catalog is future work. Promotion writes the
 file first and the catalog entry after it; cache and store availability must still be checked before execution.
 
-**Tools for the inventory and the rollout state.**
-
-| Store | What it holds | Tools |
-|---|---|---|
-| Inventory / CMDB: what should exist | every server: its BMC address, rack, PDU, model and role, and the rollout's own fields (`canary`, `writable` for a change window) | **NetBox** or **Nautobot**, open source: racks, power, cables and IPs, with REST and GraphQL APIs. The rollout reads a ring's hosts from the API instead of `inventory.yaml`. Nautobot adds Jobs, and an app that tracks validated software per device type, next to the baseline. ServiceNow CMDB or Device42 where the company already runs one |
-| Rollout state: what is happening | each host's state and wave, a lock per host, every step's intent and result, each gate's decision | **PostgreSQL**: a lock per host (a row or advisory lock) so two rollouts never touch one host, the gate as a query, an append-only audit table, a step's evidence as JSONB. Today's run records map onto it one to one: an event is a row. The workflow engine keeps its own history beside it: **Temporal** on PostgreSQL or Cassandra, or **Argo Workflows** on Kubernetes |
-| Observed state: what runs | the versions and health each BMC reports | the BMC itself, read over Redfish before anything acts on it; **Prometheus** keeps what the exporters read, **VictoriaMetrics** for a longer history |
-
-How this repository maps onto it:
+### This repository today
 
 | In the system | In this repository today | Next |
 |---|---|---|
 | Approved store, site cache | the lab's store, a SeaweedFS bucket populated by the signature-checking ingest script, and nginx over HTTPS caching it: `rollout.py` fetches each image into `lab/spool/`, checks its sha256 against `images.yaml` and pushes it. A URL in `images.yaml` is handed to `SimpleUpdate` where the BMC allows it | the approved store on S3 or Artifactory, and the same nginx cache in each site |
-| Firmware catalog | `prod/baseline.yaml` is tracked; lab baseline and images catalog are generated and git-ignored | version and review the approved catalog |
-| Inventory / CMDB | `inventory.yaml`; the poller's snapshots are the observed versions, and `make firmware SITE=prod` shows drift from the baseline | generate the inventory from NetBox or Nautobot |
+| Firmware catalog | `prod/baseline.yaml` is tracked; lab baseline and images catalog are generated and git-ignored | Nautobot, or YAML reviewed in git beside NetBox; the plan keeps the entries it used in `plan.json`, and each stage compares them again |
+| Inventory / CMDB | the lab's hosts in NetBox (`make netbox-up`), seeded once from `lab/inventory.yaml`; prod's in `prod/inventory.yaml`. The poller's snapshots are the observed versions, and `make firmware SITE=prod` shows drift from the baseline | prod's hosts in NetBox too, with each vendor's BMC account |
 | Rollout API and CLI | the CLI only: the `make` targets and `pipeline.sh`; `YES=1` is the approval | an API, and an approval between the canary and wave 1 |
 | Workflow engine | `pipeline.sh`'s stages and `rollout.py run`: waves, gates, soak | a service that resumes a stopped rollout |
 | Rollout state DB | `<site>/runs/*.jsonl`: every step's intent before it and result after it; `report.json`. A record: no host locks, no resume | PostgreSQL, with host locks and the gate as a query |

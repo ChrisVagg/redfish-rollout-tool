@@ -47,11 +47,11 @@ ROLLOUT = SITE / "policy.yaml"  # how firmware rolls out on the site: canary, wa
 #   waves             after the canary: the cumulative % of the other hosts done after each wave; it ends with 100
 #   max_per_rack      hosts of one rack in the same wave, at most (0: no limit); the rest wait for a later wave
 #   strict_waves      the first waves after the canary that, like it, halt on any failure
-#   halt_at           later waves: halt when more than this share of the hosts tried failed
+#   failure_rate      later waves: halt when more than this share of the hosts tried failed
 #   max_parallel      updates running at once in a wave (0: the whole wave)
 #   soak              seconds to wait after a wave, then re-check its hosts, before the next one (0: none)
 ROLLOUT_DEFAULTS = {"canary_per_model": 1, "waves": [5, 25, 100], "max_per_rack": 1, "strict_waves": 1,
-                    "halt_at": 0.02, "max_parallel": 50, "soak": 1800, "drain": None, "undrain": None}
+                    "failure_rate": 0.02, "max_parallel": 50, "soak": 1800, "drain": None, "undrain": None}
 SCHEDULER_TIMEOUT = 24 * 3600  # seconds a drain may take to empty a host, or an undrain to finish, before it fails
 APPLY_TIME = "OnReset"  # @Redfish.OperationApplyTime of every update: the image waits for step 4's reset
 TASK_TIMEOUT = 1800  # seconds an update task may run

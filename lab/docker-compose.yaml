@@ -1,4 +1,5 @@
-# The lab: ten emulated OpenBMC GB200 NVL BMCs, one QEMU per container, each on its own flash volume
+# The lab: ten emulated OpenBMC GB200 NVL BMCs, one QEMU per container, each on its own flash volume. Each serves Redfish
+# on port 443 of its own loopback address, bmcN on 127.1.0.N, as a BMC has its own IP; SSH on 127.0.0.1:2221-2230
 name: redfish-lab
 x-bmc: &bmc
   build: .
@@ -18,49 +19,49 @@ x-after-batch-2: &after-batch-2
 services:
   bmc1:
     <<: *bmc
-    ports: ["127.0.0.1:2441:443", "127.0.0.1:2221:22"]
+    ports: ["127.1.0.1:443:443", "127.0.0.1:2221:22"]
     volumes: ["bmc1-flash:/flash"]
   bmc2:
     <<: *bmc
-    ports: ["127.0.0.1:2442:443", "127.0.0.1:2222:22"]
+    ports: ["127.1.0.2:443:443", "127.0.0.1:2222:22"]
     volumes: ["bmc2-flash:/flash"]
   bmc3:
     <<: *bmc
-    ports: ["127.0.0.1:2443:443", "127.0.0.1:2223:22"]
+    ports: ["127.1.0.3:443:443", "127.0.0.1:2223:22"]
     volumes: ["bmc3-flash:/flash"]
   bmc4:
     <<: *bmc
-    ports: ["127.0.0.1:2444:443", "127.0.0.1:2224:22"]
+    ports: ["127.1.0.4:443:443", "127.0.0.1:2224:22"]
     volumes: ["bmc4-flash:/flash"]
   bmc5:
     <<: *bmc
     depends_on: *after-batch-1
-    ports: ["127.0.0.1:2445:443", "127.0.0.1:2225:22"]
+    ports: ["127.1.0.5:443:443", "127.0.0.1:2225:22"]
     volumes: ["bmc5-flash:/flash"]
   bmc6:
     <<: *bmc
     depends_on: *after-batch-1
-    ports: ["127.0.0.1:2446:443", "127.0.0.1:2226:22"]
+    ports: ["127.1.0.6:443:443", "127.0.0.1:2226:22"]
     volumes: ["bmc6-flash:/flash"]
   bmc7:
     <<: *bmc
     depends_on: *after-batch-1
-    ports: ["127.0.0.1:2447:443", "127.0.0.1:2227:22"]
+    ports: ["127.1.0.7:443:443", "127.0.0.1:2227:22"]
     volumes: ["bmc7-flash:/flash"]
   bmc8:
     <<: *bmc
     depends_on: *after-batch-1
-    ports: ["127.0.0.1:2448:443", "127.0.0.1:2228:22"]
+    ports: ["127.1.0.8:443:443", "127.0.0.1:2228:22"]
     volumes: ["bmc8-flash:/flash"]
   bmc9:
     <<: *bmc
     depends_on: *after-batch-2
-    ports: ["127.0.0.1:2449:443", "127.0.0.1:2229:22"]
+    ports: ["127.1.0.9:443:443", "127.0.0.1:2229:22"]
     volumes: ["bmc9-flash:/flash"]
   bmc10:
     <<: *bmc
     depends_on: *after-batch-2
-    ports: ["127.0.0.1:2450:443", "127.0.0.1:2230:22"]
+    ports: ["127.1.0.10:443:443", "127.0.0.1:2230:22"]
     volumes: ["bmc10-flash:/flash"]
     
   # The approved store, SeaweedFS: lab/promote-fw-images.sh uploads the packages into its bucket firmware once their

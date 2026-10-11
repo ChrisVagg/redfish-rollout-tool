@@ -372,11 +372,40 @@ def crawl(server, tunnel, deadline=None, keep=False) -> tuple[dict, float, str |
     return found, round(time.monotonic() - start, 1), stopped
 
 
-# Every server of the inventory, the inventory's defaults filled in
+# Every server of the inventory, the inventory's defaults filled in: from NetBox when the inventory names it
 def load_servers(path) -> list[dict]:
     with open(path) as f:
         cfg = yaml.safe_load(f)
-    return [{**(cfg.get("defaults") or {}), **server} for server in cfg["servers"]]
+    servers = netbox_servers(**cfg["netbox"]) if cfg.get("netbox") else cfg["servers"]
+    return [{**(cfg.get("defaults") or {}), **server} for server in servers]
+
+
+# A site's servers from NetBox, the inventory's source of truth, as inventory.yaml lists them: each device of the site
+# with its BMC at its out-of-band IP, its manufacturer the vendor, its tenant the project, its rack, the tag canary and
+# its name the node. Read with NETBOX_TOKEN, a read-only API token
+def netbox_servers(url, site) -> list[dict]:
+    if not (token := os.environ.get("NETBOX_TOKEN")):
+        raise SystemExit("NETBOX_TOKEN isn't set: make sets it from netbox/.netbox.env, made by make netbox-up")
+    servers, page = [], f"{url.rstrip('/')}/api/dcim/devices/?site={site}&limit=1000"
+    while page:
+        try:
+            r = requests.get(page, headers={"Authorization": f"Bearer {token}"}, timeout=10)
+            r.raise_for_status()
+        except requests.RequestException as e:
+            raise SystemExit(f"NetBox at {url}: {reason(str(e))}. make netbox-up starts it")
+        body = r.json()
+        for d in body["results"]:
+            if not d["oob_ip"]:
+                log.warning("NetBox: %s has no out-of-band IP, so its BMC isn't read", d["display"])
+                continue
+            host = d["oob_ip"]["address"].split("/")[0]
+            server = {"host": host, "vendor": d["device_type"]["manufacturer"]["name"],
+                      "project": (d["tenant"] or {}).get("name"), "rack": (d["rack"] or {}).get("name"),
+                      "canary": any(t["slug"] == "canary" for t in d["tags"]) or None,
+                      "node": d["name"] if d["name"] != host else None}
+            servers.append({k: v for k, v in server.items() if v is not None})
+        page = body["next"]
+    return servers
 
 
 # Crawl every BMC in parallel, snapshot each host and return the summary table

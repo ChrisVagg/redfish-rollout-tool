@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # The rollout pipeline, one stage after the other: plan → canary → waves → report. A stage that fails stops the
-# pipeline: rollout.py exits 1 when a gate fails (a canary failure, or more than halt_at of the hosts failing). The
+# pipeline: rollout.py exits 1 when a gate fails (a canary failure, or more than failure_rate of the hosts failing). The
 # report runs either way, over the records this pipeline wrote.
 #
 #   SITE=lab ./pipeline.sh COMPONENT [plan options]         every stage a dry run: the plan and what each host would get

@@ -2,6 +2,6 @@ canary_per_model: 1   # test host per model, in prod >=2.
 waves: [33, 100]      # the cumulative % of the other remaining (2 waves in lab).
 max_per_rack: 2       # hosts of one rack in the same wave, at most; the rest wait for a later wave
 strict_waves: 1       # the first waves after the canary that halt on any failure
-halt_at: 0.1          # halt when more than this share of the hosts tried failed
-max_parallel: 10      # updates running at once in a wave
+failure_rate: 0.1     # stop the wave when the hosts % > failure_rate of the host in the wave
+max_parallel: 10      # updates of hosts running at once in a wave
 soak: 60              # seconds to wait for health check after all the hosts os the wave is done.

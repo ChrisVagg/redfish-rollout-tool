@@ -998,7 +998,7 @@
      "options": {
       "sort": [
        {
-        "field": "host",
+        "field": "wave",
         "desc": false
        }
       ]
@@ -1177,7 +1177,7 @@
     "type": "loki",
     "uid": "loki"
    },
-   "description": "Each gate's decision after the canary and each wave. Halts on: any failure for the canary and the first strict waves, else when more than halt_at of the hosts tried failed.",
+   "description": "Each gate's decision after the canary and each wave. Halts on: any failure for the canary and the first strict waves, else when more than failure_rate of the hosts tried failed.",
    "targets": [
     {
      "datasource": {
@@ -1632,7 +1632,7 @@
      "options": {
       "sort": [
        {
-        "field": "host",
+        "field": "wave",
         "desc": false
        }
       ]
