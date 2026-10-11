@@ -22,6 +22,8 @@ schema_config:
     - {from: 2026-01-01, store: tsdb, object_store: filesystem, schema: v13, index: {prefix: index_, period: 24h}}
 limits_config:
   retention_period: 360h
+  # a query split by day, not by hour: Grafana already asks day by day, and the dashboards read 15 days
+  split_queries_by_interval: 24h
 compactor:
   working_directory: /loki/compactor
   retention_enabled: true

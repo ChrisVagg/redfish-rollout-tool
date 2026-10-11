@@ -8,7 +8,7 @@
   "from": "now-30m",
   "to": "now"
  },
- "refresh": "5s",
+ "refresh": "",
  "tags": [
   "redfish",
   "lab"
@@ -379,7 +379,13 @@
     "y": 3,
     "w": 5,
     "h": 4
-   }
+   },
+   "links": [
+    {
+     "title": "Follow live: refresh every 30 s",
+     "url": "/d/lab-pipeline?${pipeline:queryparam}&from=now-30m&to=now&refresh=30s"
+    }
+   ]
   },
   {
    "transparent": false,
@@ -2869,10 +2875,10 @@
     "hide": 0,
     "refresh": 2,
     "query": {
-     "query": "query_result(max by (pipeline) (rollout_hosts{site=\"$site\"}))",
+     "query": "query_result(label_replace(max by (pipeline) (rollout_running{site=\"$site\"}) > 0, \"name\", \"$1 · running\", \"pipeline\", \"(.+)\") or on (pipeline) label_replace(max by (pipeline) (rollout_gate_halted{site=\"$site\"}) > 0, \"name\", \"$1 · halted\", \"pipeline\", \"(.+)\") or on (pipeline) label_replace(max by (pipeline) (rollout_hosts{site=\"$site\"}), \"name\", \"$1 · passed\", \"pipeline\", \"(.+)\"))",
      "refId": "pipeline"
     },
-    "regex": "/pipeline=\"([^\"]+)\"/",
+    "regex": "/name=\"(?<text>[^\"]+)\".*pipeline=\"(?<value>[^\"]+)\"/",
     "sort": 2,
     "multi": false,
     "includeAll": false
