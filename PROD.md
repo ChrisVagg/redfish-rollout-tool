@@ -201,7 +201,8 @@ only truth about what runs: a host is read again over Redfish before anything ac
 | Part | Tool | What it does |
 |---|---|---|
 | Rollout API and CLI | a service in front of the engine | an operator requests a rollout and approves the canary |
-| Source of truth: inventory, firmware catalog, baseline | **Nautobot** or **NetBox** | Nautobot holds all three: the devices, the image files with their sha256, the validated software per device type. NetBox holds the devices; the catalog and baseline stay YAML reviewed in git, a merged pull request the approval |
+| Inventory / CMDB | **NetBox** or Nautobot | the devices: each server with its rack, project and model, and its BMC's out-of-band address |
+| Firmware catalog and baseline | **YAML in git**, never in NetBox | the approved version per model and component, and each version's image file and sha256; a merged pull request is the approval, not a database edit |
 | Workflow engine | Temporal, or Argo Workflows | pre-flight, the canary and waves, the gates and the soak; continues after a crash |
 | Engine store | the engine's own: PostgreSQL or Cassandra for Temporal | its workflow history, which it replays to continue |
 | Rollout state DB | PostgreSQL | each host's state and wave, a lock per host, an append-only audit trail; a gate is a query |
@@ -259,7 +260,7 @@ file first and the catalog entry after it; cache and store availability must sti
 | In the system | In this repository today | Next |
 |---|---|---|
 | Approved store, site cache | the lab's store, a SeaweedFS bucket populated by the signature-checking ingest script, and nginx over HTTPS caching it: `rollout.py` fetches each image into `lab/spool/`, checks its sha256 against `images.yaml` and pushes it. A URL in `images.yaml` is handed to `SimpleUpdate` where the BMC allows it | the approved store on S3 or Artifactory, and the same nginx cache in each site |
-| Firmware catalog | `prod/baseline.yaml` is tracked; lab baseline and images catalog are generated and git-ignored | Nautobot, or YAML reviewed in git beside NetBox; the plan keeps the entries it used in `plan.json`, and each stage compares them again |
+| Firmware catalog | `prod/baseline.yaml` is tracked; lab baseline and images catalog are generated and git-ignored | stays YAML reviewed in git, beside NetBox, not in it: prod's `images.yaml` beside its baseline, and a check of every change (each baseline version in the catalog, each entry with its sha256, each file in the store); the plan keeps the entries it used in `plan.json`, and each stage compares them again |
 | Inventory / CMDB | the lab's hosts in NetBox (`make netbox-up`), seeded once from `lab/inventory.yaml`; prod's in `prod/inventory.yaml`. The poller's snapshots are the observed versions, and `make firmware SITE=prod` shows drift from the baseline | prod's hosts in NetBox too, with each vendor's BMC account |
 | Rollout API and CLI | the CLI only: the `make` targets and `pipeline.sh`; `YES=1` is the approval | an API, and an approval between the canary and wave 1 |
 | Workflow engine | `pipeline.sh`'s stages and `rollout.py run`: waves, gates, soak | a service that resumes a stopped rollout |
