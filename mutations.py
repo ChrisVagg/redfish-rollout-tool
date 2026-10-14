@@ -54,6 +54,8 @@ BREAKS = [  # (what a careless edit does, the line as it is, the line broken, th
     ("changed plan inputs ignored", "if sha256_of(f) != sha]", "if False]", "test_frozen_plan"),
     ("another BMC updated", 'if planned and r["verdict"] == "go" and r.get("identity") != planned:', "if False:",
      "test_frozen_plan"),
+    ("a state's series vanishes between pushes", 'in dict.fromkeys([*HOST_STATES, *w["totals"]]):', 'in w["totals"]:',
+     "test_metrics_mid_run"),
     ("a host changed in the inventory runs", 'if current.get(h) != saved["servers"].get(h)]', "if False]",
      "test_frozen_plan"),
 ]

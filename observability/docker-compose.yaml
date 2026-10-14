@@ -30,8 +30,9 @@ services:
     image: prom/prometheus:v3.15.0
     restart: unless-stopped
     network_mode: host
+    # the admin API deletes a pipeline's history (LAB.md, Prometheus); it listens on 127.0.0.1 only
     command: [--config.file=/etc/prometheus/prometheus.yml, --storage.tsdb.path=/prometheus,
-              --web.listen-address=127.0.0.1:9090]
+              --web.listen-address=127.0.0.1:9090, --web.enable-admin-api]
     volumes: ["./prometheus.yml:/etc/prometheus/prometheus.yml:ro", "prometheus:/prometheus"]
   loki:
     image: grafana/loki:3.7.8

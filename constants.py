@@ -138,6 +138,9 @@ RESET_PREFERENCE = {"Manager": ("GracefulRestart", "ForceRestart"),
                     "Chassis": ("PowerCycle", "FullPowerCycle", "ForceRestart")}
 # The end states of a host that count against the rollout: halting looks at them after every wave
 FAILED_STATES = {"failed", "rolled_back", "needs_attention"}
+# Every state a host of a run can be in: the metrics push each one, 0 when no host is in it
+HOST_STATES = ("running", "untouched", "updated", "rolled_back", "failed", "needs_attention", "blocked", "skipped",
+               "incomplete")
 CAPABILITIES_ROW = ("Model", "Hosts", "Sample", "Redfish", "Types", "Services", "Actions", "SimpleUpdate",
                     "Push update", "Telemetry", "Sensors")
 STYLE = {"OK": "green", "Enabled": "green", "Connected": "green", "Warning": "yellow", "Critical": "bold red",

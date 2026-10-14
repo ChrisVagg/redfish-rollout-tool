@@ -426,6 +426,16 @@ def test_metrics_mid_run():
     assert doc["result"] == "running" and doc["waves"][0]["hosts"][0]["state"] == "running"
     text = rollout.metrics(doc)
     assert 'rollout_hosts{wave="wave 1",state="running"} 1' in text and "rollout_running 1" in text
+    # Pushed again at the end: no series of the push before vanishes, so the last value in a time range is the run as
+    # it stands; a host's info rows, whose labels change, rank by the time of its latest event
+    end = rollout.metrics(rollout.pipeline_report(None, events + [
+        {"at": at("00:10"), "host": "h1", "step": "done", "state": "failed", "detail": "aborted"},
+        {"at": at("00:10"), "host": "-", "step": "run", "state": "end"}], "run", []))
+    series = lambda t: {l.rsplit(" ", 1)[0] for l in t.splitlines() if l and not l.startswith("rollout_host_info")}
+    assert series(text) <= series(end), series(text) - series(end)
+    assert 'rollout_hosts{wave="wave 1",state="running"} 0' in end and "rollout_running 0" in end
+    info = lambda t: float(next(l for l in t.splitlines() if l.startswith("rollout_host_info")).rsplit(" ", 1)[1])
+    assert info(end) > info(text) > 0
     # Pushed mid-run, a host the run hasn't reached yet takes its versions from the plan, not "-"
     record = Path(tempfile.mkdtemp()) / "run.jsonl"
     record.write_text("".join(json.dumps(e) + "\n" for e in events))

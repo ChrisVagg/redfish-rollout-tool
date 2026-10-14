@@ -59,7 +59,7 @@ from rich.table import Column, Table
 from rich.text import Text
 
 from constants import (ACTION_ROW, ACTIONS_ROW, APPLY_TIME, BASELINE, CACHE_CA, DOTTED, FAILED_STATES, FAULTS, HOST_ROW,
-                       HOST_STEP, IMAGE_CACHE, IMAGES, INVENTORY_FILE, LEFT_OUT_ROW, NEXT_STEP, PLAN_ROW, PREFLIGHT_ROW,
+                       HOST_STATES, HOST_STEP, IMAGE_CACHE, IMAGES, INVENTORY_FILE, LEFT_OUT_ROW, NEXT_STEP, PLAN_ROW, PREFLIGHT_ROW,
                        PROPS, REPORT_SCHEMA, RESET_PREFERENCE, ROLLOUT, ROLLOUT_DEFAULTS, ROOT, RUNNING_STATES, RUNS,
                        SCENARIO, SCHEDULER_TIMEOUT, SITE, SPOOL, STEP_ROW, STYLE, TASK_TIMEOUT, VERSIONS_ROW, WAVE_ROW)
 from helpers import (block, first_of, first_real, identity, label, link, norm, obj, of, output_options, reason, sample,
@@ -1178,7 +1178,10 @@ def run(args) -> list:
 # ---- Metrics: a run's report as Prometheus metrics, pushed while it runs when PUSHGATEWAY is set ----
 
 # The report as Prometheus text: hosts by wave and state, each host's versions and time, each step's duration, every
-# check after the flash (post-check, soak, a rollback's post-check), each gate's decision, and whether the run goes on
+# check after the flash (post-check, soak, a rollback's post-check), each gate's decision, and whether the run goes on.
+# A series never vanishes between two pushes of a run, so a dashboard reading the last value in a time range reads the
+# run as it stands: every state is pushed, 0 or not, and a host's info, whose labels change as it moves on, carries the
+# time of its latest event, so the newest of its rows is the one with the highest value
 def metrics(doc) -> str:
     lines = []
 
@@ -1187,8 +1190,8 @@ def metrics(doc) -> str:
 
     drained = 0
     for w in doc["waves"]:
-        for state, n in w["totals"].items():
-            add("rollout_hosts", n, wave=w["name"], state=state)
+        for state in dict.fromkeys([*HOST_STATES, *w["totals"]]):
+            add("rollout_hosts", w["totals"].get(state, 0), wave=w["name"], state=state)
         g = w["gate"]
         if g.get("tried") is not None:
             add("rollout_gate_failed", g["failed"], wave=w["name"])
@@ -1198,7 +1201,8 @@ def metrics(doc) -> str:
             # drained and not given back: the host is out of service
             drained += any(s["step"] == "drain" and s.get("result") == "done" for s in d["steps"]) and not any(
                 s["step"] == "undrain" and s.get("result") == "done" for s in d["steps"])
-            add("rollout_host_info", 1, wave=w["name"], host=d["host"], state=d["state"], before=text(d["before"]),
+            at = datetime.fromisoformat(d["ended"]).timestamp() if d["ended"] else 0
+            add("rollout_host_info", at, wave=w["name"], host=d["host"], state=d["state"], before=text(d["before"]),
                    target=text(d["target"]), after=text(d["after"]))
             # running: the step it is in (a rollback's steps count as rollback); ended: how
             step = d["steps"][-1]["step"] if d["steps"] and d["state"] == "running" else d["state"]

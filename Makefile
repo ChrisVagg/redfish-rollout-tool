@@ -107,14 +107,17 @@ mutations:
 
 # ---- Lab ----
 # The store first, then the ingest into it: download-fw-images.sh downloads, promote-fw-images.sh checks and uploads. Then
-# every package the catalog names must be in the store, before the BMCs boot from the older build's bmc.mtd
+# every package the catalog names must be in the store, before the BMCs boot from the older build's bmc.mtd. A store
+# that just started answers before its volumes are registered, so each read is retried for 30 s
 lab-up: lab/qemu-system-arm lab/cache/tls.crt netbox-up
 	$(LAB) up --detach --wait store
 	[ -f lab/images.yaml ] && [ -f lab/baseline.yaml ] && [ -f lab/bmc.mtd ] || \
 	  { ./lab/download-fw-images.sh && ./lab/promote-fw-images.sh lab/staging/*.tar; }
 	@for f in $$(sed -n 's/.*{file: "\([^"]*\)".*/\1/p' lab/images.yaml); do \
-	  $(LAB) exec -T store wget -q --spider "http://127.0.0.1:8888/buckets/firmware/$$f" || \
-	  { echo "The store lost $$f, its volume deleted: make lab-clean lab-up ingests the newest builds again"; exit 1; }; \
+	  ok=; for i in 1 2 3 4 5 6 7 8 9 10; do \
+	    $(LAB) exec -T store wget -q --spider "http://127.0.0.1:8888/buckets/firmware/$$f" && { ok=1; break; }; sleep 3; \
+	  done; \
+	  [ -n "$$ok" ] || { echo "The store lost $$f, its volume deleted: make lab-clean lab-up ingests the newest builds again"; exit 1; }; \
 	done
 	$(LAB) up --detach --build --wait
 

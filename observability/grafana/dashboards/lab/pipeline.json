@@ -5,7 +5,7 @@
  "schemaVersion": 39,
  "editable": false,
  "time": {
-  "from": "now-30m",
+  "from": "now-24h",
   "to": "now"
  },
  "refresh": "",
@@ -130,7 +130,7 @@
      "instant": true,
      "range": false,
      "legendFormat": "{{scenario}}",
-     "expr": "max by (scenario) (rollout_scenario{site=\"$site\",pipeline=\"$pipeline\"})"
+     "expr": "max by (scenario) (last_over_time(rollout_scenario{site=\"$site\",pipeline=\"$pipeline\"}[$__range]))"
     }
    ],
    "fieldConfig": {
@@ -177,7 +177,7 @@
       "type": "prometheus",
       "uid": "prometheus"
      },
-     "expr": "sum(rollout_seconds{site=\"$site\",pipeline=\"$pipeline\"})",
+     "expr": "sum(last_over_time(rollout_seconds{site=\"$site\",pipeline=\"$pipeline\"}[$__range]))",
      "legendFormat": "",
      "refId": "A",
      "instant": true,
@@ -307,7 +307,7 @@
       "type": "prometheus",
       "uid": "prometheus"
      },
-     "expr": "(max(rollout_gate_halted{site=\"$site\",pipeline=\"$pipeline\"}) * 2 or vector(0)) + (max(rollout_running{site=\"$site\",pipeline=\"$pipeline\"}) or vector(0))",
+     "expr": "(max(last_over_time(rollout_gate_halted{site=\"$site\",pipeline=\"$pipeline\"}[$__range])) * 2 or vector(0)) + (max(last_over_time(rollout_running{site=\"$site\",pipeline=\"$pipeline\"}[$__range])) or vector(0))",
      "legendFormat": "",
      "refId": "A",
      "instant": true,
@@ -488,7 +488,7 @@
       "type": "prometheus",
       "uid": "prometheus"
      },
-     "expr": "sum(rollout_hosts{site=\"$site\",pipeline=\"$pipeline\",state=\"updated\"}) or vector(0)",
+     "expr": "sum(last_over_time(rollout_hosts{site=\"$site\",pipeline=\"$pipeline\",state=\"updated\"}[$__range])) or vector(0)",
      "legendFormat": "updated",
      "refId": "A",
      "instant": true,
@@ -499,7 +499,7 @@
       "type": "prometheus",
       "uid": "prometheus"
      },
-     "expr": "max(rollout_planned_hosts{site=\"$site\",pipeline=\"$pipeline\"}) or sum(rollout_hosts{site=\"$site\",pipeline=\"$pipeline\"})",
+     "expr": "max(last_over_time(rollout_planned_hosts{site=\"$site\",pipeline=\"$pipeline\"}[$__range])) or sum(last_over_time(rollout_hosts{site=\"$site\",pipeline=\"$pipeline\"}[$__range]))",
      "legendFormat": "of planned",
      "refId": "B",
      "instant": true,
@@ -562,7 +562,7 @@
       "type": "prometheus",
       "uid": "prometheus"
      },
-     "expr": "sum(rollout_hosts{site=\"$site\",pipeline=\"$pipeline\",state=\"rolled_back\"}) or vector(0)",
+     "expr": "sum(last_over_time(rollout_hosts{site=\"$site\",pipeline=\"$pipeline\",state=\"rolled_back\"}[$__range])) or vector(0)",
      "legendFormat": "rolled back",
      "refId": "A",
      "instant": true,
@@ -573,7 +573,7 @@
       "type": "prometheus",
       "uid": "prometheus"
      },
-     "expr": "sum(rollout_hosts{site=\"$site\",pipeline=\"$pipeline\",state=\"failed\"}) or vector(0)",
+     "expr": "sum(last_over_time(rollout_hosts{site=\"$site\",pipeline=\"$pipeline\",state=\"failed\"}[$__range])) or vector(0)",
      "legendFormat": "failed",
      "refId": "B",
      "instant": true,
@@ -636,7 +636,7 @@
       "type": "prometheus",
       "uid": "prometheus"
      },
-     "expr": "sum(rollout_hosts{site=\"$site\",pipeline=\"$pipeline\",state=\"needs_attention\"}) or vector(0)",
+     "expr": "sum(last_over_time(rollout_hosts{site=\"$site\",pipeline=\"$pipeline\",state=\"needs_attention\"}[$__range])) or vector(0)",
      "legendFormat": "needs attention",
      "refId": "A",
      "instant": true,
@@ -647,7 +647,7 @@
       "type": "prometheus",
       "uid": "prometheus"
      },
-     "expr": "sum(rollout_hosts{site=\"$site\",pipeline=\"$pipeline\",state=\"blocked\"}) or vector(0)",
+     "expr": "sum(last_over_time(rollout_hosts{site=\"$site\",pipeline=\"$pipeline\",state=\"blocked\"}[$__range])) or vector(0)",
      "legendFormat": "blocked",
      "refId": "B",
      "instant": true,
@@ -710,7 +710,7 @@
       "type": "prometheus",
       "uid": "prometheus"
      },
-     "expr": "sum(rollout_hosts{site=\"$site\",pipeline=\"$pipeline\",state=\"running\"}) or vector(0)",
+     "expr": "sum(last_over_time(rollout_hosts{site=\"$site\",pipeline=\"$pipeline\",state=\"running\"}[$__range])) or vector(0)",
      "legendFormat": "running",
      "refId": "A",
      "instant": true,
@@ -721,7 +721,7 @@
       "type": "prometheus",
       "uid": "prometheus"
      },
-     "expr": "(max(rollout_planned_hosts{site=\"$site\",pipeline=\"$pipeline\"}) - sum(rollout_hosts{site=\"$site\",pipeline=\"$pipeline\"}) or vector(0)) + (sum(rollout_hosts{site=\"$site\",pipeline=\"$pipeline\",state=\"untouched\"}) or vector(0))",
+     "expr": "(max(last_over_time(rollout_planned_hosts{site=\"$site\",pipeline=\"$pipeline\"}[$__range])) - sum(last_over_time(rollout_hosts{site=\"$site\",pipeline=\"$pipeline\"}[$__range])) or vector(0)) + (sum(last_over_time(rollout_hosts{site=\"$site\",pipeline=\"$pipeline\",state=\"untouched\"}[$__range])) or vector(0))",
      "legendFormat": "not started",
      "refId": "B",
      "instant": true,
@@ -784,7 +784,7 @@
       "type": "prometheus",
       "uid": "prometheus"
      },
-     "expr": "sum(rollout_hosts_drained{site=\"$site\",pipeline=\"$pipeline\"}) or vector(0)",
+     "expr": "sum(last_over_time(rollout_hosts_drained{site=\"$site\",pipeline=\"$pipeline\"}[$__range])) or vector(0)",
      "legendFormat": "",
      "refId": "A",
      "instant": true,
@@ -1311,7 +1311,7 @@
       "type": "prometheus",
       "uid": "prometheus"
      },
-     "expr": "sum by (wave, state) (rollout_hosts{site=\"$site\",pipeline=\"$pipeline\"})",
+     "expr": "sum by (wave, state) (last_over_time(rollout_hosts{site=\"$site\",pipeline=\"$pipeline\"}[$__range])) > 0",
      "legendFormat": "",
      "refId": "A",
      "instant": true,
@@ -1522,7 +1522,7 @@
       "type": "prometheus",
       "uid": "prometheus"
      },
-     "expr": "rollout_host_info{site=\"$site\",pipeline=\"$pipeline\"}",
+     "expr": "topk by (host) (1, last_over_time(rollout_host_info{site=\"$site\",pipeline=\"$pipeline\"}[$__range]))",
      "legendFormat": "",
      "refId": "A",
      "instant": true,
@@ -2410,7 +2410,7 @@
       "type": "prometheus",
       "uid": "prometheus"
      },
-     "expr": "max by (step) (rollout_step_seconds{site=\"$site\",pipeline=\"$pipeline\"})",
+     "expr": "max by (step) (last_over_time(rollout_step_seconds{site=\"$site\",pipeline=\"$pipeline\"}[$__range]))",
      "legendFormat": "{{step}}",
      "refId": "A",
      "instant": true,
@@ -2483,7 +2483,7 @@
       "type": "prometheus",
       "uid": "prometheus"
      },
-     "expr": "max by (host) (rollout_step_seconds{site=\"$site\",pipeline=\"$pipeline\",step=\"reset\"})",
+     "expr": "max by (host) (last_over_time(rollout_step_seconds{site=\"$site\",pipeline=\"$pipeline\",step=\"reset\"}[$__range]))",
      "legendFormat": "{{host}}",
      "refId": "A",
      "instant": true,
@@ -2802,7 +2802,7 @@
       "type": "prometheus",
       "uid": "prometheus"
      },
-     "expr": "rollout_check_ok{site=\"$site\",pipeline=\"$pipeline\"} == 0",
+     "expr": "last_over_time(rollout_check_ok{site=\"$site\",pipeline=\"$pipeline\"}[$__range]) == 0",
      "legendFormat": "",
      "refId": "A",
      "instant": true,
@@ -2875,7 +2875,7 @@
     "hide": 0,
     "refresh": 2,
     "query": {
-     "query": "query_result(label_replace(max by (pipeline) (rollout_running{site=\"$site\"}) > 0, \"name\", \"$1 · running\", \"pipeline\", \"(.+)\") or on (pipeline) label_replace(max by (pipeline) (rollout_gate_halted{site=\"$site\"}) > 0, \"name\", \"$1 · halted\", \"pipeline\", \"(.+)\") or on (pipeline) label_replace(max by (pipeline) (rollout_hosts{site=\"$site\"}), \"name\", \"$1 · passed\", \"pipeline\", \"(.+)\"))",
+     "query": "query_result(label_replace(max by (pipeline) (last_over_time(rollout_running{site=\"$site\"}[$__range])) > 0, \"name\", \"$1 · running\", \"pipeline\", \"(.+)\") or on (pipeline) label_replace(max by (pipeline) (last_over_time(rollout_gate_halted{site=\"$site\"}[$__range])) > 0, \"name\", \"$1 · halted\", \"pipeline\", \"(.+)\") or on (pipeline) label_replace(max by (pipeline) (last_over_time(rollout_hosts{site=\"$site\"}[$__range])), \"name\", \"$1 · passed\", \"pipeline\", \"(.+)\"))",
      "refId": "pipeline"
     },
     "regex": "/name=\"(?<text>[^\"]+)\".*pipeline=\"(?<value>[^\"]+)\"/",
