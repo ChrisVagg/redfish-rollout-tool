@@ -150,9 +150,20 @@
       "type": "prometheus",
       "uid": "prometheus"
      },
-     "expr": "count(redfish_up{site=\"$site\",host=~\"$host\"} == 0) or vector(0)",
-     "legendFormat": "",
+     "expr": "count((redfish_up{site=\"$site\",host=~\"$host\"} == 0) unless on (host) max by (host) (max_over_time(((rollout_host_step{site=\"$site\",host=~\"$host\"} > 0 < 10) and on (pipeline, stage) (rollout_running{site=\"$site\"} == 1) and on (pipeline, stage) (time() - push_time_seconds{job=\"rollout\",site=\"$site\"} < 1200))[1m:15s]))) or vector(0)",
+     "legendFormat": "down",
      "refId": "A",
+     "instant": false,
+     "range": true
+    },
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "count((redfish_up{site=\"$site\",host=~\"$host\"} == 0) and on (host) max by (host) (max_over_time(((rollout_host_step{site=\"$site\",host=~\"$host\"} > 0 < 10) and on (pipeline, stage) (rollout_running{site=\"$site\"} == 1) and on (pipeline, stage) (time() - push_time_seconds{job=\"rollout\",site=\"$site\"} < 1200))[1m:15s]))) or vector(0)",
+     "legendFormat": "updating",
+     "refId": "B",
      "instant": false,
      "range": true
     }
@@ -174,7 +185,32 @@
       ]
      }
     },
-    "overrides": []
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "updating"
+      },
+      "properties": [
+       {
+        "id": "thresholds",
+        "value": {
+         "mode": "absolute",
+         "steps": [
+          {
+           "color": "green",
+           "value": null
+          },
+          {
+           "color": "blue",
+           "value": 1
+          }
+         ]
+        }
+       }
+      ]
+     }
+    ]
    },
    "options": {
     "reduceOptions": {
@@ -184,9 +220,10 @@
     },
     "colorMode": "background",
     "graphMode": "none",
-    "textMode": "value"
+    "textMode": "value_and_name"
    },
-   "transparent": true
+   "transparent": true,
+   "description": "BMCs not answering Redfish. down: a real outage; updating: not answering while a pipeline updates it (its reset), from the rollout's pushed steps: a host in a step from pre-flight to undrain of a stage still running and pushed in the last 20 minutes, and a minute after"
   },
   {
    "type": "stat",
@@ -433,7 +470,7 @@
       "type": "prometheus",
       "uid": "prometheus"
      },
-     "expr": "(max by (host) (redfish_up{site=\"$site\",host=~\"$host\"})) * on (host) group_left (vendor, manufacturer, model, project, rack) redfish_host_info{site=\"$site\",host=~\"$host\"}",
+     "expr": "(max by (host) (redfish_up{site=\"$site\",host=~\"$host\"}) + on (host) (2 * (max by (host) (max_over_time(((rollout_host_step{site=\"$site\",host=~\"$host\"} > 0 < 10) and on (pipeline, stage) (rollout_running{site=\"$site\"} == 1) and on (pipeline, stage) (time() - push_time_seconds{job=\"rollout\",site=\"$site\"} < 1200))[1m:15s])) > bool 0) or 0 * max by (host) (redfish_up{site=\"$site\",host=~\"$host\"}))) * on (host) group_left (vendor, manufacturer, model, project, rack) redfish_host_info{site=\"$site\",host=~\"$host\"}",
      "legendFormat": "",
      "refId": "A",
      "instant": true,
@@ -525,7 +562,7 @@
      "format": "table"
     }
    ],
-   "description": "One row per BMC: the equipment (the inventory's vendor, project and rack, the BMC's Manufacturer and Model), answering Redfish, its worst health, how many components aren't OK, how far its readings are past their thresholds, time since its last reset, how long its crawl took, how many resources it has and how many GETs failed (what they would have read is missing). A host opens its own dashboard.",
+   "description": "One row per BMC: the equipment (the inventory's vendor, project and rack, the BMC's Manufacturer and Model), answering Redfish, its worst health, how many components aren't OK, how far its readings are past their thresholds, time since its last reset, how long its crawl took, how many resources it has and how many GETs failed (what they would have read is missing). A host opens its own dashboard. Redfish: up, down, or updating: not answering while a pipeline updates it (its reset), from the rollout's pushed steps: a host in a step from pre-flight to undrain of a stage still running and pushed in the last 20 minutes, and a minute after.",
    "transformations": [
     {
      "id": "merge",
@@ -611,6 +648,16 @@
             "text": "down",
             "color": "red",
             "index": 1
+           },
+           "2": {
+            "text": "updating",
+            "color": "blue",
+            "index": 2
+           },
+           "3": {
+            "text": "up",
+            "color": "green",
+            "index": 3
            }
           }
          }
@@ -800,14 +847,14 @@
       "type": "prometheus",
       "uid": "prometheus"
      },
-     "expr": "redfish_up{site=\"$site\",host=~\"$host\"}",
+     "expr": "max by (host) (redfish_up{site=\"$site\",host=~\"$host\"}) + on (host) (2 * (max by (host) (max_over_time(((rollout_host_step{site=\"$site\",host=~\"$host\"} > 0 < 10) and on (pipeline, stage) (rollout_running{site=\"$site\"} == 1) and on (pipeline, stage) (time() - push_time_seconds{job=\"rollout\",site=\"$site\"} < 1200))[1m:15s])) > bool 0) or 0 * max by (host) (redfish_up{site=\"$site\",host=~\"$host\"}))",
      "legendFormat": "{{host}}",
      "refId": "A",
      "instant": false,
      "range": true
     }
    ],
-   "description": "Each BMC over time: a firmware update shows as the reset's gap",
+   "description": "Each BMC over time: up, down, or updating: not answering while a pipeline updates it (its reset), from the rollout's pushed steps: a host in a step from pre-flight to undrain of a stage still running and pushed in the last 20 minutes, and a minute after",
    "fieldConfig": {
     "defaults": {
      "mappings": [
@@ -823,6 +870,16 @@
          "text": "down",
          "color": "red",
          "index": 1
+        },
+        "2": {
+         "text": "updating",
+         "color": "blue",
+         "index": 2
+        },
+        "3": {
+         "text": "up",
+         "color": "green",
+         "index": 3
         }
        }
       }

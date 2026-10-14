@@ -123,6 +123,33 @@ database and Valkey passwords, and the `admin` login's `SUPERUSER_PASSWORD` (git
 each host's entry as NetBox gave it, and a stage refuses a host whose entry changed since: the file's sha256 can't pin
 what a service holds. The catalog and baseline stay files, reviewed in git. Screenshots: [The lab in NetBox](#the-lab-in-netbox).
 
+### The state database
+
+The rollout's state lives in PostgreSQL on `127.0.0.1:5432` ([state/](state/docker-compose.yaml)), started by
+`make lab-up` or `make state-up`: a lock per host, and every event of every run. [Host locks and
+state](#host-locks-and-state) says how the rollout uses them. [state/schema.sql](state/schema.sql) makes the tables
+and accounts on the first start:
+
+| Table or view | What it holds |
+|---|---|
+| `host_locks` | the one pipeline that may touch a host: its site, pipeline, stage, and since when |
+| `events` | every event of every run, whole, as JSON, with its site, pipeline, stage, wave, host, step and state |
+| `host_state` | a view: each host's latest event in each pipeline |
+
+| Account | Used by | May |
+|---|---|---|
+| `rollout` | the owner: `make state`, `make unlock`, the retention | everything |
+| `redfish_rollout_sa` | `rollout.py run --yes`, through `STATE_DB`, which make sets | add events, never change or delete one; take and give back locks |
+| `grafana` | Grafana's **State** data source | read the three |
+| `viewer` | pgAdmin | read every table and view, and change nothing |
+
+Two more services run beside it. `retention` deletes the events older than 15 days every hour (`RETENTION_DAYS`), as
+Prometheus and Loki keep 15 days; it never deletes a lock. pgAdmin, on `http://127.0.0.1:5050`, is there to look at
+the schema and the tables: log in as `admin@example.com` with `PGADMIN_PASSWORD`, and the server **Redfish state** is
+there, connected as `viewer`. `make` makes `state/.state.env` once, with every account's password and pgAdmin's login,
+random (git-ignored, never printed). `make state` lists the locks, then each host's latest state; `make unlock
+HOST=...` gives a lock back.
+
 ## How the rollout works
 
 ![The lab rollout: plan, canary and waves on the ten emulated BMCs, step by step](docs/lab-rollout.svg)
@@ -180,10 +207,14 @@ Every step goes into `<site>/runs/<pipeline>-<stage>.jsonl`, its intent before i
 stopped halfway still shows where each host was. Each pipeline keeps its plan and reports in
 `<site>/runs/pipeline-<time>/`.
 
+`make dry-run` makes no firmware changes. It still reads the BMCs, saves the plan and the stages' HTML files, and
+publishes the plan and its pre-flight checks to Loki when `LOKI` is set (the lab Makefile sets it). A successful dry
+run has no per-host execution records and does not produce the combined `report.json` or `report.html`.
+
 ### Host locks and state
 
-The state database ([state/](state/schema.sql): PostgreSQL on `127.0.0.1:5432`, started by `make lab-up` or
-`make state-up`) holds a lock per host, so two pipelines never update one host at once, and every event of every run:
+The [state database](#the-state-database) holds a lock per host, so two pipelines never update one host at once, and
+every event of every run:
 
 - Before its first step, `rollout.py run --yes` takes the lock of every host of its stage in one transaction, or of
   none: a host another pipeline holds stops the stage, which then holds nothing. Without the database it doesn't
@@ -194,26 +225,24 @@ The state database ([state/](state/schema.sql): PostgreSQL on `127.0.0.1:5432`, 
 - The waves stage takes its hosts' locks when it starts, not at the plan: another pipeline that took one since stops it.
 - Every event of the run record also goes into `events`, whole, as JSON. It is append-only: the rollout's account,
   `redfish_rollout_sa`, may add rows but not change or delete one. `host_state`, a view, is each host's latest event
-  in each pipeline. `make state` lists the locks, then each host's latest state.
-- Every hour a retention service deletes the events older than 15 days (`RETENTION_DAYS` in
-  [state/docker-compose.yaml](state/docker-compose.yaml)), as Prometheus and Loki keep 15 days. Locks never expire.
+  in each pipeline. Events are kept 15 days; a lock, until it is given back.
 - Grafana reads it as `grafana`, an account that may only read: the Pipeline dashboard's **Locks**, and the Host
   dashboard's **Every firmware update** of the host.
 
-To look at the schema and the tables, pgAdmin runs beside it on `http://127.0.0.1:5050` (`make state-up`): log in as
-`admin@example.com` with `PGADMIN_PASSWORD`, and the server **Redfish state** is there, connected as `viewer`, which
-may read every table and view and change nothing.
+Two pipelines after one host, as run on the lab: pipeline A updated 127.1.0.1, and pipeline B, started 3 s later with
+the same plan, reached its canary stage while A held the lock:
 
-Its four accounts' passwords, and pgAdmin's login, are random, made once into `state/.state.env` (git-ignored, never
-printed): `rollout`, the owner, for `make state`, `make unlock` and the retention; `redfish_rollout_sa`, the
-rollout's; `grafana`, Grafana's; `viewer`, pgAdmin's.
+```
+━━━ stage canary · 15:01:34 UTC ━━━
+locked: 127.1.0.1 by pipeline-20261014T150128Z. One pipeline at a time touches a host: wait for it to end, or make unlock HOST=... once a person checked the host
+━━━ stage canary: FAILED, exit 1 after 2s ━━━
+```
+
+B took no lock and wrote no event. A went on, and gave its lock back when its canary stage ended; until then the
+Pipeline dashboard's **Locks** showed 127.1.0.1 held by A, and the step it was in.
 
 Nothing resumes a stopped run yet: it is planned and run again once its hosts are checked and unlocked, and pre-flight
 skips the hosts already on the target ([Not built yet](PROD.md#not-built-yet)).
-
-`make dry-run` makes no firmware changes. It still reads the BMCs, saves the plan and the stages' HTML files, and
-publishes the plan and its pre-flight checks to Loki when `LOKI` is set (the lab Makefile sets it). A successful dry
-run has no per-host execution records and does not produce the combined `report.json` or `report.html`.
 
 ## How an update runs on the lab's BMCs
 
@@ -444,7 +473,7 @@ same crawl is the exporters of [Observability](#observability), which serve each
 | Pushgateway `:9091` | Where `rollout.py run` pushes its report as metrics after every recorded event (`PUSHGATEWAY`): hosts by wave and state, versions, every step's duration, every check after the flash, each gate. A plan that blocks every host pushes its blocked hosts and the halt, as stage `plan`. Best effort: if it is down, the rollout logs it once and goes on. It holds each run's latest push in memory, until deleted or restarted; the dashboards don't depend on it. They read Prometheus's history: the Pipeline dashboard lists the pipelines with data in the selected time range (24 hours by default) and shows each as its last push in that range left it, so a pipeline from days ago opens the same as a live one, for the 15 days Prometheus keeps it. That holds because no series vanishes between two pushes of a run: every state is pushed, 0 or not, and a host's info, whose labels change as it moves on, carries the time of its latest event, so the dashboard keeps its newest row. |
 | Loki `:3100` | Where `rollout.py run` sends every event of its run record as it writes it (`LOKI`): each step of each host with its detail, the Task's messages, the checks. Labelled only `job` and `site`; the pipeline, stage, wave, host and step are fields of the JSON line, which LogQL's `json` reads, so it stays one stream per site however many hosts and pipelines there are. Keeps 15 days, best effort like the Pushgateway. |
 | Prometheus `:9090` | Scrapes the exporters and Pushgateway, labels each exporter's metrics with its `site`, keeps 15 days. Its admin API is on, on 127.0.0.1 only, so a pipeline's history can be deleted, and the Pipeline dashboard no longer lists it: `curl -X POST -g 'http://127.0.0.1:9090/api/v1/admin/tsdb/delete_series?match[]={pipeline="<pipeline>"}'`, then `curl -X POST http://127.0.0.1:9090/api/v1/admin/tsdb/clean_tombstones` frees the space. Its events stay in Loki. |
-| Grafana `:3000` | A **Lab** and a **Prod** folder, three shared dashboards in each, fixed to its site, plus Update details in Lab. **Fleet manager**, every BMC: BMCs answering, worst health, readings past critical, a row per host with its equipment (vendor, manufacturer, model, project, rack) and failed GETs that opens its own dashboard, Redfish up over time (a firmware update shows as the reset's gap), firmware by hardware model and version (two versions of one component on one model is drift) and by host with Updateable, Push and Pull, the readings nearest their upper critical, everything not OK, the BMCs' own memory and storage. **Host**, one BMC: what it is, its firmware inventory and what Redfish can update and how, the health of every component, worst first, then a row each for Chassis · Thermal, Chassis · Power, Systems and Managers (the BMC itself): a chart per kind of reading, in its unit, with min, max, mean and last in the legend and each reading's caution and critical thresholds as dashed lines (orange, red). **Pipeline**, per pipeline, from both Prometheus and Loki, laid out as an operations page (no auto-refresh, as a finished pipeline doesn't change: the pipeline list says which is running, passed or halted, and the Result panel's Follow live link refreshes every 30 s): the run (site, component, target, `OperationApplyTime`, the scenario `make fault` ran or none, elapsed, how fresh the last event is); the verdict, PASSED, RUNNING or HALTED, with how the latest stage ended in words; five counts (updated and verified, rolled back and failed, needing a person and blocked, running and not started, still drained); the plan, first as in a pipeline (the policy it used, and every host's pre-flight verdict with its wave, running version, target, its update's activation, whether the host restarts, and the rollback the rollout would carry out), beside the gate after the canary and each wave, with what halts it (any failure, or over `failure_rate`), and each wave's progress; the host evidence, one row per host with its wave, its versions before and after, and each step's outcome, numbered as a host goes through them (1 pre-flight, 2 drain, 3 update with its Task message, 4 reset with its seconds, 5 post-check and a rollback, 6 undrain, then the soak and the outcome), each host linking to its every event and its own dashboard; checks and recovery counted per numbered step beside the decision log, the plan saved first. Below: one host's every event (opened from its link in the host evidence), every host's step on a timeline, the BMCs answering Redfish, the longest steps and each reset's time, every error and every failed check. The **Gate markers** switch at the top draws each gate's decision on the timelines. **Update details** (the lab only): how a BMC firmware update runs here, four facts checked against the DMTF schemas and on a lab BMC (`OnReset`, the Manager's reset alone, a Task and no Job, nothing staged to cancel), the rollback per resource the rollout updates, and per pipeline, stage by stage: the plan (every host's pre-flight verdict, and each of its checks against every host, ✓ or ✗ with why), step 1's pre-flight again on a fresh read with the BMC's identity and its checks, then the drain, the push, the Task, the reset and each host's rollback. |
+| Grafana `:3000` | Three data sources: Prometheus, Loki, and the state database as **State**, read with an account that may only read. A **Lab** and a **Prod** folder, three shared dashboards in each, fixed to its site, plus Update details in Lab. **Fleet manager**, every BMC: BMCs answering, worst health, readings past critical, a row per host with its equipment (vendor, manufacturer, model, project, rack) and failed GETs that opens its own dashboard, Redfish up, down or updating over time (a firmware update's reset shows as updating, not down), firmware by hardware model and version (two versions of one component on one model is drift) and by host with Updateable, Push and Pull, the readings nearest their upper critical, everything not OK, the BMCs' own memory and storage. **Host**, one BMC: what it is, its firmware inventory and what Redfish can update and how, the health of every component, worst first, then a row each for Chassis · Thermal, Chassis · Power, Systems and Managers (the BMC itself): a chart per kind of reading, in its unit, with min, max, mean and last in the legend and each reading's caution and critical thresholds as dashed lines (orange, red), and every firmware update of the host, from the state database. **Pipeline**, per pipeline, from both Prometheus and Loki, laid out as an operations page (no auto-refresh, as a finished pipeline doesn't change: the pipeline list says which is running, passed or halted, and the Result panel's Follow live link refreshes every 30 s): the run (site, component, target, `OperationApplyTime`, the scenario `make fault` ran or none, elapsed, how fresh the last event is); the verdict, PASSED, RUNNING or HALTED, with how the latest stage ended in words; five counts (updated and verified, rolled back and failed, needing a person and blocked, running and not started, still drained); the plan, first as in a pipeline (the policy it used, and every host's pre-flight verdict with its wave, running version, target, its update's activation, whether the host restarts, and the rollback the rollout would carry out), beside the gate after the canary and each wave, with what halts it (any failure, or over `failure_rate`), and each wave's progress; the host evidence, one row per host with its wave, its versions before and after, and each step's outcome, numbered as a host goes through them (1 pre-flight, 2 drain, 3 update with its Task message, 4 reset with its seconds, 5 post-check and a rollback, 6 undrain, then the soak and the outcome), each host linking to its every event and its own dashboard; checks and recovery counted per numbered step beside the decision log, the plan saved first. Below: one host's every event (opened from its link in the host evidence), every host's step on a timeline, the BMCs answering Redfish, the longest steps and each reset's time, every error and every failed check, and the locks as they are now, from the state database. The **Gate markers** switch at the top draws each gate's decision on the timelines. **Update details** (the lab only): how a BMC firmware update runs here, four facts checked against the DMTF schemas and on a lab BMC (`OnReset`, the Manager's reset alone, a Task and no Job, nothing staged to cancel), the rollback per resource the rollout updates, and per pipeline, stage by stage: the plan (every host's pre-flight verdict, and each of its checks against every host, ✓ or ✗ with why), step 1's pre-flight again on a fresh read with the BMC's identity and its checks, then the drain, the push, the Task, the reset and each host's rollback. |
 
 Every panel, as screenshots: [the lab](#the-lab-in-grafana) and [the production fleet](PROD.md#the-production-fleet-in-grafana).
 
@@ -524,6 +553,12 @@ supplies behind it, and every component is OK; [the production screenshots](PROD
 
 Every BMC at a glance: how many answer, the worst health, the shortest uptime and the longest crawl; a row per host
 with its equipment, rack and health; and when each BMC answered Redfish, where every firmware update shows as its reset.
+
+A BMC that doesn't answer is **down**, or **updating** (blue) when a pipeline is updating it: the rollout's pushed
+steps put it in a step from pre-flight to undrain, of a stage still running that pushed in the last 20 minutes, or
+did a minute ago, as the exporter takes a few seconds to see a BMC back. Not answering counts the two apart, so a
+reset during an update isn't an outage, and a host waiting for a later wave, or left by a run that crashed, still
+shows down.
 
 ![Lab · Fleet manager: the counts, every host, and Redfish answering](docs/grafana/lab/fleet.png)
 
