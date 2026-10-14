@@ -21,6 +21,7 @@ only, no vendor Oem code.
 | [poller.py](poller.py) | Reads every BMC (health, firmware, inventory, sensors) into views, or serves it as Prometheus metrics. Read-only |
 | [lab/](lab/) | The emulated BMCs, the image store (SeaweedFS) and the image cache (nginx) |
 | [observability/](observability/docker-compose.yaml) | Exporters, Pushgateway, Loki, Prometheus, Grafana |
+| [state/](state/schema.sql) | PostgreSQL, the rollout state: a lock per host and every event of every run, 15 days; a Grafana data source; pgAdmin on http://127.0.0.1:5050 to look at it |
 
 ## The rollout
 
@@ -47,6 +48,9 @@ Every host goes through six steps; the hosts of a wave run in parallel:
 
 Each step is recorded before and after it runs, in `<site>/runs/`. Detail: [LAB.md](LAB.md#how-the-rollout-works).
 
+A stage first takes the lock of every host it will touch, in the state database, or none: one pipeline at a time
+touches a host. A host left `needs_attention` keeps its lock until a person runs `make unlock`.
+
 ## A real run
 
 All ten lab BMCs: the canary, then waves of 3 and 6, every gate passed.
@@ -69,7 +73,7 @@ GRAFANA_ADMIN_PASSWORD=...
 ```sh
 make setup        # venv
 make test         # the unit tests, no BMC needed
-make lab-up       # NetBox, the image store, OpenBMC's two newest builds, 10 BMCs (~10 min)
+make lab-up       # NetBox, the state database, the image store, OpenBMC's two newest builds, 10 BMCs (~10 min)
 make monitor-up   # exporters, Pushgateway, Loki, Prometheus, Grafana on http://127.0.0.1:3000
 make collect      # read every BMC; then make health, make firmware, ...
 make dry-run      # plan, canary, waves; no firmware changes
@@ -89,14 +93,14 @@ the lab back, swap the commented line in `lab/baseline.yaml` and run `make updat
 
 | Command | What it checks |
 |---|---|
-| `make test` | 22 tests, no BMC: pre-flight, post-check, rollback, gates, the frozen plan, the ingest gate, the image cache, on recorded Redfish data. `make update` runs it first |
-| `make mutations` | breaks 27 safety rules one at a time; every break fails a test |
+| `make test` | 24 tests, no BMC: pre-flight, post-check, rollback, gates, the frozen plan, the ingest gate, the image cache, on recorded Redfish data; host locks and append-only events, on the state database. `make update` runs it first |
+| `make mutations` | breaks 31 safety rules one at a time; every break fails a test |
 | `make fault SCENARIO=…` | the real pipeline on the lab, with a fault injected |
 
 ## Not built yet
 
 - An A/B bank switch as the rollback, `Activate`, staged images, Jobs
-- Host locks, and resuming a stopped run: a stopped pipeline is planned again
+- Resuming a stopped run: a stopped pipeline is planned again, once its hosts are checked and unlocked
 - Limits per PDU, fabric pod or capacity; rolling out ring by ring
 - A sha256 check of an image a BMC pulls
 - A rollout API: the CLI only
@@ -125,6 +129,9 @@ lab/                the emulated BMCs: Dockerfile, docker-compose.yaml, scenario
 prod/               the real fleet: baseline.yaml, policy.yaml; inventory.yaml and .env stay local
 netbox/             Compose for NetBox, the lab inventory's source of truth; seed.py loads lab/inventory.yaml into
                     it once; .netbox.env, its secrets and the tools' read-only token, stays local
+state/              Compose for PostgreSQL, the rollout state, its 15-day retention, and pgAdmin; schema.sql: events,
+                    host_state, host_locks and the accounts redfish_rollout_sa, grafana and viewer; .state.env, their
+                    passwords, stays local
 observability/      Compose for the exporters, Pushgateway, Loki, Prometheus and Grafana; loki/loki.yaml; a Lab and a
                     Prod dashboard folder;
                     grafana/grafana.ini; grafana/.grafana.env, Grafana's admin account, stays local;

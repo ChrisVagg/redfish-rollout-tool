@@ -365,6 +365,44 @@ def test_gate():
         "halted": True, "failed": 1, "tried": 2, "strict": False}
 
 
+# A lock per host in the state database: a stage takes the locks of all its hosts or of none, so two pipelines never
+# touch one host; at its end it gives them back, but a host left for a person keeps its lock. Events are append-only to
+# the rollout's account, and a host's state is its latest. Needs the state database (make state-up), whose STATE_DB
+# make test sets: skipped without it
+def test_host_locks():
+    try:
+        db = rollout.state_db()
+    except SystemExit as e:
+        return str(e)
+    a, b, h1, h2, h3 = (f"test-{os.getpid()}-{n}" for n in ("a", "b", "h1", "h2", "h3"))
+    try:
+        assert rollout.lock(db, a, "canary", [h1, h2]) == []
+        assert rollout.lock(db, b, "canary", [h3, h2]) == [(h2, a)]  # h2 is a's: b takes none, not even h3
+        assert rollout.lock(db, b, "canary", [h3]) == []
+        # a ends: h1 updated gives its lock back, h2 left for a person keeps it; h3 is b's, not a's to give back
+        outcomes = [{"host": h1, "state": "updated"}, {"host": h2, "state": "needs_attention"}]
+        assert rollout.release(db, a, [h1, h2, h3], outcomes) == [h2]
+        assert rollout.lock(db, b, "waves", [h1]) == []
+        assert rollout.lock(db, b, "waves", [h2, h3]) == [(h2, a), (h3, b)]  # a lock is held, even by its own pipeline
+        event = {"pipeline": a, "host": h1, "stage": "canary", "wave": "canary", "step": "update", "state": "start",
+                 "at": "2026-10-14T10:00:00+00:00", "task": {"messages": []}}
+        with db.transaction():  # rolled back: a test's events never reach the history
+            rollout.save_event(db, event, {})
+            rollout.save_event(db, {**event, "step": "done", "state": "updated", "detail": "post-check passed"}, {})
+            assert db.execute("SELECT step, state, detail FROM host_state WHERE pipeline = %s AND host = %s",
+                              (a, h1)).fetchall() == [("done", "updated", "post-check passed")]
+            assert db.execute("SELECT count(*) FROM events WHERE pipeline = %s", (a,)).fetchone() == (2,)
+            raise rollout.psycopg.Rollback
+        for change in ("UPDATE events SET state = 'updated'", "DELETE FROM events"):
+            try:
+                db.execute(f"{change} WHERE pipeline = %s", (a,))
+                raise AssertionError(f"the rollout's account may {change.split()[0]} events")
+            except rollout.psycopg.errors.InsufficientPrivilege:
+                pass
+    finally:
+        db.execute("DELETE FROM host_locks WHERE pipeline = ANY(%s)", ([a, b],))
+
+
 # NetBox's devices as inventory.yaml lists servers, page after page: a device without an out-of-band IP isn't read
 def test_netbox_inventory():
     device = {"display": "bmc1", "name": "bmc1", "oob_ip": {"address": "127.1.0.1/32"}, "tenant": {"name": "lab"},
@@ -563,8 +601,8 @@ if __name__ == "__main__":
     for name, test in list(globals().items()):
         if name.startswith("test_"):
             try:
-                test()
-                print(f"ok    {name}")
+                skipped = test()  # a test that can't run returns why
+                print(f"skip  {name}: {skipped}" if skipped else f"ok    {name}")
             except Exception as e:
                 failed += 1
                 print(f"FAIL  {name}: {type(e).__name__}: {e}")

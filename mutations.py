@@ -58,6 +58,8 @@ BREAKS = [  # (what a careless edit does, the line as it is, the line broken, th
      "test_metrics_mid_run"),
     ("a host changed in the inventory runs", 'if current.get(h) != saved["servers"].get(h)]', "if False]",
      "test_frozen_plan"),
+    ("a held lock let through", "if taken == set(hosts):", "if True:", "test_host_locks"),
+    ("a host left for a person unlocked", 'if o["state"] == "needs_attention")', "if False)", "test_host_locks"),
 ]
 
 if __name__ == "__main__":

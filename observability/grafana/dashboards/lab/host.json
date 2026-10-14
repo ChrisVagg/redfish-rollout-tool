@@ -2646,6 +2646,102 @@
     }
    },
    "transparent": true
+  },
+  {
+   "type": "row",
+   "title": "Firmware updates: the state database",
+   "collapsed": false,
+   "panels": [],
+   "id": 28,
+   "gridPos": {
+    "x": 0,
+    "y": 88,
+    "w": 24,
+    "h": 1
+   }
+  },
+  {
+   "type": "table",
+   "title": "Every firmware update of $host",
+   "description": "From the state database's events, whatever the time range: each time a pipeline ended an update of this host, newest first, for as long as the database keeps events (RETENTION_DAYS, 15). before: the version it ran, target: the one approved, running: the one it ran after.",
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "state"
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "state"
+     },
+     "refId": "A",
+     "format": "table",
+     "rawQuery": true,
+     "editorMode": "code",
+     "rawSql": "SELECT e.at AS ended, e.pipeline, e.wave,\n  (SELECT r.event->>'component' FROM events r WHERE r.pipeline = e.pipeline AND r.stage = e.stage\n     AND r.host = '-' AND r.step = 'run' AND r.state = 'start' LIMIT 1) AS component,\n  e.event->>'before' AS before, e.event->>'target' AS target, e.event->>'running' AS running,\n  e.state AS result, e.event->>'detail' AS detail\nFROM events e\nWHERE e.site = '$site' AND e.host = '$host' AND e.step = 'done'\nORDER BY e.at DESC"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "noValue": "-",
+     "custom": {
+      "minWidth": 60
+     }
+    },
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "result"
+      },
+      "properties": [
+       {
+        "id": "mappings",
+        "value": [
+         {
+          "type": "value",
+          "options": {
+           "updated": {
+            "color": "#559f77",
+            "index": 0
+           },
+           "rolled_back": {
+            "color": "#d6a45a",
+            "index": 1
+           },
+           "failed": {
+            "color": "#bb626d",
+            "index": 2
+           },
+           "needs_attention": {
+            "color": "#bb626d",
+            "index": 3
+           }
+          }
+         }
+        ]
+       },
+       {
+        "id": "custom.cellOptions",
+        "value": {
+         "type": "color-text"
+        }
+       }
+      ]
+     }
+    ]
+   },
+   "options": {
+    "showHeader": true,
+    "cellHeight": "sm"
+   },
+   "id": 29,
+   "gridPos": {
+    "x": 0,
+    "y": 89,
+    "w": 24,
+    "h": 8
+   }
   }
  ]
 }

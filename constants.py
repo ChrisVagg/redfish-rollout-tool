@@ -40,7 +40,7 @@ SPOOL = SITE / "spool"
 # Lab testing: the bad-update scenario a pipeline runs (lab/scenario.sh sets it), a label on its metrics; none otherwise
 SCENARIO = os.environ.get("SCENARIO") or "none"
 CACHE_CA = SITE / "cache" / "tls.crt"  # the cache's certificate when it is self-signed, as the lab's
-RUNS = SITE / "runs"  # the record of each rollout run: runs/<run id>.jsonl, one line per event
+RUNS = SITE / "runs"  # the record of each rollout run: runs/<pipeline>-<stage>.jsonl, one line per event
 ROLLOUT = SITE / "policy.yaml"  # how firmware rolls out on the site: canary, waves, gates
 # The rollout policy when the site has none, each value overridable in <site>/policy.yaml or by an option:
 #   canary_per_model  hosts of each hardware model that go first (inventory hosts marked canary: true first)
@@ -129,9 +129,11 @@ HOST_STEP = {"untouched": 0, "pre-flight": 1, "drain": 2, "update": 3, "reset": 
              "skipped": 15, "incomplete": 16}
 NEXT_STEP = {"failed": "the old firmware still runs: read the task's messages before trying again",
              "rolled_back": "back on the version from before, verified: find out why the new one failed first",
-             "needs_attention": "not verified: check the BMC answers and which version it runs, then give it back",
+             "needs_attention": "not verified: check the BMC answers and which version it runs, then give it back; "
+                                "its lock stays until make unlock",
              "blocked": "pre-flight blocked it: clear the reasons, then plan again",
-             "incomplete": "the run stopped during it: check the BMC before anything else"}
+             "incomplete": "the run stopped during it: check the BMC before anything else; its lock stays until "
+                           "make unlock"}
 # The reset types that activate new firmware, most preferred first: graceful before forced
 RESET_PREFERENCE = {"Manager": ("GracefulRestart", "ForceRestart"),
                     "ComputerSystem": ("GracefulRestart", "ForceRestart", "PowerCycle"),

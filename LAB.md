@@ -176,9 +176,40 @@ missing image, a sha256 mismatch, an image over `MaxImageSizeBytes`, no rollback
 to reinstall, unless `--accept-no-rollback`; an A/B bank doesn't count, as switching banks isn't built), a reset that
 restarts the host with no drain configured, a disabled update service, health not OK, and failed jobs.
 
-Every step goes into `<site>/runs/<run id>.jsonl`, its intent before it and its result after, so a run stopped halfway
-still shows where each host was. The records explain what happened; they don't resume a run or lock a host: a stopped
-pipeline is planned and run again, and pre-flight skips the hosts already on the target ([Not built yet](PROD.md#not-built-yet)). Each pipeline keeps its plan and reports in `<site>/runs/pipeline-<time>/`.
+Every step goes into `<site>/runs/<pipeline>-<stage>.jsonl`, its intent before it and its result after, so a run
+stopped halfway still shows where each host was. Each pipeline keeps its plan and reports in
+`<site>/runs/pipeline-<time>/`.
+
+### Host locks and state
+
+The state database ([state/](state/schema.sql): PostgreSQL on `127.0.0.1:5432`, started by `make lab-up` or
+`make state-up`) holds a lock per host, so two pipelines never update one host at once, and every event of every run:
+
+- Before its first step, `rollout.py run --yes` takes the lock of every host of its stage in one transaction, or of
+  none: a host another pipeline holds stops the stage, which then holds nothing. Without the database it doesn't
+  start. A dry run takes no lock.
+- At the stage's end it gives them back, those of the hosts a halt left untouched too. A host left `needs_attention`
+  keeps its lock, and a run that stopped halfway (a crash, Ctrl-C) keeps all of them, since a host may be mid-flash.
+  A lock never expires: a person checks the host, then runs `make unlock HOST=...`.
+- The waves stage takes its hosts' locks when it starts, not at the plan: another pipeline that took one since stops it.
+- Every event of the run record also goes into `events`, whole, as JSON. It is append-only: the rollout's account,
+  `redfish_rollout_sa`, may add rows but not change or delete one. `host_state`, a view, is each host's latest event
+  in each pipeline. `make state` lists the locks, then each host's latest state.
+- Every hour a retention service deletes the events older than 15 days (`RETENTION_DAYS` in
+  [state/docker-compose.yaml](state/docker-compose.yaml)), as Prometheus and Loki keep 15 days. Locks never expire.
+- Grafana reads it as `grafana`, an account that may only read: the Pipeline dashboard's **Locks**, and the Host
+  dashboard's **Every firmware update** of the host.
+
+To look at the schema and the tables, pgAdmin runs beside it on `http://127.0.0.1:5050` (`make state-up`): log in as
+`admin@example.com` with `PGADMIN_PASSWORD`, and the server **Redfish state** is there, connected as `viewer`, which
+may read every table and view and change nothing.
+
+Its four accounts' passwords, and pgAdmin's login, are random, made once into `state/.state.env` (git-ignored, never
+printed): `rollout`, the owner, for `make state`, `make unlock` and the retention; `redfish_rollout_sa`, the
+rollout's; `grafana`, Grafana's; `viewer`, pgAdmin's.
+
+Nothing resumes a stopped run yet: it is planned and run again once its hosts are checked and unlocked, and pre-flight
+skips the hosts already on the target ([Not built yet](PROD.md#not-built-yet)).
 
 `make dry-run` makes no firmware changes. It still reads the BMCs, saves the plan and the stages' HTML files, and
 publishes the plan and its pre-flight checks to Loki when `LOKI` is set (the lab Makefile sets it). A successful dry
@@ -302,7 +333,7 @@ hit every host, so the canary fails and the waves never run:
 | `unhealthy` | The new firmware flashes and boots, then fails the post-check (`--fault unhealthy`, where a health regression would show) | a real rollback: reflash the version before, check again | `rolled_back` |
 | `rejected` | The BMC refuses the image (the payload is cut to 8 MiB on its way): its task ends in `Exception` | no reset, the old firmware still runs: nothing to roll back | `failed` |
 | `bad-checksum` | The file doesn't match the catalog's sha256 | pre-flight blocks every host; the plan stage fails | `blocked` |
-| `no-return` | The BMC isn't back within the reset timeout (45 s; a reset takes about 4.5 min) | the rollback reinstalls the version before, but its reset times out too: nothing verified, left for a person | `needs_attention` |
+| `no-return` | The BMC isn't back within the reset timeout (45 s; a reset takes about 4.5 min) | the rollback reinstalls the version before, but its reset times out too: nothing verified, left for a person, locked until `make unlock` | `needs_attention` |
 
 The report of `silent-fail`
 
@@ -345,7 +376,7 @@ another canary. `docker compose -f lab/docker-compose.yaml restart bmc1` clears 
 
 ## Test-driven development
 
-`make test` runs 22 tests in [test_rollout.py](test_rollout.py), with no BMC. It tests the decisions that keep a
+`make test` runs 24 tests in [test_rollout.py](test_rollout.py), with no BMC. It tests the decisions that keep a
 bad image from spreading, on real Redfish data: the lab BMC as a collect saved it
 ([fixtures/openbmc-gb200.json](fixtures/openbmc-gb200.json)), with one fact changed per case.
 
@@ -358,6 +389,7 @@ bad image from spreading, on real Redfish data: the lab BMC as a collect saved i
 | The gate (`gate`) | any failure halts the canary and the strict waves; a later wave halts over `failure_rate`, exactly `failure_rate` passes; a host that failed its soak halts any wave; blocked and skipped hosts were never tried |
 | The ingest gate (`lab/promote-fw-images.sh`) | a package signed with the pinned key is uploaded and written into the catalog; one without its image's signature, with its image changed after signing, without a required file, signed with another key, or not signed at all, is refused, and nothing reaches the store |
 | The image cache (`image_problems`) | an image fetched from a real HTTP server into the agent's copy and checked; one the cache doesn't have, or bytes that don't match, block, and the bad copy is deleted |
+| Host locks and events (`lock`, `release`, `save_event`) | a stage takes every host's lock or none: a host another pipeline holds stops it, and it keeps none of the others; at its end it gives them back, but a host left `needs_attention` keeps its own; a lock holds even against its own pipeline; the rollout's account can't change or delete an event; a host's state is its latest event. Runs against the state database; skipped without it |
 | The plan, update methods, metrics, the exporter | waves per model and rack; canaries keep to the rack limit; push or pull against what the BMC allows; metrics mid-run; a plan that blocks every host still ends in Loki and the Pushgateway; one series per sensor |
 
 Only the network is replaced, in `run_host`: the read and the update, which need a BMC. Everything that decides runs as
@@ -369,7 +401,8 @@ test first: the tests failed (there was no `gate` or `after_checks`), then the c
 breaks one rule of `rollout.py` at a time the way a careless edit would: a downgrade let through,
 versions compared as text, a sha256 mismatch ignored, the rollback installing the target, the gate halting at exactly
 `failure_rate`, an image never fetched from the cache, an A/B bank counted as a way back, a host reset with no drain, a
-changed plan run anyway, and 18 more. For each break, the test that guards the rule must fail: 27 of 27 do. Its first run found a
+changed plan run anyway, a held lock let through, and 21 more. For each break, the test that guards the rule must
+fail: 31 of 31 do. Its first run found a
 gap: the strict-wave case had enough failures to halt anyway, so it passed with wave 1 not strict; the case now has 1
 failure in 11 hosts.
 
@@ -418,7 +451,9 @@ Every panel, as screenshots: [the lab](#the-lab-in-grafana) and [the production 
 **Two stores, two ways in.** Prometheus pulls: every 10 s it fetches `/metrics` from each site's exporter, and every
 5 s from the Pushgateway, and the exporter itself polls each BMC over Redfish, so what changes between two reads goes
 unseen. Prometheus keeps numbers over time, labelled (hosts per state, seconds per step, every sensor reading), for
-graphs, counts and thresholds. Loki keeps events with their detail, for what happened to one host and why.
+graphs, counts and thresholds. Loki keeps events with their detail, for what happened to one host and why. Grafana
+also reads the rollout's state database ([Host locks and state](#host-locks-and-state)) as its **State** data source:
+the locks as they are now, and each host's firmware updates.
 
 ### How the lab sends events to Loki
 
@@ -529,6 +564,9 @@ The BMC and its Redfish service: memory, free storage, crawl time, failed GETs, 
 
 ![Lab · Host: the BMC's memory, storage, crawl time, failed GETs and Redfish answering](docs/grafana/lab/host-details-1.png)
 
+Firmware updates: every update of the host the state database keeps, newest first, whatever the time range: the
+pipeline, wave, component, the versions before, approved and after, and how it ended.
+
 ### Pipeline
 
 **Every gate passed.** The run (component, target, `OnReset`, elapsed), the verdict, the counts, the plan with each
@@ -622,6 +660,9 @@ Why, on **Update details**: each pre-flight check against every host, and only t
 
 ![Lab · Update details: bad-checksum, image sha256 failed on every host](docs/grafana/lab/pipeline-bad-checksum-checks.png)
 
+**Locks**, at the bottom, from the state database as it is now: which pipeline holds which host, since when, and the
+host's latest step and state in it. A host left for a person stays there until `make unlock`.
+
 ### Update details
 
 How a BMC firmware update runs on the lab, each fact checked against the DMTF schemas and on a lab BMC, and the
@@ -647,9 +688,10 @@ each part; an empty place is a part it doesn't have yet. `lab/download-fw-images
 `lab/promote-fw-images.sh` checks their signatures, uploads them into the SeaweedFS store, records their sha256
 and approves the newer. `make` is the CLI (`YES=1` approves; no API yet), `pipeline.sh`
 and `rollout.py` are the local pipeline controller, the YAML files the catalog, NetBox the inventory, and the run records
-the rollout state. There is no durable workflow service, state database, host locking or resume yet.
+and the state database (PostgreSQL: a lock per host, every event for 15 days) the rollout state. There is no durable
+workflow service or resume yet.
 `rollout.py run` is the site agent: it fetches each image from the nginx cache, checks it and pushes it to ten emulated
 BMCs over Redfish, then resets, post-checks and, on a failure, rolls back. It pushes every run's metrics to the
 Pushgateway (`PUT /metrics/job/rollout`) and sends every event of its run record to Loki (`POST /loki/api/v1/push`);
 exporter-lab reads every BMC over Redfish every 10 s. Prometheus scrapes `/metrics` from both, the Pushgateway every
-5 s and exporter-lab every 10 s, and Grafana has Prometheus and Loki as its data sources.
+5 s and exporter-lab every 10 s, and Grafana has Prometheus, Loki and the state database as its data sources.

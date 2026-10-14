@@ -4,6 +4,7 @@
 #   lab/            10 emulated OpenBMC BMCs, QEMU in Docker: the only BMCs the rollout updates
 #   observability/  exporter-lab, exporter-prod, Pushgateway, Loki, Prometheus and Grafana, in Docker
 #   netbox/         NetBox, the lab inventory's source of truth, in Docker
+#   state/          PostgreSQL, the rollout state: every event of every run, and a lock per host, in Docker
 # Every target runs on the lab unless SITE=prod: the real fleet in prod/, read-only.
 
 SITE      ?= lab
@@ -13,15 +14,24 @@ WIDTH     := 200
 LAB       := docker compose -f lab/docker-compose.yaml
 MONITOR   := docker compose -f observability/docker-compose.yaml
 NETBOX    := docker compose -f netbox/docker-compose.yaml
+STATE     := docker compose -f state/docker-compose.yaml
 # the tools' read-only NetBox token, from netbox/.netbox.env
 TOKEN      = NETBOX_TOKEN=$$(sed -n 's/^NETBOX_TOKEN=//p' netbox/.netbox.env 2>/dev/null)
+# the rollout state database, where an update locks its hosts and adds its events, as the account redfish_rollout_sa
+DB         = STATE_DB=postgresql://redfish_rollout_sa:$$(sed -n 's/^REDFISH_ROLLOUT_SA_PASSWORD=//p' state/.state.env \
+             2>/dev/null)@127.0.0.1:5432/rollout
+# pgAdmin's login, and the read-only account it reads the database with
+PGADMIN    = PGADMIN_DEFAULT_PASSWORD=$$(sed -n 's/^PGADMIN_PASSWORD=//p' state/.state.env 2>/dev/null) \
+             VIEWER_PASSWORD=$$(sed -n 's/^VIEWER_PASSWORD=//p' state/.state.env 2>/dev/null)
+# Grafana's read-only account on it
+STATE_RO   = STATE_GRAFANA_PASSWORD=$$(sed -n 's/^GRAFANA_PASSWORD=//p' state/.state.env 2>/dev/null)
 # the firmware dry-run and update work on
 FIRMWARE   = $(or $(COMPONENT),Manager (BMC))
 
 ifeq ($(SITE),lab)
   # OpenBMC's public default account; the rollout pushes its metrics to the Pushgateway and its events to Loki
   ENV       := SITE=lab LAB_USERNAME=root LAB_PASSWORD=0penBmc PUSHGATEWAY=http://127.0.0.1:9091 \
-               LOKI=http://127.0.0.1:3100 IMAGE_CACHE=https://127.0.0.1:8443 $(TOKEN)
+               LOKI=http://127.0.0.1:3100 IMAGE_CACHE=https://127.0.0.1:8443 $(TOKEN) $(DB)
   # pre-flight can't put OpenBMC versions in order, so the lab allows either direction
   PLAN_ARGS := --allow-downgrade
 else ifeq ($(SITE),prod)
@@ -38,7 +48,8 @@ Every target runs on the lab unless SITE=prod: the real fleet in prod/, which is
 
 Setup
   make setup               create venv/ and install requirements.txt
-  make test                the rollout's decisions on recorded Redfish data, in about a second, no BMC needed
+  make test                the rollout's decisions on recorded Redfish data, in about a second, no BMC needed; the
+                           host locks' test needs the state database, else it's skipped
   make mutations           break each safety rule of rollout.py, in a copy: each break must fail a test
 
 NetBox: the lab's hosts, racks and projects; the tools read them from it
@@ -46,9 +57,17 @@ NetBox: the lab's hosts, racks and projects; the tools read them from it
                            lab/inventory.yaml's servers into it, once
   make netbox-down         stop it; its data stays in volumes
 
+State: PostgreSQL, every event of every run (15 days) and a lock per host: an update holds its hosts' locks
+  make state-up            start it on 127.0.0.1:5432, and pgAdmin on http://127.0.0.1:5050 to look at its schema
+                           and tables (login admin@example.com, PGADMIN_PASSWORD); lab-up starts them too. The
+                           passwords: state/.state.env
+  make state               every host's lock, then each host's latest state
+  make unlock HOST=...     give back a host's lock once a person checked it; several: HOST="a b"
+  make state-down          stop it; its data stays in a volume
+
 Lab: 10 emulated OpenBMC BMCs, QEMU in Docker, on 127.1.0.1-10, and their HTTPS image cache on :8443
-  make lab-up              start NetBox and the image store, ingest OpenBMC's two newest builds into it (download, check
-                           their signatures, upload), boot the BMCs (about 10 min)
+  make lab-up              start NetBox, the state database and the image store, ingest OpenBMC's two newest
+                           builds into it (download, check their signatures, upload), boot the BMCs (about 10 min)
   make lab-down            stop them; each keeps its flash
   make lab-reset           stop them and wipe their flash: they boot the older build again; the store keeps its images
   make lab-clean           delete everything the lab made, store included: lab-up then starts from the newest builds
@@ -88,7 +107,7 @@ export HELP
 .DEFAULT_GOAL := help
 .DELETE_ON_ERROR:
 .PHONY: help setup test mutations lab-up lab-down lab-reset lab-clean collect $(VIEWS) detail views plan dry-run update report watch fault \
-        monitor-up monitor-logs monitor-down netbox-up netbox-down
+        monitor-up monitor-logs monitor-down netbox-up netbox-down state-up state state-down unlock
 
 help:
 	@printf '%s\n' "$$HELP"
@@ -99,17 +118,17 @@ setup:
 
 # the gate: every change, and before any real update
 test:
-	$(PY) test_rollout.py
+	$(DB) $(PY) test_rollout.py
 
 # the audit, before changing a safety rule: it finds each rule by its line, so it can't be the gate
-mutations:
-	$(PY) mutations.py
+mutations: state-up
+	$(DB) $(PY) mutations.py
 
 # ---- Lab ----
 # The store first, then the ingest into it: download-fw-images.sh downloads, promote-fw-images.sh checks and uploads. Then
 # every package the catalog names must be in the store, before the BMCs boot from the older build's bmc.mtd. A store
 # that just started answers before its volumes are registered, so each read is retried for 30 s
-lab-up: lab/qemu-system-arm lab/cache/tls.crt netbox-up
+lab-up: lab/qemu-system-arm lab/cache/tls.crt netbox-up state-up
 	$(LAB) up --detach --wait store
 	[ -f lab/images.yaml ] && [ -f lab/baseline.yaml ] && [ -f lab/bmc.mtd ] || \
 	  { ./lab/download-fw-images.sh && ./lab/promote-fw-images.sh lab/staging/*.tar; }
@@ -185,11 +204,11 @@ fault:
 	$(ENV) ./lab/scenario.sh "$(SCENARIO)" $(PLAN_ARGS) $(ARGS)
 
 # ---- Observability ----
-monitor-up:
+monitor-up: state/.state.env
 	@[ -f observability/grafana/.grafana.env ] || { echo "First create observability/grafana/.grafana.env with" \
 	  "GRAFANA_ADMIN_USERNAME=... and GRAFANA_ADMIN_PASSWORD=...: Grafana's admin account (README, Quick start)"; exit 1; }
 	python3 observability/grafana/prod_dashboards.py
-	$(TOKEN) $(MONITOR) up --detach --build --wait
+	$(TOKEN) $(STATE_RO) $(MONITOR) up --detach --build --wait
 
 monitor-logs:
 	$(MONITOR) logs --follow exporter-lab exporter-prod
@@ -214,3 +233,29 @@ netbox-up: netbox/.netbox.env
 
 netbox-down:
 	$(NETBOX) down
+
+# ---- State ----
+# Its passwords, random and made once: never shown, read from the file. The owner's, the rollout's (redfish_rollout_sa), Grafana's,
+# pgAdmin's account on the database (viewer) and pgAdmin's login
+state/.state.env:
+	@umask 077; python3 -c 'import secrets; \
+	print("".join(f"{k}_PASSWORD={secrets.token_urlsafe(24)}\n" \
+	              for k in ("POSTGRES", "REDFISH_ROLLOUT_SA", "GRAFANA", "VIEWER", "PGADMIN")), end="")' > $@
+	@echo "Made $@: the state database's passwords"
+
+state-up: state/.state.env
+	$(PGADMIN) $(STATE) up --detach --wait
+
+state:
+	@$(STATE) exec -T postgres psql -U rollout -d rollout -c 'SELECT * FROM host_locks ORDER BY host' \
+	  -c "SELECT DISTINCT ON (host) host, pipeline, stage, wave, step, state, at, left(detail, 80) AS detail \
+	      FROM host_state ORDER BY host, at DESC"
+
+# A person checked the host: its lock goes, whichever pipeline held it
+unlock:
+	$(if $(HOST),,$(error set HOST, e.g. make unlock HOST=127.1.0.1))
+	@echo "DELETE FROM host_locks WHERE host = ANY(string_to_array(:'hosts', ' ')) RETURNING *" | \
+	  $(STATE) exec -T postgres psql -U rollout -d rollout -v hosts="$(HOST)"
+
+state-down:
+	$(STATE) down

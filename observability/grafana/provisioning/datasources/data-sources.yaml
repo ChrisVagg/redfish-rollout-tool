@@ -5,3 +5,6 @@ datasources:
   - {name: Prometheus, uid: prometheus, type: prometheus, url: "http://127.0.0.1:9090", isDefault: true, editable: true}
 # the rollout's events, every step of every host, from rollout.py run
   - {name: Loki, uid: loki, type: loki, url: "http://127.0.0.1:3100", editable: true}
+# the rollout state database: each host's locks and firmware history, as the read-only account grafana
+  - {name: State, uid: state, type: grafana-postgresql-datasource, url: "127.0.0.1:5432", user: grafana, editable: true,
+     jsonData: {database: rollout, sslmode: disable}, secureJsonData: {password: $STATE_GRAFANA_PASSWORD}}

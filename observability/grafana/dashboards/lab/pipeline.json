@@ -2842,6 +2842,114 @@
     "cellHeight": "sm",
     "sortBy": []
    }
+  },
+  {
+   "type": "row",
+   "title": "Locks: the state database",
+   "collapsed": false,
+   "panels": [],
+   "id": 29,
+   "gridPos": {
+    "x": 0,
+    "y": 108,
+    "w": 24,
+    "h": 1
+   }
+  },
+  {
+   "type": "table",
+   "title": "Locks: which pipeline holds which host, and since when",
+   "description": "From the state database, as it is now, whatever the time range. A stage holds its hosts' locks while it runs; a host left for a person, or every host of a run that stopped halfway, keeps its lock until a person checks it and runs make unlock HOST=.... step and state: the host's latest event in that pipeline.",
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "state"
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "state"
+     },
+     "refId": "A",
+     "format": "table",
+     "rawQuery": true,
+     "editorMode": "code",
+     "rawSql": "SELECT l.host, l.pipeline, l.stage, s.step, s.state, l.since, extract(epoch FROM now() - l.since) AS held\nFROM host_locks l LEFT JOIN host_state s ON s.pipeline = l.pipeline AND s.host = l.host\nWHERE l.site = '$site'\nORDER BY l.since"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "noValue": "-",
+     "custom": {
+      "minWidth": 60
+     }
+    },
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "state"
+      },
+      "properties": [
+       {
+        "id": "mappings",
+        "value": [
+         {
+          "type": "value",
+          "options": {
+           "updated": {
+            "color": "#559f77",
+            "index": 0
+           },
+           "rolled_back": {
+            "color": "#d6a45a",
+            "index": 1
+           },
+           "failed": {
+            "color": "#bb626d",
+            "index": 2
+           },
+           "needs_attention": {
+            "color": "#bb626d",
+            "index": 3
+           }
+          }
+         }
+        ]
+       },
+       {
+        "id": "custom.cellOptions",
+        "value": {
+         "type": "color-text"
+        }
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "held"
+      },
+      "properties": [
+       {
+        "id": "unit",
+        "value": "s"
+       }
+      ]
+     }
+    ]
+   },
+   "options": {
+    "showHeader": true,
+    "cellHeight": "sm"
+   },
+   "id": 30,
+   "gridPos": {
+    "x": 0,
+    "y": 109,
+    "w": 24,
+    "h": 6
+   }
   }
  ],
  "templating": {

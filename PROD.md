@@ -70,7 +70,8 @@ implemented here):
 - **Run**: `make dry-run SITE=prod` makes no firmware changes; it still saves the plan and stage HTML files and can
   send the plan and its pre-flight checks to Loki when `LOKI` is set. The update itself, once hosts are `writable`, is
   `SITE=prod YES=1 ./pipeline.sh "Manager (BMC)"` with `prod/.env` exported, from an admin host: the Makefile never writes
-  to production. The plan is the approval: its stages refuse to run when an input file changed since, and block a host
+  to production. It needs `STATE_DB`, the state database where each stage locks its hosts; every admin host that
+  runs a rollout must use the same one. The plan is the approval: its stages refuse to run when an input file changed since, and block a host
   whose BMC isn't the one the plan read.
 
 ## The exporter on the real fleet
@@ -164,10 +165,11 @@ firmware, the health of every component, and every reading against its threshold
 - **Other update flows**: switching to the other A/B bank as a rollback (pre-flight doesn't count a bank as a way
   back), an `Activate` action, a staged image, an apply scheduled as a Job. The rollout uses an upload applied at
   reset, its own reset, and a reinstall of the version before as the way back.
-- **Durable orchestration**: a lock per host, so two rollouts never touch one; picking up a stopped run where it
-  was, after a crash; resolving a request whose answer was lost (an update the BMC may or may not have taken). The run
-  records say what happened, but nothing resumes from them: a stopped pipeline is planned and run again, and
-  pre-flight skips the hosts already on the target. In production this is the workflow engine and the rollout state
+- **Durable orchestration**: picking up a stopped run where it was, after a crash; resolving a request whose answer
+  was lost (an update the BMC may or may not have taken). The state database holds a lock per host and each host's
+  latest step, and the run records every step, but nothing resumes from them: a stopped run keeps its hosts' locks, a
+  person checks and unlocks them, and the pipeline is planned and run again; pre-flight skips the hosts already on the
+  target. In production this is the workflow engine and the rollout state
   database ([a production system](#a-production-system---scaling-for-a-large-fleet)).
 - **Limits beyond racks**: per PDU, fabric pod or remaining capacity.
 - **Pull integrity**: a pulled image is never seen by the agent, so its sha256 isn't checked against the catalog;
@@ -261,7 +263,7 @@ file first and the catalog entry after it; cache and store availability must sti
 | Inventory / CMDB | the lab's hosts in NetBox (`make netbox-up`), seeded once from `lab/inventory.yaml`; prod's in `prod/inventory.yaml`. The poller's snapshots are the observed versions, and `make firmware SITE=prod` shows drift from the baseline | prod's hosts in NetBox too, with each vendor's BMC account |
 | Rollout API and CLI | the CLI only: the `make` targets and `pipeline.sh`; `YES=1` is the approval | an API, and an approval between the canary and wave 1 |
 | Workflow engine | `pipeline.sh`'s stages and `rollout.py run`: waves, gates, soak | a service that resumes a stopped rollout |
-| Rollout state DB | `<site>/runs/*.jsonl`: every step's intent before it and result after it; `report.json`. A record: no host locks, no resume | PostgreSQL, with host locks and the gate as a query |
+| Rollout state DB | PostgreSQL in Docker ([state/](state/schema.sql)): a lock per host, which a stage takes for all its hosts or none, and every event of every run, append-only to the rollout's account, kept 15 days; Grafana reads it with an account that may only read. `<site>/runs/*.jsonl` keeps every event on the agent's disk too, `report.json` the report. No resume | one database for every site's agents, the gate as a query, and a retention as long as the audit needs |
 | Engine store | none: a rerun plans again, and pre-flight skips the hosts already on the target | the engine's own |
 | Site agent | `rollout.py run` on an admin host | one per site |
 | Scheduler | Optional `drain` and `undrain` hooks; neither site configures them, and no integration with a real scheduler has been validated | implement and validate the site's commands, including waiting for the node to become empty |

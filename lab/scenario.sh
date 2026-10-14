@@ -67,7 +67,8 @@ YES=1 SCENARIO=$scenario RUN_ARGS="${faults[$scenario]}" ./pipeline.sh "Manager 
   --images "$catalog" "$@" || status=$?
 
 # How each host ended: its done event; blocked or skipped at pre-flight; untouched when the run never reached it
-out=$(ls -d lab/runs/pipeline-* | tail -1)
+out=$(ls -d lab/runs/pipeline-*/ | tail -1)  # the directory: its records are pipeline-<time>-<stage>.jsonl beside it
+out=${out%/}
 echo "$scenario" > "$out/scenario.txt"
 canary=$(python3 -c 'import json, sys; print(*json.load(open(sys.argv[1]))["waves"].get("canary", ["-"])[:1])' \
   "$out/plan.json")
@@ -99,6 +100,8 @@ for pair in ${faults[$scenario]//--fault /}; do
   echo "bmc${port: -1} keeps the aborted task until it restarts, and pre-flight blocks it until then:" \
     "docker compose -f lab/docker-compose.yaml restart bmc${port: -1}"
 done
+# A host left for a person keeps its lock in the state database: the next pipeline that needs it stops
+[ "$scenario" = no-return ] && echo "$canary keeps its lock, left for a person: make unlock HOST=$canary once it answers"
 if [ "$ok" = yes ]; then
   printf '✓ scenario %s: every host ended as expected and the pipeline stopped at its gate (exit %s)\n' \
     "$scenario" "$status"

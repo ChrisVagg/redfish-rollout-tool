@@ -26,8 +26,10 @@ unless --allow-downgrade, and a component without a rollback path unless --accep
                     pre-flighted again right before it is touched. The saved plan decides the component, files,
                     options, policy and waves; a stage refuses to start when a file changed since the plan, and blocks
                     a host whose BMC isn't the one the plan read. Without --yes a dry run: what each host would get.
-                    With --yes only hosts marked writable: true in the inventory are updated (the lab); every step is
-                    recorded, its intent before it and its result after, in <site>/runs/<run id>.jsonl. A gate that
+                    With --yes only hosts marked writable: true in the inventory are updated (the lab), and only once
+                    the stage holds every one's lock in the state database (STATE_DB): another pipeline's host stops
+                    it. Every step is recorded, its intent before it and its result after, in
+                    <site>/runs/<pipeline>-<stage>.jsonl and the state database's events. A gate that
                     fails (a failing canary or strict wave, or failures over failure_rate) exits 1, so the next stage
                     doesn't run. pipeline.sh runs plan, the canary stage, then the waves stage.
 
@@ -51,6 +53,7 @@ from functools import lru_cache
 from itertools import zip_longest
 from pathlib import Path
 
+import psycopg
 import requests
 import urllib3
 import yaml
@@ -703,12 +706,64 @@ def plan(args) -> list:
                                      for name, hosts in planned]) or Text("Plan: no host to update")]
 
 
+# ---- State: each host's lock and every event, in the rollout state database (PostgreSQL, STATE_DB) ----
+
+# The state database: run --yes stops without it, as it can't lock a host
+def state_db() -> psycopg.Connection:
+    url = os.environ.get("STATE_DB")
+    if not url:
+        raise SystemExit("run --yes needs the state database for its host locks: STATE_DB, which make sets")
+    try:
+        return psycopg.connect(url, autocommit=True, connect_timeout=5)
+    except psycopg.Error as e:
+        raise SystemExit(f"the state database: {e}. make state-up starts it")
+
+
+# Take the locks of a stage's hosts for its pipeline, every one or none: [(host, the pipeline holding it)] when one is
+# held, else []. In one order, so two pipelines after the same hosts wait on each other rather than deadlock
+def lock(db, pipeline, stage, hosts) -> list[tuple[str, str]]:
+    with db.transaction():
+        taken = {h for h, in db.execute("INSERT INTO host_locks (host, site, pipeline, stage) SELECT "
+                                        "unnest(%s::text[]), %s, %s, %s ON CONFLICT (host) DO NOTHING RETURNING host",
+                                        (sorted(hosts), SITE.name, pipeline, stage))}
+        if taken == set(hosts):
+            return []
+        held = db.execute("SELECT host, pipeline FROM host_locks WHERE host = ANY(%s) ORDER BY host",
+                          (sorted(set(hosts) - taken),)).fetchall()
+        raise psycopg.Rollback  # none taken
+    return held
+
+
+# Give back a stage's locks at its end; a host left for a person keeps its lock until make unlock. The hosts kept
+def release(db, pipeline, hosts, outcomes) -> list[str]:
+    kept = sorted(o["host"] for o in outcomes if o["state"] == "needs_attention")
+    db.execute("DELETE FROM host_locks WHERE pipeline = %s AND host = ANY(%s)",
+               (pipeline, [h for h in hosts if h not in kept]))
+    return kept
+
+
+# Add one event of a run to the state database's events, which a host's state is the latest of. Best effort, like the
+# metrics: the locks are taken by then, the record keeps every event, and a run never stops halfway through a flash for
+# its state database
+def save_event(db, event, state) -> None:
+    if state.get("off"):
+        return
+    try:
+        db.execute("INSERT INTO events (at, site, pipeline, stage, wave, host, step, state, event) VALUES "
+                   "(%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)",
+                   (event["at"], SITE.name, *map(event.get, ("pipeline", "stage", "wave", "host", "step", "state")),
+                    json.dumps(event, default=str)))
+    except psycopg.Error as e:
+        state["off"] = True
+        log.warning("state: %s; no more events saved to the state database this run", e)
+
+
 # ---- Run: steps 2 to 6 on each host that passes, wave by wave ----
 
 _record_lock = threading.Lock()
 
 
-# Append one event to the run's record, runs/<run id>.jsonl: before an action its intent, after it its result
+# Append one event to the run's record, runs/<pipeline>-<stage>.jsonl: before an action its intent, after it its result
 def record(path, host, step, state, **detail) -> dict:
     event = {"at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "host": host, "step": step,
              "state": state, **detail}
@@ -1131,22 +1186,27 @@ def run(args) -> list:
     if refused:
         raise SystemExit(f"not writable in {args.inventory}: {', '.join(refused)}. Only hosts marked writable: true "
                          "are updated; production stays read-only.")
+    pipeline, db = Path(args.plan).parent.name, state_db()
+    if held := lock(db, pipeline, args.stage, args.hosts):
+        raise SystemExit(f"locked: {', '.join(f'{h} by {p}' for h, p in held)}. One pipeline at a time touches a host: "
+                         "wait for it to end, or make unlock HOST=... once a person checked the host")
     RUNS.mkdir(exist_ok=True)
-    path = RUNS / f"{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}.jsonl"
-    pipeline = Path(args.plan).parent.name
+    path = RUNS / f"{pipeline}-{args.stage}.jsonl"
     group, pushing = f"site/{SITE.name}/pipeline/{pipeline}/stage/{args.stage}", {}
     # the stage's part of the saved plan: a host the run hasn't reached yet takes its versions from the plan
     # and how many hosts the whole plan has, which a canary that halts never reaches
     planned_stage = {**saved, "waves": stage, "planned": sum(map(len, saved["waves"].values()))}
 
-    wave_of, sending = {h: name for name, hosts in planned for h in (s["host"] for s in hosts)}, {}
+    wave_of, sending, saving = {h: name for name, hosts in planned for h in (s["host"] for s in hosts)}, {}, {}
 
-    # lambda *event, **detail: record one event, send it to Loki, then push the run's metrics as they stand
+    # lambda *event, **detail: record one event, send it to Loki and the state database, then push the run's metrics as
+    # they stand
     def rec(*event, **detail) -> None:
         e = record(path, *event, **detail)
         sent = {**e, "pipeline": pipeline, "stage": args.stage, "wave": e.get("wave") or wave_of.get(e["host"]),
                 **({"next": NEXT_STEP.get(e["state"])} if e["step"] == "done" else {})}
         push_event(sent, sending)
+        save_event(db, sent, saving)
         if e["step"] == "pre-flight":
             push_checks(sent, e.get("checks"), sending)
         push_metrics(path, group, pushing, planned_stage)
@@ -1171,7 +1231,12 @@ def run(args) -> list:
             halted = f"halted after {'the ' * (name == 'canary')}{name}: {g['failed']} of {g['tried']} hosts failed"
             args.exit_code = 1
             break
-    rec("-", "run", "end", detail=halted or "every wave done")
+    try:
+        kept = release(db, pipeline, args.hosts, [o for _, o in outcomes])
+    except psycopg.Error as e:
+        kept = sorted(args.hosts)
+        log.warning("state: %s; the stage's locks stay until make unlock", e)
+    rec("-", "run", "end", detail=halted or "every wave done", locked=kept)
     return [*plan_view, *render(pipeline_report(None, events_of([path]), path.stem, [path])), Text(f"Record: {path}")]
 
 
@@ -1540,7 +1605,7 @@ def latest_pipeline() -> tuple[Path | None, list[Path]]:
         if not plan.is_file():
             continue
         records = ([RUNS / Path(line).name for line in listed.read_text().split()] if listed.is_file()
-                   else sorted(p for p in RUNS.glob("*.jsonl") if p.stat().st_mtime >= plan.stat().st_mtime))
+                   else sorted(RUNS.glob(f"{d.name}-*.jsonl")))
         if records or (d / "report.json").is_file():
             return plan, records
     return None, []
@@ -1603,7 +1668,8 @@ def main() -> None:
     r.set_defaults(run=run)
     rp = commands.add_parser("report", parents=[output_options()],
                              help="a pipeline's report, from its plan and run records [the latest pipeline]")
-    rp.add_argument("record", nargs="*", help="with --plan: the pipeline's <site>/runs/<run id>.jsonl, merged")
+    rp.add_argument("record", nargs="*",
+                    help="with --plan: the pipeline's <site>/runs/<pipeline>-<stage>.jsonl, merged")
     rp.add_argument("--plan", metavar="FILE", help="the pipeline's plan.json [the latest pipeline's]")
     rp.add_argument("--save", metavar="FILE", help=f"also write the report as JSON ({REPORT_SCHEMA}), for services")
     rp.add_argument("--details", action="store_true", help="every host's steps, with their evidence")

@@ -46,6 +46,7 @@ services:
     network_mode: host
     env_file:
       - ./grafana/.grafana.env
+    environment: [STATE_GRAFANA_PASSWORD]  # the state database's read-only account, from make
     volumes: ["./grafana/grafana.ini:/etc/grafana/grafana.ini:ro", 
               "./grafana/provisioning:/etc/grafana/provisioning:ro",
               "./grafana/dashboards:/etc/grafana/dashboards:ro", 
