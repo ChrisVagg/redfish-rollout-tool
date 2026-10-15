@@ -13,10 +13,11 @@ services:
     restart: unless-stopped
     network_mode: host  # the BMCs are on the host's addresses
     command: [--listen, "127.0.0.1:${EXPORTER_PORT:?}", --interval, "${INTERVAL:?}"]
-    environment: [SITE, LAB_USERNAME, LAB_PASSWORD, NETBOX_TOKEN]  # from make; a site's BMC accounts from <site>/.env
+    # from make, NETBOX_TOKEN the exporter's own; a site's BMC accounts from <site>/.env
+    environment: [SITE, LAB_USERNAME, LAB_PASSWORD, NETBOX_TOKEN]
     env_file: [{path: "../${SITE:?}/.env", required: false}]
     volumes: ["..:/app:ro", "../schemas:/app/schemas"]  # the repo read-only; the DMTF schemas cache shared with it
-  agent:
+  prometheus-site-agent:
     image: prom/prometheus:v3.15.0
     restart: unless-stopped
     network_mode: host

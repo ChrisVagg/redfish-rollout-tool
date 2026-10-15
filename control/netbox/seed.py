@@ -1,58 +1,66 @@
-"""Loads lab/inventory.yaml's servers into NetBox once: a site that already has devices is left as it is, so NetBox stays
-the source and its edits stay. Also makes the tools' account, redfish, which may only view devices, and its read-only
-API token from NETBOX_TOKEN in control/netbox/.netbox.env, so it survives a new NetBox volume. Runs in NetBox's Django
-shell: make control-up.
-
-A server becomes a device of site lab: named after its node, else its BMC address; its vendor the manufacturer, its
-project the tenant, its rack the rack, its model the device type (unspecified without one), canary: true the tag
-canary; its role server. The device is the server and the BMC how it's reached: its management-only interface bmc,
-which holds the BMC's address, the device's out-of-band IP."""
+"""Seeds NetBox, the inventory's only source, in its Django shell: make control-up. It makes only what is missing, so
+NetBox's own edits stay:
+  the services' accounts, redfish_poller_sa, redfish_exporter_sa and redfish_rollout_sa: each may only view devices,
+    can't log in, and has one API token, read-only, NETBOX_TOKEN_<SERVICE> in control/netbox/.tokens.env, so it
+    survives a new NetBox volume
+  the sites lab and prod, the tags canary and writable, and each site's config context: how its BMCs are reached
+  the lab's ten BMCs, when site lab has no device: bmc1 to bmc10 on 127.1.0.N, as lab/docker-compose.yaml runs them,
+    NVIDIA GB200 NVL in racks r1 to r3 in turn, each tagged writable, bmc1 also canary
+A device is the server and its BMC how it's reached: its management-only interface bmc holds the BMC's address, the
+device's out-of-band IP. Prod's servers are added in NetBox (PROD.md), each with the platform whose config context
+names its BMC account."""
 import os
 
-import yaml
-from django.utils.text import slugify
-
 from core.models import ObjectType
-from ipam.models import IPAddress
 from dcim.models import Device, DeviceRole, DeviceType, Interface, Manufacturer, Rack, Site
-from extras.models import Tag
+from extras.models import ConfigContext, Tag
+from ipam.models import IPAddress
 from tenancy.models import Tenant
 from users.models import ObjectPermission, Token, User
 
-# The tools' account, redfish: it may only view devices, can't log in, and its token is read-only too
-tools, created = User.objects.get_or_create(username="redfish")
-if created:
-    tools.set_unusable_password()
-    tools.save()
-view, _ = ObjectPermission.objects.get_or_create(name="redfish: view devices", defaults={"actions": ["view"]})
-view.object_types.set([ObjectType.objects.get_for_model(Device)])
-view.users.add(tools)
-key, value = os.environ["NETBOX_TOKEN"].removeprefix("nbt_").split(".")
-Token.objects.filter(key=key).exclude(user=tools).delete()  # made for another account before
-if not Token.objects.filter(key=key).exists():
-    Token.objects.create(user=tools, key=key, token=value, write_enabled=False, description="redfish tools: read-only")
+# Each service's account: it may only view devices, can't log in, and its one token is read-only
+for service in ("poller", "exporter", "rollout"):
+    account, created = User.objects.get_or_create(username=f"redfish_{service}_sa")
+    if created:
+        account.set_unusable_password()
+        account.save()
+    view, _ = ObjectPermission.objects.get_or_create(name=f"redfish_{service}_sa: view devices",
+                                                     defaults={"actions": ["view"]})
+    view.object_types.set([ObjectType.objects.get_for_model(Device)])
+    view.users.add(account)
+    key, value = os.environ[f"NETBOX_TOKEN_{service.upper()}"].removeprefix("nbt_").split(".")
+    Token.objects.filter(key=key).exclude(user=account).delete()  # made for another account before
+    Token.objects.filter(user=account).exclude(key=key).delete()  # this account's old one, after a rotation
+    if not Token.objects.filter(key=key).exists():
+        Token.objects.create(user=account, key=key, token=value, write_enabled=False,
+                             description=f"redfish {service}: read-only")
 
+# The sites, and how each one's BMCs are reached: its config context. Without one, HTTPS with the certificate checked.
+# The lab's account is OpenBMC's default, its values in LAB_USERNAME and LAB_PASSWORD (make)
 canary, _ = Tag.objects.get_or_create(slug="canary", defaults={"name": "canary"})
+writable, _ = Tag.objects.get_or_create(slug="writable", defaults={"name": "writable"})
+for name, data in {"lab": {"verify": False, "retries": 1, "deadline": 300, "username_env": "LAB_USERNAME",
+                           "password_env": "LAB_PASSWORD"},
+                   "prod": {"verify": False}}.items():
+    site, _ = Site.objects.get_or_create(slug=name, defaults={"name": name})
+    context, created = ConfigContext.objects.get_or_create(name=f"site {name}", defaults={"data": data})
+    if created:
+        context.sites.set([site])
 
-site, _ = Site.objects.get_or_create(slug="lab", defaults={"name": "lab"})
-if Device.objects.filter(site=site).exists():
-    print(f"NetBox has {Device.objects.filter(site=site).count()} devices in site lab: it is the source, nothing loaded")
+lab = Site.objects.get(slug="lab")
+if count := Device.objects.filter(site=lab).count():
+    print(f"NetBox has {count} devices in site {lab}: it is the source, nothing loaded")
 else:
-    servers = yaml.safe_load(open("/seed/lab/inventory.yaml"))["servers"]
+    nvidia, _ = Manufacturer.objects.get_or_create(slug="nvidia", defaults={"name": "NVIDIA"})
+    kind, _ = DeviceType.objects.get_or_create(manufacturer=nvidia, slug="nvidia-gb200-nvl",
+                                               defaults={"model": "GB200 NVL"})
     role, _ = DeviceRole.objects.get_or_create(slug="server", defaults={"name": "server"})
-    for s in servers:
-        maker, _ = Manufacturer.objects.get_or_create(slug=slugify(s["vendor"]), defaults={"name": s["vendor"]})
-        model = s.get("model", "unspecified")
-        kind, _ = DeviceType.objects.get_or_create(manufacturer=maker, slug=f"{maker.slug}-{slugify(model)}",
-                                                   defaults={"model": model})
-        tenant = s.get("project") and Tenant.objects.get_or_create(
-            slug=slugify(s["project"]), defaults={"name": s["project"]})[0]
-        rack = s.get("rack") and Rack.objects.get_or_create(site=site, name=s["rack"])[0]
-        device = Device.objects.create(name=s.get("node") or s["host"], site=site, role=role, device_type=kind,
-                                       tenant=tenant or None, rack=rack or None)
+    tenant, _ = Tenant.objects.get_or_create(slug="lab", defaults={"name": "lab"})
+    for n in range(1, 11):
+        rack, _ = Rack.objects.get_or_create(site=lab, name=f"r{(n - 1) % 3 + 1}")
+        device = Device.objects.create(name=f"bmc{n}", site=lab, role=role, device_type=kind, tenant=tenant, rack=rack)
         bmc = Interface.objects.create(device=device, name="bmc", type="1000base-t", mgmt_only=True)
-        device.oob_ip = IPAddress.objects.create(address=f"{s['host']}/32", assigned_object=bmc)
+        device.oob_ip = IPAddress.objects.create(address=f"127.1.0.{n}/32", assigned_object=bmc)
         device.save()
-        if s.get("canary"):
-            device.tags.add(canary)
-    print(f"Loaded the {len(servers)} servers of lab/inventory.yaml into NetBox, site lab")
+        device.tags.add(writable, *([canary] if n == 1 else []))
+    print(f"Added the lab's 10 BMCs to NetBox, site {lab}")

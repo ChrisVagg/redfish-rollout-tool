@@ -13,20 +13,19 @@ has [the rollout step by step](LAB.md#how-the-rollout-works).
 `SITE=prod` selects the real fleet's inventory, credentials and policy. The current setup uses the read-only
 commands; the six-step update flow has been exercised only on the lab's BMCs.
 
-Production (**ASUS**, **Dell**, **HPE**, **Gigabyte**, **Supermicro**) has been used **read-only**: `make collect SITE=prod`, the views (`make health SITE=prod`, `make firmware SITE=prod`...), `make plan SITE=prod`, `make dry-run SITE=prod`, and the prod site's exporter (`make site-up SITE=prod`), configured with a 30-second polling interval. They read only, plus a Redfish session login and logout. `make update` and `make fault` refuse `SITE=prod`, and no production host is marked `writable`. The runner underneath can write: `rollout.py run --plan … --yes` updates a host the inventory marks `writable: true`, which is how a change window would run ([Before enabling production writes](#before-enabling-production-writes)). The Supermicro has no row in `prod/baseline.yaml` yet, so the plan skips it as not in the baseline.
+Production (**ASUS**, **Dell**, **HPE**, **Gigabyte**, **Supermicro**) has been used **read-only**: `make collect SITE=prod`, the views (`make health SITE=prod`, `make firmware SITE=prod`...), `make plan SITE=prod`, `make dry-run SITE=prod`, and the prod site's exporter (`make site-up SITE=prod`), configured with a 30-second polling interval. They read only, plus a Redfish session login and logout. `make update` and `make fault` refuse `SITE=prod`, and no production host is tagged `writable`. The runner underneath can write: `rollout.py run --plan … --yes` updates a host tagged `writable` in NetBox, which is how a change window would run ([Before enabling production writes](#before-enabling-production-writes)). The Supermicro has no row in `prod/baseline.yaml` yet, so the plan skips it as not in the baseline.
 
-[prod/inventory.example.yaml](prod/inventory.example.yaml)
+The real fleet's hosts are NetBox's site `prod`, read as the lab's are ([NetBox](LAB.md#netbox-the-inventorys-source-of-truth)).
+A host is added in NetBox: a device of site `prod`, its manufacturer the vendor and its tenant the project (its rack
+when known); its management-only interface `bmc` with the BMC's address, set as the device's out-of-band IP; and its
+platform, the vendor's BMC (`DELL BMC`, `HPE BMC`...), whose config context names the BMC account's env vars:
 
-```yaml
-# prod/inventory.yaml
-defaults: {scheme: https, verify: false}
-servers:
-  - {host: 10.0.0.5, vendor: Dell, project: cluster-a, rack: r1,
-     username_env: DELL_REDFISH_USERNAME, password_env: DELL_REDFISH_PASSWORD}
+```json
+{"username_env": "DELL_REDFISH_USERNAME", "password_env": "DELL_REDFISH_PASSWORD"}
 ```
 
 ```sh
-# prod/.env, read by make
+# prod/.env, read by make: the account's values
 DELL_REDFISH_USERNAME=...
 DELL_REDFISH_PASSWORD=...
 ```
@@ -53,10 +52,10 @@ implemented here):
 ### Before enabling production writes
 
 - **Accounts**: keep the poller on a ReadOnly role. Give the rollout its own account whose role can update firmware
-  and perform the required reset; verify the privileges on each BMC. The local inventory's `writable` flag is an
+  and perform the required reset; verify the privileges on each BMC. NetBox's `writable` tag is an
   application gate, not proof of the account's Redfish role.
-- **Scope**: mark hosts `writable: true` only for the change window, give each its `rack`, and mark a few
-  representative spare hosts per model `canary: true`.
+- **Scope**: tag hosts `writable` in NetBox only for the change window, give each its rack, and tag a few
+  representative spare hosts per model `canary`. Who may edit NetBox decides who can open a change window.
 - **Scheduler hooks**: `drain` and `undrain` are not configured in `prod/policy.yaml`, and no integration with a real
   scheduler has been validated here. Before a host-reset update, supply and test commands using `{node}`; the drain
   must return only after the node is empty, its jobs ended. Without a drain, pre-flight blocks updates whose reset
@@ -68,8 +67,9 @@ implemented here):
   The plan's Push and Pull columns show which, per resource, and pre-flight blocks a host whose method the BMC
   doesn't allow.
 - **Run**: `make dry-run SITE=prod` makes no firmware changes; it still saves the plan and stage HTML files and can
-  send the plan and its pre-flight checks to Loki when `LOKI` is set. The update itself, once hosts are `writable`, is
-  `SITE=prod YES=1 ./pipeline.sh "Manager (BMC)"` with `prod/.env` exported, from an admin host: the Makefile never writes
+  send the plan and its pre-flight checks to Loki when `LOKI` is set. The update itself, once hosts are tagged `writable`, is
+  `SITE=prod YES=1 ./pipeline.sh "Manager (BMC)"` with `prod/.env` exported and `NETBOX_TOKEN` set to the rollout's
+  token, from an admin host: the Makefile never writes
   to production. It needs `STATE_DB`, the state database where each stage locks its hosts; every admin host that
   runs a rollout must use the same one. The plan is the approval: its stages refuse to run when an input file changed since, and block a host
   whose BMC isn't the one the plan read. Set `ROLLOUT_ACTOR` to the person or system that authorized the run: on a
@@ -138,7 +138,8 @@ not implement. It is not evidence of production updates; [Not built yet](#not-bu
 
 The Prod folder over two days of the real fleet, read-only. The fleet manager shows which BMCs answer, their health,
 equipment and firmware, and how each component can be updated; the host dashboard shows one host in full: its
-firmware, the health of every component, and every reading against its thresholds.
+firmware, the health of every component, and every reading against its thresholds. Its Hosts table is grouped by
+project: a row per project with its hosts' count and the worst Redfish and health among them, open for its hosts.
 
 ### Fleet manager
 
@@ -310,12 +311,12 @@ file first and the catalog entry after it; cache and store availability must sti
 |---|---|---|
 | Approved store, site cache | the control plane's store, a SeaweedFS bucket populated by the signature-checking ingest script, and the lab site's nginx over HTTPS caching it: `rollout.py` fetches each image into `lab/spool/`, checks its sha256 against `images.yaml` and pushes it. A URL in `images.yaml` is handed to `SimpleUpdate` where the BMC allows it | the approved store on S3 or Artifactory, and the same nginx cache in each site |
 | Firmware catalog | `control/catalog/<site>/`: prod's `baseline.yaml` is tracked; the lab's baseline and images catalog are written by the ingest, git-ignored | stays YAML reviewed in git, beside NetBox, not in it: prod's `images.yaml` beside its baseline, and a check of every change (each baseline version in the catalog, each entry with its sha256, each file in the store); the plan keeps the entries it used in `plan.json`, and each stage compares them again |
-| Inventory / CMDB | the lab's hosts in NetBox (`make control-up`), seeded once from `lab/inventory.yaml`; prod's in `prod/inventory.yaml`. The poller's snapshots are the observed versions, and `make firmware SITE=prod` shows drift from the baseline | prod's hosts in NetBox too, with each vendor's BMC account |
+| Inventory / CMDB | NetBox holds both sites' hosts, each BMC's account named in its platform's config context; each service reads it with its own read-only account. The poller's snapshots are the observed versions, and `make firmware SITE=prod` shows drift from the baseline | the exporter re-reading NetBox while it runs; people's accounts and roles in NetBox, through SSO; NetBox backed up |
 | Rollout API and CLI | the CLI only: the `make` targets and `pipeline.sh`; `YES=1` is the approval. Who planned, started or cancelled a run is recorded (`ROLLOUT_ACTOR`, else the account and host), with the commit each catalog file was approved in | an API, and an approval between the canary and wave 1; `ROLLOUT_ACTOR` from what authorized the run, a CI's actor or the API's authenticated user |
 | Workflow engine | `pipeline.sh`'s stages and `rollout.py run`: waves, gates, soak | a service that resumes a stopped rollout |
 | Rollout state DB | PostgreSQL in the control plane ([control/state/schema.sql](control/state/schema.sql)): a lock per host, which a stage takes for all its hosts or none, and every event of every run, append-only to the rollout's account, kept until deleted; Grafana reads it with an account that may only read. `<site>/runs/*.jsonl` keeps every event on the agent's disk too, `report.json` the report. No resume | one database for every site's agents, the gate as a query, and a retention for events, which PostgreSQL lacks: daily partitions, dropped after the audit period |
 | Engine store | none: a rerun plans again, and pre-flight skips the hosts already on the target | the engine's own |
 | Site agent | `rollout.py run` on an admin host | one per site |
 | Scheduler | Optional `drain` and `undrain` hooks; neither site configures them, and no integration with a real scheduler has been validated | implement and validate the site's commands, including waiting for the node to become empty |
-| Secrets | `prod/.env`, and the control plane's `.netbox.env`, `.state.env` and `.grafana.env`, git-ignored | Vault-backed storage; validate account rotation separately |
+| Secrets | `prod/.env`, and the control plane's `.netbox.env`, `.tokens.env`, `.state.env` and `.grafana.env`, git-ignored | Vault-backed storage; validate account rotation separately |
 | Observability | the report: terminal, HTML and `report.json`; an exporter and a Prometheus agent per site, pushing every BMC's telemetry, health and firmware to the control plane, the rollout's metrics pushed live, its events in Loki, and Grafana dashboards in a folder per site ([Observability](LAB.md#observability)) | paging the on-call on a halt or a host left for a person; a Pushgateway in each site, read by its agent; an event receiver that subscribes to Redfish `EventService` and forwards BMC events to Loki |

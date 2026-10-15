@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Redfish fleet report: one collector, several views.
 
-  collect [INVENTORY]       Crawl every BMC once, in parallel: one persistent HTTPS connection (tunnel) per BMC,
+  collect                   Crawl every BMC once, in parallel: one persistent HTTPS connection (tunnel) per BMC,
                             the Redfish tree discovered recursively from /redfish/v1 (every link except logs,
                             sessions, accounts and the like). Saves one snapshot per host in <site>/snapshots and
                             prints the connection summary. The views below read the snapshots, not the BMCs.
@@ -18,15 +18,15 @@
   capabilities              What each hardware model can do: Redfish version, services, actions, firmware update
                             methods, telemetry support.
   diff                      What changed on each host between the previous collect and the latest one.
-  exporter [INVENTORY]      Crawl every BMC each --interval and serve the readings, health, firmware and BMC
+  exporter                  Crawl every BMC each --interval and serve the readings, health, firmware and BMC
                             resources as Prometheus metrics on --listen. One session per BMC, kept across crawls;
                             a host whose fresh login is refused is not asked again until a restart.
   detail HOST               Everything about one host: inventory, services, actions, health and telemetry. A
                             reading's unit comes from the BMC's MetricDefinitions, else the DMTF JSON Schema of the
                             resource (downloaded once into ./schemas), else the resource itself (ReadingUnits).
 
-The site is the fleet the poller reads: SITE=prod (the default) or SITE=lab, a folder with the inventory
-(INVENTORY is <site>/inventory.yaml by default), the baseline and the snapshots."""
+The site is the fleet the poller reads: SITE=prod (the default) or SITE=lab. Its hosts are NetBox's site of that name
+(NETBOX_URL, read with NETBOX_TOKEN), and its folder holds the snapshots."""
 import argparse
 import json
 import logging
@@ -53,9 +53,9 @@ from rich.rule import Rule
 from rich.table import Column, Table
 from rich.text import Text
 
-from constants import (ACTION, ALLOWED, BASELINE, CAPABILITIES_ROW, CHASSIS, COMPLIANCE_ROW, CRITICAL, DMTF, FIELDS,
-                       FW_PARTS, INVENTORY_FILE, INVENTORY_ROW, JOBS_ROW, JOB_TYPES, KIND, LIMIT, LINKS,
-                       MANAGER, OEM_PATH, PREVIOUS, PROPS, READINGS, ROOT, SCHEMAS, SENSORS, SERVICE, SEVERITY, SKIP,
+from constants import (ACTION, ALLOWED, BASELINE, CAPABILITIES_ROW, CHASSIS, COMPLIANCE_ROW, CONNECTION, CRITICAL, DMTF,
+                       FIELDS, FW_PARTS, INVENTORY_ROW, JOBS_ROW, JOB_TYPES, KIND, LIMIT, LINKS, MANAGER, NETBOX_URL,
+                       OEM_PATH, PREVIOUS, PROPS, READINGS, ROOT, SCHEMAS, SENSORS, SERVICE, SEVERITY, SITE, SKIP,
                        STATUS_LEAF, SUMMARY, SYSTEM, TELEMETRY_ROW, TEMPLATES, THRESHOLD, VOLATILE, WILDCARD)
 from helpers import (at, block, choose, connection, details, discrete, first_of, first_real, identity, items, label,
                      link, load, named, norm, obj, of, output_options, per_host, pick, pointer, previous, properties,
@@ -372,20 +372,13 @@ def crawl(server, tunnel, deadline=None, keep=False) -> tuple[dict, float, str |
     return found, round(time.monotonic() - start, 1), stopped
 
 
-# Every server of the inventory, the inventory's defaults filled in: from NetBox when the inventory names it
-def load_servers(path) -> list[dict]:
-    with open(path) as f:
-        cfg = yaml.safe_load(f)
-    servers = netbox_servers(**cfg["netbox"]) if cfg.get("netbox") else cfg["servers"]
-    return [{**(cfg.get("defaults") or {}), **server} for server in servers]
-
-
-# A site's servers from NetBox, the inventory's source of truth, as inventory.yaml lists them: each device of the site
-# with its BMC at its out-of-band IP, its manufacturer the vendor, its tenant the project, its rack, the tag canary and
-# its name the node. Read with NETBOX_TOKEN, a read-only API token
-def netbox_servers(url, site) -> list[dict]:
+# A site's servers, from NetBox, the inventory's only source: each device of the site with its BMC at its out-of-band
+# IP, its manufacturer the vendor, its tenant the project, its rack, its tags canary and writable, its name the node,
+# and how its BMC is reached from its config context (its site's and its platform's, merged by NetBox). Read with
+# NETBOX_TOKEN, the service's read-only API token
+def load_servers(url=NETBOX_URL, site=SITE.name) -> list[dict]:
     if not (token := os.environ.get("NETBOX_TOKEN")):
-        raise SystemExit("NETBOX_TOKEN isn't set: make sets it from control/netbox/.netbox.env, which make control-up "
+        raise SystemExit("NETBOX_TOKEN isn't set: make sets it from control/netbox/.tokens.env, which make control-up "
                          "makes")
     servers, page = [], f"{url.rstrip('/')}/api/dcim/devices/?site={site}&limit=1000"
     while page:
@@ -396,22 +389,30 @@ def netbox_servers(url, site) -> list[dict]:
             raise SystemExit(f"NetBox at {url}: {reason(str(e))}. make control-up starts it")
         body = r.json()
         for d in body["results"]:
+            # only how its BMC is reached: a context can't make a host canary or writable, only a tag can
+            context = {k: v for k, v in (d.get("config_context") or {}).items() if k in CONNECTION}
             if not d["oob_ip"]:
                 log.warning("NetBox: %s has no out-of-band IP, so its BMC isn't read", d["display"])
-                continue
-            host = d["oob_ip"]["address"].split("/")[0]
-            server = {"host": host, "vendor": d["device_type"]["manufacturer"]["name"],
-                      "project": (d["tenant"] or {}).get("name"), "rack": (d["rack"] or {}).get("name"),
-                      "canary": any(t["slug"] == "canary" for t in d["tags"]) or None,
-                      "node": d["name"] if d["name"] != host else None}
-            servers.append({k: v for k, v in server.items() if v is not None})
+            elif not {"username_env", "password_env"} <= context.keys():
+                log.warning("NetBox: %s has no BMC account in its config context (username_env, password_env), so "
+                            "its BMC isn't read", d["display"])
+            else:
+                host, tags = d["oob_ip"]["address"].split("/")[0], {t["slug"] for t in d["tags"]}
+                server = {"host": host, "vendor": d["device_type"]["manufacturer"]["name"],
+                          "project": (d["tenant"] or {}).get("name"), "rack": (d["rack"] or {}).get("name"),
+                          "canary": "canary" in tags or None, "writable": "writable" in tags or None,
+                          "node": d["name"] if d["name"] != host else None}
+                # unless its context says otherwise, HTTPS with the certificate checked: every reader takes the entry
+                servers.append({"scheme": "https", "verify": True, **context,
+                                **{k: v for k, v in server.items() if v is not None}})
         page = body["next"]
     return servers
 
 
 # Crawl every BMC in parallel, snapshot each host and return the summary table
 def collect(args) -> list:
-    servers = load_servers(args.config)
+    if not (servers := load_servers()):
+        raise SystemExit(f"no BMC in NetBox site {SITE.name}: its hosts are added in NetBox (PROD.md)")
     tunnels = [tunnel(server) for server in servers]
     with ThreadPoolExecutor(len(servers)) as pool:
         snaps = list(pool.map(snapshot, servers, tunnels))
@@ -554,9 +555,9 @@ def exposition(server, found, seconds) -> list[str]:
 
 # Crawl every BMC each interval, one session kept per BMC, and serve the latest metrics on /metrics
 def exporter(args) -> list:
-    servers = load_servers(args.config) if Path(args.config).exists() else []
+    servers = load_servers()
     if not servers:
-        log.warning("exporter: no BMC in %s, nothing to read", args.config)
+        log.warning("exporter: no BMC in NetBox site %s, nothing to read", SITE.name)
     for server in servers:
         tunnel(server)
     parts = {server["host"]: [] for server in servers}
@@ -940,9 +941,7 @@ def main() -> None:
     output = output_options()
     commands = p.add_subparsers(dest="command", required=True, metavar="command")
     command = lambda name, run, help: commands.add_parser(name, parents=[output], help=help).set_defaults(run=run)
-    c = commands.add_parser("collect", parents=[output], help="crawl every BMC in the inventory, snapshot each host")
-    c.add_argument("config", nargs="?", default=INVENTORY_FILE, help="the BMCs [<site>/inventory.yaml]")
-    c.set_defaults(run=collect)
+    command("collect", collect, "crawl every BMC of the site, snapshot each host")
     command("health", view_health, "what is broken right now: health, jobs to check, failed requests")
     command("firmware", view_firmware, "firmware per hardware model, against the baseline")
     command("inventory", view_inventory, "one row per host: what we have")
@@ -950,7 +949,6 @@ def main() -> None:
     command("capabilities", view_capabilities, "what each hardware model can do")
     command("diff", view_diff, "what changed since the previous collect")
     e = commands.add_parser("exporter", help="read every BMC each interval, serve the metrics to Prometheus")
-    e.add_argument("config", nargs="?", default=INVENTORY_FILE, help="the BMCs [<site>/inventory.yaml]")
     e.add_argument("--listen", default="127.0.0.1:9101", help="address:port to serve /metrics on [127.0.0.1:9101]")
     e.add_argument("--interval", type=float, default=10, help="seconds between two reads of every BMC [10]")
     e.set_defaults(run=exporter)

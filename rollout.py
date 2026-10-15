@@ -10,7 +10,7 @@
                     SoftwareId:<id> for the row whose entries carry that id on each host.
                     Per host a verdict with every reason: go, skip (nothing to do now, or busy: try a later wave) or
                     block (a person has to look). The hosts that pass go into waves: a canary, then waves spread
-                    across racks (the inventory's optional rack, else its project). One table per vendor.
+                    across racks (the host's rack in NetBox, else its project). One table per vendor.
 
 Pre-flight never updates without a way back and never goes down, or in an unknown direction, by accident: it needs
 the target version's image in the image catalog (file and sha256), and blocks a downgrade or an order it can't tell
@@ -26,15 +26,16 @@ unless --allow-downgrade, and a component without a rollback path unless --accep
                     pre-flighted again right before it is touched. The saved plan decides the component, files,
                     options, policy and waves; a stage refuses to start when a file changed since the plan, and blocks
                     a host whose BMC isn't the one the plan read. Without --yes a dry run: what each host would get.
-                    With --yes only hosts marked writable: true in the inventory are updated (the lab), and only once
+                    With --yes only hosts tagged writable in NetBox are updated (the lab), and only once
                     the stage holds every one's lock in the state database (STATE_DB): another pipeline's host stops
                     it. Every step is recorded, its intent before it and its result after, in
                     <site>/runs/<pipeline>-<stage>.jsonl and the state database's events. A gate that
                     fails (a failing canary or strict wave, or failures over failure_rate) exits 1, so the next stage
                     doesn't run. pipeline.sh runs plan, the canary stage, then the waves stage.
 
-The site is the fleet: SITE=prod (the default) or SITE=lab, a folder with the inventory (inventory.yaml), the
-baseline (baseline.yaml), the image catalog (images.yaml, its files relative to the folder) and the run records."""
+The site is the fleet: SITE=prod (the default) or SITE=lab. Its hosts are NetBox's site of that name (NETBOX_URL, read
+with NETBOX_TOKEN), its baseline and image catalog control/catalog/<site>/, and its folder holds its policy and run
+records."""
 import argparse
 import getpass
 import hashlib
@@ -64,7 +65,7 @@ from rich.table import Column, Table
 from rich.text import Text
 
 from constants import (ACTION_ROW, ACTIONS_ROW, APPLY_TIME, BASELINE, CACHE_CA, DOTTED, FAILED_STATES, FAULTS, HOST_ROW,
-                       HOST_STATES, HOST_STEP, IMAGE_CACHE, IMAGES, INVENTORY_FILE, LEFT_OUT_ROW, NEXT_STEP, PLAN_ROW, PREFLIGHT_ROW,
+                       HOST_STATES, HOST_STEP, IMAGE_CACHE, IMAGES, LEFT_OUT_ROW, NETBOX_URL, NEXT_STEP, PLAN_ROW, PREFLIGHT_ROW,
                        PROPS, REPORT_SCHEMA, RESET_PREFERENCE, ROLLOUT, ROLLOUT_DEFAULTS, ROOT, RUNNING_STATES, RUNS,
                        SCENARIO, SCHEDULER_TIMEOUT, SITE, SPOOL, STEP_ROW, STYLE, TASK_TIMEOUT, VERSIONS_ROW, WAVE_ROW)
 from helpers import (block, first_of, first_real, identity, label, link, norm, obj, of, output_options, reason, sample,
@@ -588,9 +589,10 @@ def overview(servers, reads, baselines, policy, caption) -> list:
 def prepare(args) -> dict:
     """What plan shows and run starts from: servers, reads, results (None without a component), planned waves,
     baselines, policy and when the reads started."""
-    servers = [s for s in load_servers(args.inventory) if not args.hosts or s["host"] in args.hosts]
+    servers = [s for s in load_servers() if not args.hosts or s["host"] in args.hosts]
     if not servers:
-        raise SystemExit(f"no host of {args.inventory} matches --hosts {' '.join(args.hosts)}")
+        raise SystemExit(f"no host of NetBox site {SITE.name}"
+                         + (f" matches --hosts {' '.join(args.hosts)}" if args.hosts else ""))
     baselines, rollout = load_baseline(args.baseline), load_rollout(args)
     policy = {"allow_downgrade": args.allow_downgrade, "accept_no_rollback": args.accept_no_rollback,
               "images": load_images(args.images), "drain": rollout["drain"]}
@@ -632,10 +634,9 @@ def save_plan(args, servers, results, planned, rollout) -> None:
     Path(args.save).write_text(json.dumps({
         "created": datetime.now(timezone.utc).isoformat(timespec="seconds"), "planned_by": actor(),
         "component": args.component,
-        "inventory": os.path.relpath(args.inventory), "baseline": os.path.relpath(args.baseline),
+        "inventory": f"NetBox {NETBOX_URL}, site {SITE.name}", "baseline": os.path.relpath(args.baseline),
         "images": os.path.relpath(args.images),
-        "inputs": {os.path.relpath(f): sha256_of(f) for f in (args.inventory, args.baseline, args.images,
-                                                               rollout["file"]) if f},
+        "inputs": {os.path.relpath(f): sha256_of(f) for f in (args.baseline, args.images, rollout["file"]) if f},
         "approvals": {os.path.relpath(f): approval(f) for f in (args.baseline, args.images) if f},  # who approved
         "allow_downgrade": args.allow_downgrade, "accept_no_rollback": args.accept_no_rollback, "rollout": rollout,
         "waves": {name: [s["host"] for s in hosts] for name, hosts in planned},
@@ -1028,9 +1029,9 @@ def apply(server, found, key, image, want, before, policy, rec, phase) -> tuple[
 
 # Step 2 and the undrain of step 6: take a host out of the scheduler or give it back; (ok, output)
 def scheduler(command, server) -> tuple[bool, str]:
-    """policy.yaml's drain or undrain command with {host} and {node} (the inventory's node, else the host) filled in.
-    A drain must return only once the node is empty, its jobs ended, not once the scheduler stops sending it new ones;
-    one still running after SCHEDULER_TIMEOUT fails. None configured: nothing to do, as in the lab."""
+    """policy.yaml's drain or undrain command with {host} and {node} (the host's name in NetBox, else its address)
+    filled in. A drain must return only once the node is empty, its jobs ended, not once the scheduler stops sending it
+    new ones; one still running after SCHEDULER_TIMEOUT fails. None configured: nothing to do, as in the lab."""
     if not command:
         return True, "no scheduler configured"
     try:
@@ -1177,13 +1178,13 @@ def run(args) -> list:
     if changed := changed_inputs(saved):
         raise SystemExit(f"changed since the plan was approved: {', '.join(changed)}. A run does only what its "
                          "plan approved: plan again")
-    for key in ("component", "inventory", "baseline", "images", "allow_downgrade", "accept_no_rollback"):
+    for key in ("component", "baseline", "images", "allow_downgrade", "accept_no_rollback"):
         setattr(args, key, saved[key])
     stage = {name: hosts for name, hosts in saved["waves"].items() if (name == "canary") == (args.stage == "canary")}
     args.hosts = [h for hosts in stage.values() for h in hosts]
     if not args.hosts:
         return [Text(f"Nothing to do: the plan has no host for the {args.stage} stage")]
-    if changed := changed_hosts(saved, load_servers(args.inventory), args.hosts):
+    if changed := changed_hosts(saved, load_servers(), args.hosts):
         raise SystemExit(f"changed in the inventory since the plan was approved: {', '.join(changed)}. A run does "
                          "only what its plan approved: plan again")
     step = prepare(args)
@@ -1211,8 +1212,8 @@ def run(args) -> list:
         return [*plan_view, Text("\n".join([*skipped, "Dry run: no firmware changes. Add --yes to run it."]))]
     refused = [s["host"] for name, hosts in planned for s in hosts if s.get("writable") is not True]
     if refused:
-        raise SystemExit(f"not writable in {args.inventory}: {', '.join(refused)}. Only hosts marked writable: true "
-                         "are updated; production stays read-only.")
+        raise SystemExit(f"not tagged writable in NetBox: {', '.join(refused)}. Only hosts tagged writable are "
+                         "updated; production stays read-only.")
     pipeline, db = Path(args.plan).parent.name, state_db()
     if held := lock(db, pipeline, args.stage, args.hosts):
         raise SystemExit(f"locked: {', '.join(f'{h} by {p}' for h, p in held)}. One pipeline at a time touches a host: "
@@ -1685,10 +1686,9 @@ def main() -> None:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     commands = p.add_subparsers(dest="command", required=True, metavar="command")
     c = argparse.ArgumentParser(add_help=False)  # step 1, shared by plan and run
-    c.add_argument("--inventory", default=INVENTORY_FILE, help="the BMCs [<site>/inventory.yaml]")
     c.add_argument("--baseline", default=BASELINE, help="the approved versions [<site>/baseline.yaml]")
     c.add_argument("--images", default=IMAGES, help="the image catalog [<site>/images.yaml]")
-    c.add_argument("--hosts", nargs="+", metavar="HOST", help="only these hosts of the inventory")
+    c.add_argument("--hosts", nargs="+", metavar="HOST", help="only these hosts of the site")
     c.add_argument("--canary", dest="canary_per_model", type=int, help="canary hosts per hardware model [policy]")
     c.add_argument("--waves", type=lambda v: [float(w) for w in v.split(",")], metavar="PCT,…",
                    help="cumulative %% of the other hosts done after each wave, e.g. 5,25,100 [policy]")

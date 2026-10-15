@@ -115,27 +115,36 @@ no database holds them, only the catalog's path and sha256 for each.
 
 ### NetBox, the inventory's source of truth
 
-The lab's hosts live in NetBox on `http://127.0.0.1:8000`, in the control plane (NetBox, its PostgreSQL and Valkey),
-started by `make lab-up` or `make control-up`. `lab/inventory.yaml` names it
-(`netbox: {url, site}`) and keeps what isn't fleet data: the connection defaults and `writable`, reviewed in git. Its
-`servers` only seed an empty NetBox, once ([control/netbox/seed.py](control/netbox/seed.py)); after that, hosts change in NetBox.
+Both sites' hosts live in NetBox on `http://127.0.0.1:8000`, in the control plane (NetBox, its PostgreSQL and Valkey),
+started by `make lab-up` or `make control-up`, and nowhere else: no file lists them. The poller, the exporter and the
+rollout read the devices of their site (`SITE`) over NetBox's REST API.
+[control/netbox/seed.py](control/netbox/seed.py) makes what an empty NetBox needs: the services' accounts, the sites
+`lab` and `prod`, the tags, each site's config context, and the lab's ten BMCs; after that, hosts change in NetBox.
 
-| inventory.yaml | NetBox |
+| What the tools read | Where it is in NetBox |
 |---|---|
-| `host` | the device's out-of-band IP, on its management-only interface `bmc` |
-| `vendor`, `model` | the device type: its manufacturer, its model |
-| `project` | the tenant |
-| `rack` | the rack |
-| `canary: true` | the tag `canary` |
-| `node` | the device's name: `bmc1` to `bmc10`, the Compose services |
-| | role `server`: the device is the server, the BMC how it's reached |
+| the BMC's address | the device's out-of-band IP, on its management-only interface `bmc` |
+| vendor, model | the device type: its manufacturer, its model |
+| project, rack | the tenant, the rack |
+| node | the device's name: `bmc1` to `bmc10`, the Compose services; a device named after its IP has none |
+| canary, writable | the tags `canary` and `writable`: only a tag makes a host writable |
+| how its BMC is reached | its config contexts, its site's and its platform's, which NetBox merges. `site lab`: `verify: false`, `retries: 1`, `deadline: 300` and its account's env vars, `LAB_USERNAME` and `LAB_PASSWORD`. `site prod`: `verify: false`; each prod platform, a vendor's BMC, names its account's env vars. Without them: HTTPS, the certificate checked |
 
-The poller, the exporter and the rollout read the devices of site `lab` over NetBox's REST API as `redfish`, an
-account that can't log in and may only view devices, with `NETBOX_TOKEN`, its read-only token: a write, or a read of
-anything but devices, gets 403. `make` makes `control/netbox/.netbox.env` once, with random secrets: the token, the
-database and Valkey passwords, and the `admin` login's `SUPERUSER_PASSWORD` (git-ignored, never printed). A plan keeps
-each host's entry as NetBox gave it, and a stage refuses a host whose entry changed since: the file's sha256 can't pin
-what a service holds. The catalog and baseline stay files, reviewed in git. Screenshots: [The lab in NetBox](#the-lab-in-netbox).
+A device without an out-of-band IP, or without an account in its config context, is skipped with a warning. Each
+service reads as its own account, which can't log in and may only view devices, with its own read-only token: a
+write, or a read of anything but devices, gets 403.
+
+| Account | Its token | Used by |
+|---|---|---|
+| `redfish_poller_sa` | `NETBOX_TOKEN_POLLER` | `make collect` |
+| `redfish_exporter_sa` | `NETBOX_TOKEN_EXPORTER` | each site's exporter (`make site-up`) |
+| `redfish_rollout_sa` | `NETBOX_TOKEN_ROLLOUT` | `plan` and `run`: `make plan`, `dry-run`, `update`, `fault` |
+
+`make` makes `control/netbox/.tokens.env` once, with the three tokens, and hands each target only its own service's;
+`control/netbox/.netbox.env` holds NetBox's own secrets: the database and Valkey passwords and the `admin` login's
+`SUPERUSER_PASSWORD`. Both are random, git-ignored and never printed. A plan keeps each host's entry as NetBox gave it,
+and a stage refuses a host whose entry changed since. The catalog, the baseline and each site's policy stay files,
+reviewed in git. Screenshots: [The lab in NetBox](#the-lab-in-netbox).
 
 ### The state database
 
@@ -164,18 +173,18 @@ lists the locks, then each host's latest state; `make unlock HOST=...` gives a l
 
 ![The lab rollout: plan, canary and waves on the ten emulated BMCs, step by step](docs/lab-rollout.svg)
 
-Each site is a folder, `lab/` or `prod/`, picked with `SITE=lab` or `SITE=prod`. Three files describe its fleet:
-`inventory.yaml` (the BMCs, how to reach them, their rack, whether they are `writable`; the lab's hosts come from
-[NetBox](#netbox-the-inventorys-source-of-truth)), `baseline.yaml` (the approved
-version per model and component) and `images.yaml` (the image file and sha256 per version).
+Each site is a folder, `lab/` or `prod/`, picked with `SITE=lab` or `SITE=prod`. Its hosts come from
+[NetBox](#netbox-the-inventorys-source-of-truth): the BMCs, how to reach them, their rack, whether they are tagged
+`writable`. Two files of its catalog describe its firmware: `baseline.yaml` (the approved version per model and
+component) and `images.yaml` (the image file and sha256 per version).
 
 [pipeline.sh](pipeline.sh) runs the canary first, then wave by wave, with a gate after each:
 
 1. **plan**: reads every BMC live and pre-flights it, then puts the hosts that pass in waves as the site's rollout
    policy says ([Rollout policy](#rollout-policy)): a canary of each hardware model, then waves that grow, spread
    across racks. It saves `plan.json`, and the later stages run exactly that plan: it records the sha256 of every
-   file it read (inventory, baseline, catalog, policy) and each BMC's identity, and a stage refuses to start when one
-   of those files changed since. It also records who planned it (`ROLLOUT_ACTOR`, else the account and host `make`
+   file it read (baseline, catalog, policy), each host's entry from NetBox and each BMC's identity, and a stage
+   refuses to start when one of those changed since. It also records who planned it (`ROLLOUT_ACTOR`, else the account and host `make`
    runs as) and the git commit each catalog file was approved in; each stage records who started it, and
    `make cancel` who cancelled.
 2. **canary**: updates the canary hosts. Gate: any failure stops the pipeline, so wave 1 never starts.
@@ -310,7 +319,7 @@ policy is reviewed like code: it decides how many hosts a bad image can reach be
 
 | Setting | [lab](lab/policy.yaml) | [production](prod/policy.yaml) | What it does |
 |---|---|---|---|
-| `canary_per_model` | 1 | 1 | Hosts of each hardware model that go first. A bad image is almost always model-specific, so one canary for the whole fleet proves nothing for the other models. Hosts marked `canary: true` in the inventory go first, and the canaries keep to `max_per_rack` too, unless every host of a model is in a full rack. |
+| `canary_per_model` | 1 | 1 | Hosts of each hardware model that go first. A bad image is almost always model-specific, so one canary for the whole fleet proves nothing for the other models. Hosts tagged `canary` in NetBox go first, and the canaries keep to `max_per_rack` too, unless every host of a model is in a full rack. |
 | `waves` | 33, 100 | 5, 25, 100 | Cumulative % of the other hosts done after each wave: small while the evidence is thin, bigger once gates have passed. |
 | `max_per_rack` | 2 | 1 | Hosts of one rack in the same wave, at most; this caps host count, not measured spare capacity. The rest wait for a later wave, so it also caps a wave's size: 1,000 hosts in 100 racks at 1 per rack take 11 waves after the canary (50, then up to 100 each); at 2 per rack, 6. Racks only: limits per PDU, fabric pod or capacity aren't built. |
 | `strict_waves` | 1 | 1 | The first waves after the canary that halt on any failure, as the canary does. |
@@ -433,6 +442,7 @@ bad image from spreading, on real Redfish data: the lab BMC as a collect saved i
 | Post-check (`after_checks`) | the target runs; health no worse than before; a manager gone since fails; no new failed task. A task that says `Completed` while the old firmware still runs fails it |
 | One host (`run_host`, `scheduler`) | a failure before the reset: the old firmware still runs, nothing to roll back; after it: the version that ran before is reinstalled, not the target; a failed rollback, or none possible: `needs_attention`; a drain that fails or runs past its timeout fails the host before any update; an undrain that fails: `needs_attention`; a BMC that isn't the one the plan approved is blocked |
 | The frozen plan (`changed_inputs`) | an input file changed or gone since the plan stops the run |
+| The inventory (`load_servers`) | NetBox's devices, page by page: a config context's connection keys merged in, `canary` and `writable` from tags only (a context's `writable` ignored); a device without an out-of-band IP or a BMC account skipped; no token, or a site with no host, stops collect and plan with why |
 | The gate (`gate`) | any failure halts the canary and the strict waves; a later wave halts over `failure_rate`, exactly `failure_rate` passes; a host that failed its soak halts any wave; blocked and skipped hosts were never tried |
 | The ingest gate (`control/ingest/promote-fw-images.sh`) | a package signed with the pinned key is uploaded and written into the catalog; one without its image's signature, with its image changed after signing, without a required file, signed with another key, or not signed at all, is refused, and nothing reaches the store |
 | The image cache (`image_problems`) | an image fetched from a real HTTP server into the agent's copy and checked; one the cache doesn't have, or bytes that don't match, block, and the bad copy is deleted |
@@ -447,11 +457,11 @@ it does in a rollout.
 A test is worth something only if it fails when the code is wrong. The gate and the post-check's decision were written
 test first: the tests failed (there was no `gate` or `after_checks`), then the code moved out of `run` and
 `post_check` until they passed. For the code that came before its tests, [tests/mutations.py](tests/mutations.py) (`make mutations`)
-breaks one rule of `rollout.py` at a time the way a careless edit would: a downgrade let through,
+breaks one rule of the tools at a time the way a careless edit would: a downgrade let through,
 versions compared as text, a sha256 mismatch ignored, the rollback installing the target, the gate halting at exactly
 `failure_rate`, an image never fetched from the cache, an A/B bank counted as a way back, a host reset with no drain, a
-changed plan run anyway, a held lock let through, and 21 more. For each break, the test that guards the rule must
-fail: 31 of 31 do. Its first run found a
+changed plan run anyway, a held lock let through, `writable` taken from a config context, and 21 more. For each
+break, the test that guards the rule must fail: 32 of 32 do. Its first run found a
 gap: the strict-wave case had enough failures to halt anyway, so it passed with wave 1 not strict; the case now has 1
 failure in 11 hosts.
 
@@ -489,7 +499,7 @@ agent ([site/](site/docker-compose.yaml)). Every port is on 127.0.0.1:
 
 | Service | What it does |
 |---|---|
-| The exporter, a site's (lab `:9101`, prod `:9102`) | `poller.py exporter`: crawls every BMC of its site, each on its own loop, and serves the latest read on `/metrics`: what the equipment is (`redfish_host_info`: the inventory's vendor, project and rack, the BMC's Manufacturer and Model), whether it answered (`redfish_up`) and how many of its GETs failed (`redfish_failed_requests`: what they would have read is missing from that read), every reading with its unit (`redfish_reading`), its thresholds (`redfish_reading_threshold`) and how far past them it is (`redfish_reading_crossed`: 0 within, 1 caution, 2 critical, 3 fatal, upper or lower), the health of every object with a `Status`, each fan and power supply too (`redfish_health`), each firmware component with its running version, whether Redfish can update it and how an image gets in, push or pull, the same checks as `rollout.py plan` (`redfish_firmware_info`), the BMC's last reset (`LastResetTime`), and its memory and free storage (`ManagerDiagnosticData`). Standard properties only, read as `collect` reads them. The lab every 10 s on `:9101`; prod every 30 s on `:9102` (a crawl can take longer; see [the production exporter](PROD.md#the-exporter-on-the-real-fleet)), read-only, with `prod/.env`'s accounts; without a `prod/inventory.yaml` (a fresh clone) it reads nothing and stays up. |
+| The exporter, a site's (lab `:9101`, prod `:9102`) | `poller.py exporter`: crawls every BMC of its site, each on its own loop, and serves the latest read on `/metrics`: what the equipment is (`redfish_host_info`: the inventory's vendor, project and rack, the BMC's Manufacturer and Model), whether it answered (`redfish_up`) and how many of its GETs failed (`redfish_failed_requests`: what they would have read is missing from that read), every reading with its unit (`redfish_reading`), its thresholds (`redfish_reading_threshold`) and how far past them it is (`redfish_reading_crossed`: 0 within, 1 caution, 2 critical, 3 fatal, upper or lower), the health of every object with a `Status`, each fan and power supply too (`redfish_health`), each firmware component with its running version, whether Redfish can update it and how an image gets in, push or pull, the same checks as `rollout.py plan` (`redfish_firmware_info`), the BMC's last reset (`LastResetTime`), and its memory and free storage (`ManagerDiagnosticData`). Standard properties only, read as `collect` reads them. The lab every 10 s on `:9101`; prod every 30 s on `:9102` (a crawl can take longer; see [the production exporter](PROD.md#the-exporter-on-the-real-fleet)), read-only, with `prod/.env`'s accounts; with no device in its NetBox site (prod, on a fresh clone) it reads nothing and stays up. It reads its site's hosts from NetBox when it starts: a host added since is read once it restarts. |
 | The Prometheus agent, a site's (lab `:9201`, prod `:9202`) | Prometheus in agent mode beside the exporter: it scrapes it every 10 s and pushes every sample to the control plane's Prometheus (remote write, [lab/prometheus-agent.yml](lab/prometheus-agent.yml)), so the control plane never connects into a site. It keeps no history, only what it hasn't sent yet. |
 | Pushgateway `:9091` | Where `rollout.py run` pushes its report as metrics after every recorded event (`PUSHGATEWAY`): hosts by wave and state, versions, every step's duration, every check after the flash, each gate. A plan that blocks every host pushes its blocked hosts and the halt, as stage `plan`. Best effort: if it is down, the rollout logs it once and goes on. It holds each run's latest push in memory, until deleted or restarted; the dashboards don't depend on it. They read Prometheus's history: the Pipeline dashboard lists the pipelines with data in the selected time range (24 hours by default) and shows each as its last push in that range left it, so a pipeline from days ago opens the same as a live one, for the 15 days Prometheus keeps it. That holds because no series vanishes between two pushes of a run: every state is pushed, 0 or not, and a host's info, whose labels change as it moves on, carries the time of its latest event, so the dashboard keeps its newest row. |
 | Loki `:3100` | Where `rollout.py run` sends every event of its run record as it writes it (`LOKI`): each step of each host with its detail, the Task's messages, the checks. Labelled only `job` and `site`; the pipeline, stage, wave, host and step are fields of the JSON line, which LogQL's `json` reads, so it stays one stream per site however many hosts and pipelines there are. Keeps 15 days, best effort like the Pushgateway. |
@@ -536,7 +546,7 @@ to site prod, and a read-only note on the pipeline), so a change is made once an
 
 The inventory as NetBox holds it, on `http://127.0.0.1:8000` ([how the tools use it](#netbox-the-inventorys-source-of-truth)).
 Every device is a server of site `lab`, named after its Compose service: model GB200 NVL by NVIDIA, its rack and
-project, and its BMC's address as the out-of-band IP. `bmc1` carries the tag `canary`.
+project, and its BMC's address as the out-of-band IP. Each carries the tag `writable`, `bmc1` also `canary`.
 
 ![NetBox: the ten lab servers, each with its rack, model and out-of-band IP](docs/netbox/devices.png)
 
@@ -552,13 +562,18 @@ The ten BMC addresses, one per server, each on its server's `bmc` interface
 
 ![NetBox: the ten BMC addresses, 127.1.0.1 to 127.1.0.10](docs/netbox/ip-addresses.png)
 
-What the tools may do: the account `redfish` may only view devices; adding, changing and deleting are refused
+How the lab's BMCs are reached: the config context `site lab`, which NetBox merges into each lab device's
 
-![NetBox: the permission redfish: view devices, only View on DCIM device](docs/netbox/permission.png)
+![NetBox: the config context site lab: verify false, retries 1, deadline 300, LAB_USERNAME and LAB_PASSWORD](docs/netbox/config-context.png)
 
-Its API token is read-only (write disabled), so a write is refused twice over
+What the services may do: each one's account, `redfish_poller_sa`, `redfish_exporter_sa` and `redfish_rollout_sa`,
+may only view devices; adding, changing and deleting are refused
 
-![NetBox: the API tokens, redfish's read-only](docs/netbox/tokens.png)
+![NetBox: the permissions, each service's account may only view DCIM devices](docs/netbox/permission.png)
+
+Each one's API token is read-only (write disabled), so a write is refused twice over
+
+![NetBox: the API tokens, one read-only token per service](docs/netbox/tokens.png)
 
 ## The lab in Grafana
 

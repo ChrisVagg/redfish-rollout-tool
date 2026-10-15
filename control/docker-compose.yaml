@@ -10,12 +10,13 @@ name: redfish-control
 x-netbox-secrets: &netbox-secrets
   env_file: netbox/.netbox.env
 services:
-  # NetBox, the inventory's source of truth: the lab's hosts, their racks, projects and BMC addresses. Its secrets are
-  # random, made once by make into control/netbox/.netbox.env: the admin's password is SUPERUSER_PASSWORD there; the tools read
-  # as the account redfish, which may only view devices, with NETBOX_TOKEN, its read-only API token
+  # NetBox, the inventory's only source: both sites' hosts, their racks, projects, BMC addresses and how each BMC is
+  # reached (config contexts). Its secrets are random, made once by make into control/netbox/.netbox.env: the admin's
+  # password is SUPERUSER_PASSWORD there. Each service reads as its own account, which may only view devices, with its
+  # read-only API token from control/netbox/.tokens.env, which seed.py gives it
   netbox:
     image: netboxcommunity/netbox:v4.7.2-5.1.1
-    <<: *netbox-secrets
+    env_file: [netbox/.netbox.env, netbox/.tokens.env]  # the tokens for seed.py
     restart: unless-stopped
     depends_on:
       netbox-postgres: {condition: service_healthy}
@@ -26,7 +27,6 @@ services:
     environment: [DB_HOST=netbox-postgres, DB_NAME=netbox, DB_USER=netbox, REDIS_HOST=netbox-redis,
                   SKIP_SUPERUSER=false, SUPERUSER_NAME=admin, GRANIAN_EXTRA_ARGS=--host=0.0.0.0]
     healthcheck: {test: /opt/netbox/health.sh, start_period: 600s, timeout: 3s, interval: 5s}  # the first start migrates
-    volumes: ["../lab/inventory.yaml:/seed/lab/inventory.yaml:ro"]  # what seed.py loads
   netbox-postgres:
     image: postgres:18-alpine
     <<: *netbox-secrets

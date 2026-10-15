@@ -10,6 +10,7 @@ import tempfile
 import time
 from collections import Counter
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parent.parent  # the repository, where the tools under test are
@@ -464,14 +465,25 @@ def test_who():
     assert rollout.approval(repo / "images.yaml", repo) is None
 
 
-# NetBox's devices as inventory.yaml lists servers, page after page: a device without an out-of-band IP isn't read
+# NetBox's devices as the tools' servers, page after page: a device's config context gives how its BMC is reached
+# (else HTTPS, the certificate checked: every entry says, as each reader takes it), canary and writable come from its
+# tags only; a device without an out-of-band IP or a BMC account isn't read. No token, or a site with no host, stops
+# collect and plan with why
 def test_netbox_inventory():
+    lab = {"verify": False, "retries": 1, "deadline": 300, "username_env": "LAB_USERNAME",
+           "password_env": "LAB_PASSWORD"}
     device = {"display": "bmc1", "name": "bmc1", "oob_ip": {"address": "127.1.0.1/32"}, "tenant": {"name": "lab"},
-              "device_type": {"manufacturer": {"name": "NVIDIA"}}, "rack": {"name": "r1"}, "tags": [{"slug": "canary"}]}
-    bare = {**device, "name": "127.1.0.2", "oob_ip": {"address": "127.1.0.2/32"}, "tenant": None, "rack": None,
-            "tags": []}
+              "device_type": {"manufacturer": {"name": "NVIDIA"}}, "rack": {"name": "r1"},
+              "tags": [{"slug": "canary"}, {"slug": "writable"}], "config_context": lab}
+    # a platform's context names its account; its writable and workers are no connection keys: dropped
+    bare = {**device, "display": "10.0.0.5", "name": "10.0.0.5", "oob_ip": {"address": "10.0.0.5/32"},
+            "tenant": None, "rack": None, "tags": [], "device_type": {"manufacturer": {"name": "DELL"}},
+            "config_context": {"username_env": "DELL_USERNAME", "password_env": "DELL_PASSWORD", "writable": True,
+                               "workers": 4}}
     pages = {"http://nb/api/dcim/devices/?site=lab&limit=1000": {"results": [device], "next": "http://nb/2"},
-             "http://nb/2": {"results": [bare, {**device, "display": "spare", "oob_ip": None}], "next": None}}
+             "http://nb/2": {"results": [bare, {**device, "display": "spare", "oob_ip": None},
+                                         {**device, "display": "no account", "config_context": {"verify": False}}],
+                             "next": None}}
 
     class Answer:  # one page of NetBox's answer
         def __init__(self, url, **_):
@@ -484,9 +496,32 @@ def test_netbox_inventory():
             return self.body
 
     with patch.dict(os.environ, {"NETBOX_TOKEN": "nbt_key.token"}), patch("poller.requests.get", Answer):
-        assert poller.netbox_servers("http://nb/", "lab") == [
-            {"host": "127.1.0.1", "vendor": "NVIDIA", "project": "lab", "rack": "r1", "canary": True, "node": "bmc1"},
-            {"host": "127.1.0.2", "vendor": "NVIDIA"}]
+        assert poller.load_servers("http://nb/", "lab") == [
+            {"host": "127.1.0.1", "vendor": "NVIDIA", "project": "lab", "rack": "r1", "canary": True,
+             "writable": True, "node": "bmc1", "scheme": "https", **lab},
+            {"host": "10.0.0.5", "vendor": "DELL", "scheme": "https", "verify": True, "username_env": "DELL_USERNAME",
+             "password_env": "DELL_PASSWORD"}]
+    with patch.dict(os.environ, {"NETBOX_TOKEN": ""}):
+        try:
+            poller.load_servers("http://nb/", "lab")
+        except SystemExit as e:
+            assert ".tokens.env" in str(e), e
+        else:
+            raise AssertionError("NetBox read without a token")
+    with patch("poller.load_servers", lambda: []):
+        try:
+            poller.collect(None)
+        except SystemExit as e:
+            assert "no BMC in NetBox site" in str(e), e
+        else:
+            raise AssertionError("a site with no host collected")
+    with patch("rollout.load_servers", lambda: []):
+        try:
+            rollout.prepare(SimpleNamespace(hosts=None))
+        except SystemExit as e:
+            assert "no host of NetBox site" in str(e), e
+        else:
+            raise AssertionError("a site with no host planned")
 
 
 # ---- Update methods, metrics, the exporter ----

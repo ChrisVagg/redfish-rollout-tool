@@ -8,8 +8,19 @@ from pathlib import Path
 DASHBOARDS = Path(__file__).parent / "dashboards"
 NOTE = {"type": "text", "title": "", "id": 99, "gridPos": {"x": 0, "y": 0, "w": 24, "h": 3}, "transparent": True,
         "options": {"mode": "markdown", "content": (
-            "**Production is read-only.** `rollout.py run --yes` refuses hosts not marked `writable: true`, and none in "
-            "`prod/inventory.yaml` is, so no pipeline pushes here. `make plan SITE=prod` shows what a rollout would do.")}}
+            "**Production is read-only.** `rollout.py run --yes` refuses hosts not tagged `writable` in NetBox, and no "
+            "host of site `prod` is, so no pipeline pushes here. `make plan SITE=prod` shows what a rollout would "
+            "do.")}}
+# Grafana's Group to nested tables: a row per project, its hosts in a table under it. A field aggregated into the
+# project's row leaves the hosts' table, so the row's are copies of the Redfish (I) and health (J) queries: how many
+# hosts, the worst Redfish (0 down) and the worst health of them, so a collapsed project still shows a host down
+BY_PROJECT = [
+    {"id": "groupToNestedTable", "options": {"showSubframeHeaders": True, "fields": {
+        "Project": {"operation": "groupby", "aggregations": []},
+        "Value #I": {"operation": "aggregate", "aggregations": ["count", "min"]},
+        "Value #J": {"operation": "aggregate", "aggregations": ["max"]}}}},
+    {"id": "organize", "options": {"renameByName": {
+        "Value #I (count)": "Hosts", "Value #I (min)": "Redfish", "Value #J (max)": "Worst health"}}}]
 
 
 # A dashboard with lab's site, title, folder link, ids and links between dashboards made prod's
@@ -33,6 +44,20 @@ if __name__ == "__main__":
             for panel in doc["panels"]:
                 panel["gridPos"]["y"] += NOTE["gridPos"]["h"]
             doc["panels"].insert(0, NOTE)
+        if lab.stem == "fleet":  # prod's hosts belong to projects: the Hosts table grouped by project
+            hosts = next(p for p in doc["panels"] if p["title"] == "Hosts")
+            redfish, health = hosts["targets"][:2]
+            hosts["targets"] += [{**redfish, "refId": "I"}, {**health, "refId": "J"}]
+            hosts["transformations"] += BY_PROJECT
+            hosts["description"] += (" Grouped by project: a row each, with its hosts' count and the worst Redfish and "
+                                     "health among them; open it for its hosts.")
+            for panel in doc["panels"]:  # taller, room for an open project under the projects: the rest below it
+                if panel["gridPos"]["y"] > hosts["gridPos"]["y"]:
+                    panel["gridPos"]["y"] += 6
+            hosts["gridPos"]["h"] += 6
+            overrides = hosts["fieldConfig"]["overrides"]  # the hosts' table takes only the overrides scoped nested
+            overrides += [{**o, "matcher": {**o["matcher"], "scope": "nested"}} for o in overrides]
+            hosts["options"]["sortBy"] = [{"displayName": "Project", "desc": False}]
         text = json.dumps(doc, indent=1, ensure_ascii=False) + "\n"
         left = re.findall(r'"[Ll]ab"|"Lab |lab-(?:fleet|host|pipeline)', text)
         if left:

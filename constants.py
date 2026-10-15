@@ -27,10 +27,13 @@ WILDCARD = re.compile(r"\\\{(\w+)\\\}")  # {Name} in a re.escape'd MetricPropert
 REASON = re.compile(r"\[Errno -?\d+\] [^'\"()]+|(?:Read )?timed out|certificate verify failed[^'\"(]*"
                     r"|\d{3} \w+ Error: .*?(?= for url)|too many \d+ error responses")
 SCHEMAS = Path(__file__).with_name("schemas")  # DMTF JSON Schemas, fetched once, then read offline
-# The site: the folder of one fleet, prod (the default) or lab with SITE=lab. It holds the fleet's inventory, baseline
-# and image catalog, and what the tools write about it.
+# The site: the folder of one fleet, prod (the default) or lab with SITE=lab. It holds the site's policy and what the
+# tools write about it; its hosts are NetBox's site of the same name
 SITE = Path(__file__).parent / os.environ.get("SITE", "prod")
-INVENTORY_FILE = SITE / "inventory.yaml"  # the BMCs and how to reach them
+# NetBox, the inventory's only source: each service reads it with its own read-only API token, NETBOX_TOKEN
+NETBOX_URL = os.environ.get("NETBOX_URL", "http://127.0.0.1:8000")
+# What a device's config context may set: how its BMC is reached. Whether it is canary or writable comes from its tags
+CONNECTION = ("scheme", "verify", "timeout", "retries", "max_failures", "deadline", "username_env", "password_env")
 # The site's firmware catalog: the control plane's, YAML reviewed in git, a folder per site
 CATALOG = Path(__file__).parent / "control" / "catalog" / SITE.name
 BASELINE = CATALOG / "baseline.yaml"  # the approved firmware version per model and component
@@ -45,7 +48,7 @@ CACHE_CA = SITE / "cache" / "tls.crt"  # the cache's certificate when it is self
 RUNS = SITE / "runs"  # the record of each rollout run: runs/<pipeline>-<stage>.jsonl, one line per event
 ROLLOUT = SITE / "policy.yaml"  # how firmware rolls out on the site: canary, waves, gates
 # The rollout policy when the site has none, each value overridable in <site>/policy.yaml or by an option:
-#   canary_per_model  hosts of each hardware model that go first (inventory hosts marked canary: true first)
+#   canary_per_model  hosts of each hardware model that go first (hosts tagged canary in NetBox first)
 #   waves             after the canary: the cumulative % of the other hosts done after each wave; it ends with 100
 #   max_per_rack      hosts of one rack in the same wave, at most (0: no limit); the rest wait for a later wave
 #   strict_waves      the first waves after the canary that, like it, halt on any failure

@@ -9,7 +9,7 @@ only, no vendor Oem code.
 | **Lab**, [LAB.md](LAB.md) | 10 emulated OpenBMC BMCs (QEMU in Docker), an image store fed by a signature-checking ingest script, an HTTPS image cache | every update so far ran here |
 | **Production**, [PROD.md](PROD.md) | ASUS, Dell, HPE, Gigabyte and Supermicro servers | read-only: monitoring, plans, dry runs |
 
-`make update` refuses production; `rollout.py` writes only to hosts marked `writable: true`, and only with `--yes`.
+`make update` refuses production; `rollout.py` writes only to hosts tagged `writable` in NetBox, and only with `--yes`.
 
 ![The lab rollout: plan, canary and waves on the ten emulated BMCs, step by step](docs/lab-rollout.svg)
 
@@ -94,7 +94,7 @@ swap the commented line in `control/catalog/lab/baseline.yaml` and run `make upd
 | Command | What it checks |
 |---|---|
 | `make test` | 26 tests, no BMC: pre-flight, post-check, rollback, gates, the frozen plan, the ingest gate, the image cache, on recorded Redfish data; host locks and append-only events, on the state database. `make update` runs it first |
-| `make mutations` | breaks 31 safety rules one at a time; every break fails a test |
+| `make mutations` | breaks 32 safety rules one at a time; every break fails a test |
 | `make fault SCENARIO=…` | the real pipeline on the lab, with a fault injected |
 
 ## Not built yet
@@ -118,25 +118,25 @@ poller.py           collect, the views (health, firmware, inventory, telemetry, 
 redfish.py          the Redfish connection both tools share: session, token, GET, POST, DELETE
 rollout.py          plan, run, report
 tests/              test_rollout.py, the rollout's decisions on recorded Redfish data: make test;
-                    mutations.py, breaks rollout.py one rule at a time, each break must fail a test: make
+                    mutations.py, breaks the tools one rule at a time, each break must fail a test: make
                     mutations; testdata/, the lab BMC as a collect saved it, which the tests read
 constants.py        what to crawl, table columns, rollout constants
 helpers.py          shared helpers
 schemas/            DMTF Redfish JSON Schemas for sensor units, downloaded on first use (git-ignored)
 control/            the control plane, Compose for one per fleet: ingest/, download-fw-images.sh and
                     promote-fw-images.sh with openbmc-dev.pub, the gate's pinned key; store/, the store's read-only
-                    access; netbox/seed.py, which loads lab/inventory.yaml into NetBox once; state/schema.sql: events,
-                    host_state, host_locks and the accounts redfish_rollout_sa and grafana; observability/,
-                    Prometheus, Loki and Grafana: a Lab and a Prod dashboard folder, prod_dashboards.py making the prod
-                    ones from the lab's; catalog/<site>/, the firmware catalog: baseline.yaml, images.yaml. The
-                    secrets, .netbox.env, .state.env and .grafana.env, stay local
+                    access; netbox/seed.py: NetBox's service accounts, sites and the lab's ten BMCs;
+                    state/schema.sql: events, host_state, host_locks and the accounts redfish_rollout_sa and grafana;
+                    observability/, Prometheus, Loki and Grafana: a Lab and a Prod dashboard folder, prod_dashboards.py
+                    making the prod ones from the lab's; catalog/<site>/, the firmware catalog: baseline.yaml,
+                    images.yaml. The secrets, .netbox.env, .tokens.env, .state.env and .grafana.env, stay local
 site/               a site, Compose for one per site: the exporter's Dockerfile, the Prometheus agent, cache/, the
                     image cache's nginx config
 lab/                the lab: its hardware, the BMCs' Dockerfile and docker-compose.yaml, and scenario.sh; its site,
-                    inventory.yaml, policy.yaml, prometheus-agent.yml
-prod/               the real fleet's site: policy.yaml, prometheus-agent.yml; inventory.yaml and .env stay local
+                    policy.yaml and prometheus-agent.yml
+prod/               the real fleet's site: policy.yaml, prometheus-agent.yml; .env stays local
 docs/               the diagrams: the rollout, the lab, production today, a production system, the lab on its
                     layout, one update as resources; grafana/, a screenshot of every panel; netbox/, the
-                    lab's inventory in NetBox
+                    inventory in NetBox
 docs/runs/          reports of real lab runs: the update and every bad-update scenario
 ```

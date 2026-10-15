@@ -1,5 +1,5 @@
-"""Proof the tests catch what they are for: break one rule of rollout.py at a time, the way a careless edit would, and
-check the test that guards it fails. The breaks go into a copy, never into rollout.py: make mutations. Run it before
+"""Proof the tests catch what they are for: break one rule of the tools at a time, the way a careless edit would, and
+check the test that guards it fails. The breaks go into a copy, never into the tools: make mutations. Run it before
 changing a safety rule; a rule whose line changed must be updated in BREAKS too."""
 import re
 import shutil
@@ -59,12 +59,15 @@ BREAKS = [  # (what a careless edit does, the line as it is, the line broken, th
      "test_metrics_mid_run"),
     ("a host changed in the inventory runs", 'if current.get(h) != saved["servers"].get(h)]', "if False]",
      "test_frozen_plan"),
+    ("writable from a config context",
+     'context = {k: v for k, v in (d.get("config_context") or {}).items() if k in CONNECTION}',
+     'context = dict(d.get("config_context") or {})', "test_netbox_inventory"),
     ("a held lock let through", "if taken == set(hosts):", "if True:", "test_host_locks"),
     ("a host left for a person unlocked", 'if o["state"] == "needs_attention")', "if False)", "test_host_locks"),
 ]
 
 if __name__ == "__main__":
-    original = (ROOT / "rollout.py").read_text()
+    tools = {f.name: f.read_text() for f in ROOT.glob("*.py")}  # rollout.py and the tools it imports
     missed = []
     with tempfile.TemporaryDirectory() as copy:
         for f in ROOT.glob("*.py"):
@@ -73,12 +76,14 @@ if __name__ == "__main__":
         (Path(copy) / "control" / "ingest").mkdir(parents=True)  # the ingest gate's test runs its script
         shutil.copy2(ROOT / "control" / "ingest" / "promote-fw-images.sh", Path(copy) / "control" / "ingest")
         for what, line, broken, test in BREAKS:
-            if original.count(line) != 1:
-                sys.exit(f"rollout.py changed: the line {what!r} breaks is there {original.count(line)} times, not "
-                         "once. Update it in BREAKS.")
-            (Path(copy) / "rollout.py").write_text(original.replace(line, broken))
+            where = [name for name, text in tools.items() if line in text]
+            if len(where) != 1 or tools[where[0]].count(line) != 1:
+                sys.exit(f"the line {what!r} breaks is in {', '.join(where) or 'no tool'}, not once in one tool. "
+                         "Update it in BREAKS.")
+            (Path(copy) / where[0]).write_text(tools[where[0]].replace(line, broken))
             out = subprocess.run([sys.executable, "tests/test_rollout.py"], cwd=copy, capture_output=True,
                                  text=True).stdout
+            (Path(copy) / where[0]).write_text(tools[where[0]])  # whole again for the next break
             failing = re.findall(r"^FAIL  (\w+)", out, re.M)
             print(f"{'caught' if test in failing else 'MISSED'}  {what:32} {', '.join(failing) or 'no test failed'}")
             missed += [what] if test not in failing else []

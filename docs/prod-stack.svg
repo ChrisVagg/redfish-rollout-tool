@@ -1,4 +1,4 @@
-<svg viewBox="0 0 900 608" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Production today: the real fleet, read-only. prod/policy.yaml holds the policy for when writes are enabled: a canary of one host per hardware model, then waves to 5%, 25% and 100%, at most one host of a rack in a wave, the first wave strict, a halt over 2% failed, a 30 minute soak, 50 at once. Today poller.py collects every BMC and shows health, firmware, inventory, telemetry, capabilities and diff views, and its exporter reads every BMC on a 30-second interval for Prometheus and Grafana; rollout.py plan pre-flights and plans waves, read-only; run --yes is refused because no host is writable. Both use the prod/ folder: the inventory, the policy, the Prometheus agent's targets and the BMC accounts for read-only operations in .env; the baseline is the control plane's, in control/catalog/prod/. They speak Redfish over HTTPS, reads only plus a session login and logout, to the real fleet: each vendor's own Redfish implementation, ASUS Z13PH-D16 and Gigabyte TO24-JD1 on AMI's Redfish server, Dell PowerEdge R630 and R730xd on iDRAC 8, HPE ProLiant DL360 Gen9 on iLO 4, Supermicro SYS-221H-TNR on Supermicro's BMC firmware, each on the BMC chip of its motherboard. The observability stack runs in Docker Compose, every service on 127.0.0.1: the prod site's exporter, poller.py exporter, reads every BMC over Redfish on a 30-second interval, and the site's Prometheus agent pushes its samples to the control plane's Prometheus (remote write); Prometheus also scrapes the Pushgateway, where only lab runs push; Grafana shows them in a Prod folder, Prod · Fleet manager, Prod · Host and Prod · Pipeline, next to a Lab folder.">
+<svg viewBox="0 0 900 608" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Production today: the real fleet, read-only. prod/policy.yaml holds the policy for when writes are enabled: a canary of one host per hardware model, then waves to 5%, 25% and 100%, at most one host of a rack in a wave, the first wave strict, a halt over 2% failed, a 30 minute soak, 50 at once. Today poller.py collects every BMC and shows health, firmware, inventory, telemetry, capabilities and diff views, and its exporter reads every BMC on a 30-second interval for Prometheus and Grafana; rollout.py plan pre-flights and plans waves, read-only; run --yes is refused because no host is tagged writable. Both read the hosts from NetBox, site prod, each with its own read-only account, and use the prod/ folder: the policy, the Prometheus agent's targets and the BMC accounts for read-only operations in .env; the baseline is the control plane's, in control/catalog/prod/. They speak Redfish over HTTPS, reads only plus a session login and logout, to the real fleet: each vendor's own Redfish implementation, ASUS Z13PH-D16 and Gigabyte TO24-JD1 on AMI's Redfish server, Dell PowerEdge R630 and R730xd on iDRAC 8, HPE ProLiant DL360 Gen9 on iLO 4, Supermicro SYS-221H-TNR on Supermicro's BMC firmware, each on the BMC chip of its motherboard. The observability stack runs in Docker Compose, every service on 127.0.0.1: the prod site's exporter, poller.py exporter, reads every BMC over Redfish on a 30-second interval, and the site's Prometheus agent pushes its samples to the control plane's Prometheus (remote write); Prometheus also scrapes the Pushgateway, where only lab runs push; Grafana shows them in a Prod folder, Prod · Fleet manager, Prod · Host and Prod · Pipeline, next to a Lab folder.">
   <style>
     .rfp text { font-family: var(--mono, monospace); }
     .rfp .bg { fill: var(--bg-deep, #050708); }
@@ -35,7 +35,7 @@
     <rect class="bg" x="0" y="0" width="900" height="608" rx="12"/>
 
     <!-- the policy for when writes are enabled: the rollout itself is rollout.svg -->
-    <g class="ind"><text class="band hi" x="20" y="24">PRODUCTION · THE REAL FLEET · READ-ONLY TODAY: NO HOST IS writable</text></g>
+    <g class="ind"><text class="band hi" x="20" y="24">PRODUCTION · THE REAL FLEET · READ-ONLY TODAY: NO HOST IS TAGGED writable</text></g>
     <rect class="box" x="20" y="34" width="860" height="44" rx="8"/>
     <text class="name" x="450" y="52" text-anchor="middle">prod/policy.yaml · for when writes are enabled</text>
     <text class="sub" x="450" y="68" text-anchor="middle">canary 1 per model → waves to 5%, 25%, 100% · ≤ 1 per rack · wave 1 strict · halt over 2% · soak 30 min · 50 at once</text>
@@ -49,15 +49,15 @@
 
     <rect class="box" x="325" y="94" width="250" height="76" rx="8"/>
     <text class="name" x="450" y="116" text-anchor="middle">Site folder · prod/</text>
-    <text class="sub" x="450" y="134" text-anchor="middle">inventory · policy.yaml · agent</text>
-    <text class="sub" x="450" y="148" text-anchor="middle">.env: BMC credentials</text>
+    <text class="sub" x="450" y="134" text-anchor="middle">hosts: NetBox, site prod</text>
+    <text class="sub" x="450" y="148" text-anchor="middle">policy.yaml · agent · .env credentials</text>
     <text class="sub" x="450" y="162" text-anchor="middle">out: snapshots · runs · reports</text>
 
     <rect class="box" x="610" y="94" width="250" height="76" rx="8"/>
     <text class="name" x="735" y="116" text-anchor="middle">rollout.py plan</text>
     <text class="sub" x="735" y="134" text-anchor="middle">pre-flight: go · skip · block</text>
     <text class="sub" x="735" y="148" text-anchor="middle">canary and waves, read-only</text>
-    <text class="sub" x="735" y="162" text-anchor="middle">run --yes refused: none writable</text>
+    <text class="sub" x="735" y="162" text-anchor="middle">run --yes refused: none tagged writable</text>
 
     <path class="wire flow" d="M290 132H321" marker-end="url(#rfp-dim)"/>
     <path class="wire flow" d="M610 132H579" marker-end="url(#rfp-dim)"/>

@@ -13,8 +13,8 @@ WIDTH     := 200
 CONTROL   := docker compose -f control/docker-compose.yaml
 SITE_STACK = docker compose -p redfish-site-$(SITE) -f site/docker-compose.yaml
 LAB       := docker compose -f lab/docker-compose.yaml
-# the tools' read-only NetBox token, from control/netbox/.netbox.env
-TOKEN      = NETBOX_TOKEN=$$(sed -n 's/^NETBOX_TOKEN=//p' control/netbox/.netbox.env 2>/dev/null)
+# a service's read-only NetBox token, from control/netbox/.tokens.env: $(call token,POLLER), EXPORTER or ROLLOUT
+token      = NETBOX_TOKEN=$$(sed -n 's/^NETBOX_TOKEN_$(1)=//p' control/netbox/.tokens.env 2>/dev/null)
 # the rollout state database, where an update locks its hosts and adds its events, as the account redfish_rollout_sa
 DB         = STATE_DB=postgresql://redfish_rollout_sa:$$(sed -n 's/^REDFISH_ROLLOUT_SA_PASSWORD=//p' control/state/.state.env \
              2>/dev/null)@127.0.0.1:5432/rollout
@@ -26,7 +26,7 @@ FIRMWARE   = $(or $(COMPONENT),Manager (BMC))
 ifeq ($(SITE),lab)
   # OpenBMC's public default account; the rollout pushes its metrics to the Pushgateway and its events to Loki
   ENV       := SITE=lab LAB_USERNAME=root LAB_PASSWORD=0penBmc PUSHGATEWAY=http://127.0.0.1:9091 \
-               LOKI=http://127.0.0.1:3100 IMAGE_CACHE=https://127.0.0.1:8443 $(TOKEN) $(DB)
+               LOKI=http://127.0.0.1:3100 IMAGE_CACHE=https://127.0.0.1:8443 $(DB)
   # pre-flight can't put OpenBMC versions in order, so the lab allows either direction
   PLAN_ARGS := --allow-downgrade
   # the lab site: its exporter on :9101, its Prometheus agent on :9201, and the image cache, as it updates firmware
@@ -49,15 +49,16 @@ Setup
   make setup               create venv/ and install requirements.txt
   make test                the rollout's decisions on recorded Redfish data, in about a second, no BMC needed; the
                            host locks' test needs the state database, else it's skipped
-  make mutations           break each safety rule of rollout.py, in a copy: each break must fail a test
+  make mutations           break each safety rule of the tools, in a copy: each break must fail a test
 
 Control plane: one per fleet, every port on 127.0.0.1; the sites connect to it, never it to them
   make control-up          start NetBox (http://127.0.0.1:8000, admin's password: control/netbox/.netbox.env), the state
                            database (127.0.0.1:5432; its passwords: control/state/.state.env), the approved store,
                            Prometheus, the Pushgateway, Loki and Grafana (http://127.0.0.1:3000, account:
-                           control/observability/grafana/.grafana.env). Load lab/inventory.yaml's servers into NetBox,
-                           once, and ingest OpenBMC's two newest builds into the store when the catalog is missing
-                           (download, check their signatures, upload)
+                           control/observability/grafana/.grafana.env). Give NetBox the services' read-only accounts
+                           (tokens: control/netbox/.tokens.env) and, when it has none, the lab's ten BMCs; ingest
+                           OpenBMC's two newest builds into the store when the catalog is missing (download, check
+                           their signatures, upload)
   make control-down        stop it; its data stays in volumes
   make state               every host's lock, then each host's latest state
   make unlock HOST=...     give back a host's lock once a person checked it; several: HOST="a b"
@@ -123,16 +124,18 @@ test:
 	$(DB) $(PY) tests/test_rollout.py
 
 # the audit, before changing a safety rule: it finds each rule by its line, so it can't be the gate
-mutations: control/netbox/.netbox.env control/state/.state.env control/observability/grafana/.grafana.env
+mutations: control/netbox/.netbox.env control/netbox/.tokens.env control/state/.state.env \
+           control/observability/grafana/.grafana.env
 	$(CONTROL) up --detach --wait state-postgres
 	$(DB) $(PY) tests/mutations.py
 
 # ---- Control plane ----
-# Up, then NetBox's seed (the read-only token, and lab/inventory.yaml's servers when NetBox has no lab device yet), then
+# Up, then NetBox's seed (the services' accounts and tokens, the sites, and the lab's BMCs when it has none), then
 # the ingest into the store when the catalog is missing: download-fw-images.sh downloads, promote-fw-images.sh checks and
 # uploads. Every package the catalog names must then be in the store: a store that just started answers before its
 # volumes are registered, so each read is retried for 30 s
-control-up: control/netbox/.netbox.env control/state/.state.env control/observability/grafana/.grafana.env
+control-up: control/netbox/.netbox.env control/netbox/.tokens.env control/state/.state.env \
+            control/observability/grafana/.grafana.env
 	python3 control/observability/grafana/prod_dashboards.py
 	$(STATE_RO) $(CONTROL) up --detach --wait
 	$(CONTROL) exec -T netbox /opt/netbox/venv/bin/python /opt/netbox/netbox/manage.py shell --no-startup --no-imports \
@@ -163,7 +166,7 @@ unlock:
 # ---- Site ----
 # The site's exporter and agent, and on the lab the image cache; SITE_ENV sets each site's ports
 site-up: $(if $(filter lab,$(SITE)),lab/cache/tls.crt)
-	$(ENV) $(SITE_ENV) $(SITE_STACK) up --detach --build --wait
+	$(ENV) $(SITE_ENV) $(call token,EXPORTER) $(SITE_STACK) up --detach --build --wait
 
 site-logs:
 	$(ENV) $(SITE_ENV) $(SITE_STACK) logs --follow exporter agent
@@ -200,7 +203,7 @@ lab/cache/tls.crt:
 
 # ---- Poller ----
 collect:
-	$(ENV) $(PY) poller.py collect $(ARGS)
+	$(ENV) $(call token,POLLER) $(PY) poller.py collect $(ARGS)
 
 $(VIEWS):
 	$(ENV) $(PY) poller.py $@ $(ARGS)
@@ -219,14 +222,15 @@ views:
 
 # ---- Rollout ----
 plan:
-	$(ENV) $(PY) rollout.py plan $(if $(COMPONENT),"$(COMPONENT)") $(PLAN_ARGS) $(if $(HOST),--hosts $(HOST)) $(ARGS)
+	$(ENV) $(call token,ROLLOUT) $(PY) rollout.py plan $(if $(COMPONENT),"$(COMPONENT)") $(PLAN_ARGS) \
+	  $(if $(HOST),--hosts $(HOST)) $(ARGS)
 
 dry-run:
-	$(ENV) YES= ./pipeline.sh "$(FIRMWARE)" $(PLAN_ARGS) $(ARGS)
+	$(ENV) $(call token,ROLLOUT) YES= ./pipeline.sh "$(FIRMWARE)" $(PLAN_ARGS) $(ARGS)
 
 update: test
 	$(LAB_ONLY)
-	$(ENV) YES=1 ./pipeline.sh "$(FIRMWARE)" $(PLAN_ARGS) $(ARGS)
+	$(ENV) $(call token,ROLLOUT) YES=1 ./pipeline.sh "$(FIRMWARE)" $(PLAN_ARGS) $(ARGS)
 
 report:
 	$(ENV) $(PY) rollout.py report $(if $(HOST),--host $(HOST)) $(ARGS)
@@ -245,7 +249,7 @@ cancel:
 fault:
 	$(LAB_ONLY)
 	$(if $(SCENARIO),,$(error set SCENARIO: silent-fail, unhealthy, rejected, bad-checksum, no-return or hybrid))
-	$(ENV) ./lab/scenario.sh "$(SCENARIO)" $(PLAN_ARGS) $(ARGS)
+	$(ENV) $(call token,ROLLOUT) ./lab/scenario.sh "$(SCENARIO)" $(PLAN_ARGS) $(ARGS)
 
 # ---- The control plane's secrets ----
 # Grafana's admin account is yours to choose: make doesn't make it
@@ -253,13 +257,21 @@ control/observability/grafana/.grafana.env:
 	@echo "First create $@ with GRAFANA_ADMIN_USERNAME=... and GRAFANA_ADMIN_PASSWORD=...: Grafana's admin" \
 	  "account (README, Quick start)"; exit 1
 
-# Its secrets, random and made once: never shown, read from the file. NETBOX_TOKEN is the tools' read-only API token
+# NetBox's secrets, random and made once: never shown, read from the file
 control/netbox/.netbox.env:
 	@umask 077; python3 -c 'import secrets, string; \
 	r = lambda n: "".join(secrets.choice(string.ascii_letters + string.digits) for _ in range(n)); db = r(32); \
 	print(f"SECRET_KEY={r(60)}\nAPI_TOKEN_PEPPER_1={r(60)}\nDB_PASSWORD={db}\nPOSTGRES_PASSWORD={db}\n" \
-	      f"REDIS_PASSWORD={r(32)}\nSUPERUSER_PASSWORD={r(24)}\nNETBOX_TOKEN=nbt_{r(12)}.{r(40)}")' > $@
+	      f"REDIS_PASSWORD={r(32)}\nSUPERUSER_PASSWORD={r(24)}")' > $@
 	@echo "Made $@: NetBox's secrets and the admin's password"
+
+# The services' read-only NetBox tokens, random and made once: never shown, read from the file. seed.py gives each to
+# its account
+control/netbox/.tokens.env:
+	@umask 077; python3 -c 'import secrets, string; \
+	r = lambda n: "".join(secrets.choice(string.ascii_letters + string.digits) for _ in range(n)); \
+	print("".join(f"NETBOX_TOKEN_{s}=nbt_{r(12)}.{r(40)}\n" for s in ("POLLER", "EXPORTER", "ROLLOUT")), end="")' > $@
+	@echo "Made $@: the services' read-only NetBox tokens"
 
 # Its passwords, random and made once: never shown, read from the file. The owner's, the rollout's (redfish_rollout_sa)
 # and Grafana's
