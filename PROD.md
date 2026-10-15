@@ -13,7 +13,7 @@ has [the rollout step by step](LAB.md#how-the-rollout-works).
 `SITE=prod` selects the real fleet's inventory, credentials and policy. The current setup uses the read-only
 commands; the six-step update flow has been exercised only on the lab's BMCs.
 
-Production (**ASUS**, **Dell**, **HPE**, **Gigabyte**, **Supermicro**) has been used **read-only**: `make collect SITE=prod`, the views (`make health SITE=prod`, `make firmware SITE=prod`...), `make plan SITE=prod`, `make dry-run SITE=prod`, and `exporter-prod`, configured with a 30-second polling interval. They read only, plus a Redfish session login and logout. `make update` and `make fault` refuse `SITE=prod`, and no production host is marked `writable`. The runner underneath can write: `rollout.py run --plan … --yes` updates a host the inventory marks `writable: true`, which is how a change window would run ([Before enabling production writes](#before-enabling-production-writes)). The Supermicro has no row in `prod/baseline.yaml` yet, so the plan skips it as not in the baseline.
+Production (**ASUS**, **Dell**, **HPE**, **Gigabyte**, **Supermicro**) has been used **read-only**: `make collect SITE=prod`, the views (`make health SITE=prod`, `make firmware SITE=prod`...), `make plan SITE=prod`, `make dry-run SITE=prod`, and the prod site's exporter (`make site-up SITE=prod`), configured with a 30-second polling interval. They read only, plus a Redfish session login and logout. `make update` and `make fault` refuse `SITE=prod`, and no production host is marked `writable`. The runner underneath can write: `rollout.py run --plan … --yes` updates a host the inventory marks `writable: true`, which is how a change window would run ([Before enabling production writes](#before-enabling-production-writes)). The Supermicro has no row in `prod/baseline.yaml` yet, so the plan skips it as not in the baseline.
 
 [prod/inventory.example.yaml](prod/inventory.example.yaml)
 
@@ -72,7 +72,8 @@ implemented here):
   `SITE=prod YES=1 ./pipeline.sh "Manager (BMC)"` with `prod/.env` exported, from an admin host: the Makefile never writes
   to production. It needs `STATE_DB`, the state database where each stage locks its hosts; every admin host that
   runs a rollout must use the same one. The plan is the approval: its stages refuse to run when an input file changed since, and block a host
-  whose BMC isn't the one the plan read.
+  whose BMC isn't the one the plan read. Set `ROLLOUT_ACTOR` to the person or system that authorized the run: on a
+  shared admin host the account alone doesn't name a person, and the record should.
 
 ## The exporter on the real fleet
 
@@ -90,8 +91,9 @@ What the exporter does differently from a one-off `collect`, because it never st
   a session that expires gets a new login when the next read returns 401. On shutdown it logs out of held sessions.
 - **A refused login stops that host.** A 401 on a fresh login is not retried until a restart, since BMCs lock the
   account after a few failures; `redfish_login_refused` says so.
-- **Prod targets a read every 30 seconds.** [Compose](observability/docker-compose.yaml) sets `--interval 30`;
-  Prometheus scrapes the exporter every 10 seconds. Each BMC has its own loop: if a crawl takes longer than the
+- **Prod targets a read every 30 seconds.** [The site's Compose](site/docker-compose.yaml), started by
+  `make site-up SITE=prod`, sets `--interval 30`; the site's Prometheus agent scrapes the exporter every 10 seconds and
+  pushes each sample to Prometheus (remote write), so the control plane never connects into the site. Each BMC has its own loop: if a crawl takes longer than the
   interval, the next starts immediately after it. The crawl budget is three intervals (90 seconds here), or a
   shorter inventory deadline, checked between requests. A full iDRAC 8 crawl previously took about two minutes, so
   this setting can produce partial reads and leave little idle time. Reassess the interval against complete crawl
@@ -192,7 +194,7 @@ only truth about what runs: a host is read again over Redfish before anything ac
 
 | Part | Tool | What it does |
 |---|---|---|
-| Ingest | a promote script, as `lab/promote-fw-images.sh` | downloads the vendor package, checks its checksum and its signature against the vendor's pinned key |
+| Ingest | a promote script, as `control/ingest/promote-fw-images.sh` | downloads the vendor package, checks its checksum and its signature against the vendor's pinned key |
 | Lab test | lab hosts of every model | runs the image on each model before it is approved |
 | Approved store | S3 or Artifactory | keeps each approved image under its sha256; the storage policy prevents replacing one |
 
@@ -202,7 +204,7 @@ only truth about what runs: a host is read again over Redfish before anything ac
 |---|---|---|
 | Rollout API and CLI | a service in front of the engine | an operator requests a rollout and approves the canary |
 | Inventory / CMDB | **NetBox** or Nautobot | the devices: each server with its rack, project and model, and its BMC's out-of-band address |
-| Firmware catalog and baseline | **YAML in git**, never in NetBox | the approved version per model and component, and each version's image file and sha256; a merged pull request is the approval, not a database edit |
+| Firmware catalog and baseline | **YAML in git**, never in NetBox | one per site: the approved version per model and component, and each version's image file and sha256; a merged pull request is the approval, not a database edit |
 | Workflow engine | Temporal, or Argo Workflows | pre-flight, the canary and waves, the gates and the soak; continues after a crash |
 | Engine store | the engine's own: PostgreSQL or Cassandra for Temporal | its workflow history, which it replays to continue |
 | Rollout state DB | PostgreSQL | each host's state and wave, a lock per host, an append-only audit trail; a gate is a query |
@@ -216,16 +218,62 @@ only truth about what runs: a host is read again over Redfish before anything ac
 | Image cache | nginx over HTTPS | serves the store's images inside the site: a BMC that offers `SimpleUpdate` pulls from it, the agent pushes to one that can't |
 | Scheduler | the site's own, as Slurm or Kubernetes | drains and undrains the hosts, through a validated integration |
 | Exporter | `poller.py exporter`, on a ReadOnly account | reads every BMC's health, firmware and telemetry for Prometheus; never the agent |
-| BMCs | each vendor's Redfish service | run the update, its task and the reset; their `EventService` sends their events |
+| Prometheus agent | Prometheus in agent mode | scrapes the exporter and pushes each sample to the control plane's Prometheus (remote write): the site connects out, never in |
+| Event receiver | a small HTTPS service, as DMTF's Redfish Event Listener | subscribes to each BMC's `EventService`, receives the events the BMCs post to it and forwards them to Loki ([not built yet](#future-work-bmc-events-into-loki)); the BMCs reach it inside the site, and it connects out |
+| BMCs | each vendor's Redfish service | run the update, its task and the reset; their `EventService` posts their events to the event receiver |
 
 ### Observability
 
 | Part | Tool | What it does |
 |---|---|---|
-| Metrics | Prometheus, a Pushgateway per site | scrapes the exporters; the rollout pushes its metrics |
+| Metrics | Prometheus, fed by each site's Prometheus agent (remote write) | scrapes the workflow engine; takes each site's samples, the exporter's and the site agent's |
 | Logs | Loki | the rollout's events; the BMCs' events through an event receiver ([future work](#future-work-bmc-events-into-loki)) |
-| Dashboards | Grafana | reads both |
+| Dashboards | Grafana | reads Prometheus, Loki and the rollout state DB |
 | Alerts | Alertmanager | pages the on-call on a halt or a host left for a person |
+
+What each one holds:
+
+| Store | What goes in | From | What it answers |
+|---|---|---|---|
+| Prometheus | numbers over time: every reading and threshold, each component's health, firmware versions, BMCs answering; a rollout's hosts per state, step durations and gates | the exporter, which polls the BMCs over Redfish, and the site agent, both through the site's Prometheus agent; the workflow engine, scraped | is the fleet healthy, what runs where, how far a rollout is |
+| Loki | events as text: each step's intent and result, a Task's messages, every pre-flight check; the BMCs' own events | the site agents and the workflow engine; the event receiver | what happened to a host, and why |
+| Rollout state DB | a lock per host; every event of every run, append-only | the workflow engine and the site agents, over SQL | who may touch a host now; the audit trail |
+
+Prometheus doesn't subscribe to Redfish events: it pulls numbers on a schedule, while a BMC's `EventService` pushes
+messages, so BMC events take the event receiver's path to Loki. The exporter's polling stays the source of truth for
+state: an event a receiver misses is not sent again.
+
+**No Pushgateway in production.** A Pushgateway holds the metrics of a job too short-lived to be scraped. In the lab,
+`rollout.py run` is such a job, a command `make` starts and that exits, so it pushes to one. In production the rollout
+runs in long-lived services that serve their own `/metrics`: the workflow engine, which Prometheus scrapes inside the
+control plane, and each site agent, which the site's Prometheus agent scrapes and pushes, as it does the exporter. That
+also avoids the Pushgateway's own limits: a single instance, no high availability, and each pipeline's last push kept,
+looking current, until someone deletes it.
+
+**How Prometheus scrapes the workflow engine.** As any service: a scrape job in the control plane's Prometheus, so the
+scrape never leaves the control plane.
+
+- **Temporal.** The server serves its own metrics (workflow and task-queue latency, backlog) on the address
+  `global.metrics.prometheus.listenAddress` sets. The worker that runs the rollout's workflow and its activities serves
+  the rollout's: waves, gates, hosts per state, step durations, counted with the SDK's metric meter and served from its
+  Prometheus endpoint (in Python, `PrometheusConfig(bind_address=...)` in the runtime's telemetry). Prometheus scrapes
+  both.
+- **Argo Workflows.** Its workflow-controller serves `/metrics`, on port 9090 by default, and a Workflow declares its
+  own metrics under `metrics.prometheus`: gauges, counters and histograms the controller emits. The controller is the
+  only target.
+
+```yaml
+# the control plane's prometheus.yml, Temporal: the server and the rollout's worker (example addresses)
+scrape_configs:
+  - job_name: temporal-server
+    static_configs: [{targets: ["temporal:8000"]}]
+  - job_name: rollout-worker
+    static_configs: [{targets: ["rollout-worker:9000"]}]
+```
+
+On Kubernetes the targets come from service discovery instead of a static list: a `ServiceMonitor` with the Prometheus
+Operator, or `kubernetes_sd_configs`. The site agents' metrics still arrive by remote write, through each site's
+Prometheus agent.
 
 ### Firmware images: the catalog says what, the cache holds the bytes
 
@@ -248,25 +296,26 @@ The target design should prewarm and verify every required image, including roll
 Today pre-flight fetches required push images on demand and verifies the local copies; it does not prewarm pull URLs.
 The lab runs the push column for real ([The lab stack](LAB.md#the-lab-stack)).
 
-The catalog and the caches meet on one key, the image's path. A catalog entry names its image by a path in the approved
-store, preferably under its sha256 (`bmc/<sha256>.tar`), with storage policy preventing replacement; every
-site's cache serves the store's files under the same paths. A site's configuration holds only its cache's address, so one catalog serves every
-site. The current runner joins `IMAGE_CACHE` with relative paths for push; pull entries must already contain the full
-cache URL. Constructing site-specific pull URLs from a shared catalog is future work. Promotion writes the
+There is one catalog per site, `control/catalog/<site>/`, as each fleet has its own models and approved versions. The
+catalog and the caches meet on one key, the image's path. A catalog entry names its image by a path in the approved
+store, preferably under its sha256 (`bmc/<sha256>.tar`), with storage policy preventing replacement; every site's cache
+serves the store's files under the same paths, so a site's configuration holds only its cache's address. The current
+runner joins `IMAGE_CACHE` with relative paths for push; pull entries must already contain the full cache URL.
+Constructing a site's pull URLs from those paths is future work. Promotion writes the
 file first and the catalog entry after it; cache and store availability must still be checked before execution.
 
 ### This repository today
 
 | In the system | In this repository today | Next |
 |---|---|---|
-| Approved store, site cache | the lab's store, a SeaweedFS bucket populated by the signature-checking ingest script, and nginx over HTTPS caching it: `rollout.py` fetches each image into `lab/spool/`, checks its sha256 against `images.yaml` and pushes it. A URL in `images.yaml` is handed to `SimpleUpdate` where the BMC allows it | the approved store on S3 or Artifactory, and the same nginx cache in each site |
-| Firmware catalog | `prod/baseline.yaml` is tracked; lab baseline and images catalog are generated and git-ignored | stays YAML reviewed in git, beside NetBox, not in it: prod's `images.yaml` beside its baseline, and a check of every change (each baseline version in the catalog, each entry with its sha256, each file in the store); the plan keeps the entries it used in `plan.json`, and each stage compares them again |
-| Inventory / CMDB | the lab's hosts in NetBox (`make netbox-up`), seeded once from `lab/inventory.yaml`; prod's in `prod/inventory.yaml`. The poller's snapshots are the observed versions, and `make firmware SITE=prod` shows drift from the baseline | prod's hosts in NetBox too, with each vendor's BMC account |
-| Rollout API and CLI | the CLI only: the `make` targets and `pipeline.sh`; `YES=1` is the approval | an API, and an approval between the canary and wave 1 |
+| Approved store, site cache | the control plane's store, a SeaweedFS bucket populated by the signature-checking ingest script, and the lab site's nginx over HTTPS caching it: `rollout.py` fetches each image into `lab/spool/`, checks its sha256 against `images.yaml` and pushes it. A URL in `images.yaml` is handed to `SimpleUpdate` where the BMC allows it | the approved store on S3 or Artifactory, and the same nginx cache in each site |
+| Firmware catalog | `control/catalog/<site>/`: prod's `baseline.yaml` is tracked; the lab's baseline and images catalog are written by the ingest, git-ignored | stays YAML reviewed in git, beside NetBox, not in it: prod's `images.yaml` beside its baseline, and a check of every change (each baseline version in the catalog, each entry with its sha256, each file in the store); the plan keeps the entries it used in `plan.json`, and each stage compares them again |
+| Inventory / CMDB | the lab's hosts in NetBox (`make control-up`), seeded once from `lab/inventory.yaml`; prod's in `prod/inventory.yaml`. The poller's snapshots are the observed versions, and `make firmware SITE=prod` shows drift from the baseline | prod's hosts in NetBox too, with each vendor's BMC account |
+| Rollout API and CLI | the CLI only: the `make` targets and `pipeline.sh`; `YES=1` is the approval. Who planned, started or cancelled a run is recorded (`ROLLOUT_ACTOR`, else the account and host), with the commit each catalog file was approved in | an API, and an approval between the canary and wave 1; `ROLLOUT_ACTOR` from what authorized the run, a CI's actor or the API's authenticated user |
 | Workflow engine | `pipeline.sh`'s stages and `rollout.py run`: waves, gates, soak | a service that resumes a stopped rollout |
-| Rollout state DB | PostgreSQL in Docker ([state/](state/schema.sql)): a lock per host, which a stage takes for all its hosts or none, and every event of every run, append-only to the rollout's account, kept 15 days; Grafana reads it with an account that may only read. `<site>/runs/*.jsonl` keeps every event on the agent's disk too, `report.json` the report. No resume | one database for every site's agents, the gate as a query, and a retention as long as the audit needs |
+| Rollout state DB | PostgreSQL in the control plane ([control/state/schema.sql](control/state/schema.sql)): a lock per host, which a stage takes for all its hosts or none, and every event of every run, append-only to the rollout's account, kept until deleted; Grafana reads it with an account that may only read. `<site>/runs/*.jsonl` keeps every event on the agent's disk too, `report.json` the report. No resume | one database for every site's agents, the gate as a query, and a retention for events, which PostgreSQL lacks: daily partitions, dropped after the audit period |
 | Engine store | none: a rerun plans again, and pre-flight skips the hosts already on the target | the engine's own |
 | Site agent | `rollout.py run` on an admin host | one per site |
 | Scheduler | Optional `drain` and `undrain` hooks; neither site configures them, and no integration with a real scheduler has been validated | implement and validate the site's commands, including waiting for the node to become empty |
-| Secrets | `prod/.env` and `observability/grafana/.grafana.env`, git-ignored | Vault-backed storage; validate account rotation separately |
-| Observability | the report: terminal, HTML and `report.json`; an exporter per site with every BMC's telemetry, health and firmware, the rollout's metrics pushed live, its events in Loki, and Grafana dashboards in a folder per site ([Observability](LAB.md#observability)) | paging the on-call on a halt or a host left for a person; an exporter and a Pushgateway in each site; an event receiver that subscribes to Redfish `EventService` and forwards BMC events to Loki |
+| Secrets | `prod/.env`, and the control plane's `.netbox.env`, `.state.env` and `.grafana.env`, git-ignored | Vault-backed storage; validate account rotation separately |
+| Observability | the report: terminal, HTML and `report.json`; an exporter and a Prometheus agent per site, pushing every BMC's telemetry, health and firmware to the control plane, the rollout's metrics pushed live, its events in Loki, and Grafana dashboards in a folder per site ([Observability](LAB.md#observability)) | paging the on-call on a halt or a host left for a person; a Pushgateway in each site, read by its agent; an event receiver that subscribes to Redfish `EventService` and forwards BMC events to Loki |

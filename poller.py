@@ -385,14 +385,15 @@ def load_servers(path) -> list[dict]:
 # its name the node. Read with NETBOX_TOKEN, a read-only API token
 def netbox_servers(url, site) -> list[dict]:
     if not (token := os.environ.get("NETBOX_TOKEN")):
-        raise SystemExit("NETBOX_TOKEN isn't set: make sets it from netbox/.netbox.env, made by make netbox-up")
+        raise SystemExit("NETBOX_TOKEN isn't set: make sets it from control/netbox/.netbox.env, which make control-up "
+                         "makes")
     servers, page = [], f"{url.rstrip('/')}/api/dcim/devices/?site={site}&limit=1000"
     while page:
         try:
             r = requests.get(page, headers={"Authorization": f"Bearer {token}"}, timeout=10)
             r.raise_for_status()
         except requests.RequestException as e:
-            raise SystemExit(f"NetBox at {url}: {reason(str(e))}. make netbox-up starts it")
+            raise SystemExit(f"NetBox at {url}: {reason(str(e))}. make control-up starts it")
         body = r.json()
         for d in body["results"]:
             if not d["oob_ip"]:

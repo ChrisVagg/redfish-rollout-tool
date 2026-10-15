@@ -1,0 +1,35 @@
+# One site: what each site runs near its BMCs, the same file started once per site (make site-up SITE=lab|prod, project
+# redfish-site-<site>). Every connection goes out, to the control plane on 127.0.0.1; none comes in.
+#   exporter     poller.py exporter: reads the site's BMCs over Redfish, serves their metrics on 127.0.0.1:EXPORTER_PORT
+#   agent        a Prometheus agent: scrapes the exporter and pushes each sample to the control plane's Prometheus
+#                (remote write), as <site>/prometheus-agent.yml says
+#   image-cache  nginx over HTTPS on 127.0.0.1:8443: the control plane's approved images, fetched once from its store.
+#                Only a site that updates firmware runs it (profile cache: the lab)
+# rollout.py run, the site agent that updates firmware, runs on the site's host: make update.
+services:
+  exporter:
+    build: {context: .., dockerfile: site/Dockerfile}
+    image: redfish/exporter
+    restart: unless-stopped
+    network_mode: host  # the BMCs are on the host's addresses
+    command: [--listen, "127.0.0.1:${EXPORTER_PORT:?}", --interval, "${INTERVAL:?}"]
+    environment: [SITE, LAB_USERNAME, LAB_PASSWORD, NETBOX_TOKEN]  # from make; a site's BMC accounts from <site>/.env
+    env_file: [{path: "../${SITE:?}/.env", required: false}]
+    volumes: ["..:/app:ro", "../schemas:/app/schemas"]  # the repo read-only; the DMTF schemas cache shared with it
+  agent:
+    image: prom/prometheus:v3.15.0
+    restart: unless-stopped
+    network_mode: host
+    command: [--agent, --config.file=/etc/prometheus/agent.yml, --storage.agent.path=/prometheus,
+              "--web.listen-address=127.0.0.1:${AGENT_PORT:?}"]
+    volumes: ["../${SITE}/prometheus-agent.yml:/etc/prometheus/agent.yml:ro", "agent:/prometheus"]
+  image-cache:
+    image: nginx:1.27-alpine
+    profiles: [cache]
+    restart: unless-stopped
+    network_mode: host
+    volumes: ["image-cache:/var/cache/nginx", "./cache/nginx.conf:/etc/nginx/conf.d/default.conf:ro",
+              "../${SITE}/cache/tls.crt:/etc/nginx/tls.crt:ro", "../${SITE}/cache/tls.key:/etc/nginx/tls.key:ro"]
+volumes:
+  agent:
+  image-cache:

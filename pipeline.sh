@@ -55,7 +55,9 @@ if [ -f "$out/plan.json" ] && { [ "${#records[@]}" -gt 0 ] || [ "$status" -ne 0 
   COLUMNS=200 "$py" rollout.py report --plan "$out/plan.json" "${records[@]}" --details --html "$out/report.html" \
     > /dev/null
 fi
-printf '\nPipeline %s. Plan and reports: %s/\n' \
-  "$([ "$status" -eq 0 ] && echo passed || echo 'stopped: a stage FAILED')" "$out"
+# make cancel asked it to stop: no wave started after it, so say so rather than a failed stage
+verdict=$(if [ -f "$out/cancel" ]; then echo "cancelled by $(cat "$out/cancel")"
+          elif [ "$status" -eq 0 ]; then echo passed; else echo 'stopped: a stage FAILED'; fi)
+printf '\nPipeline %s. Plan and reports: %s/\n' "$verdict" "$out"
 [ -z "$yes" ] && echo "Every stage was a dry run: no firmware changes. YES=1 (make update) to update."
 exit "$status"

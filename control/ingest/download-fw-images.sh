@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # The first half of the lab's firmware ingest: downloads OpenBMC's two newest successful GB200 NVL builds from its
-# Jenkins, each a whole-flash update package, into lab/staging/, where promote-fw-images.sh checks them. Jenkins keeps
+# Jenkins, each a whole-flash update package, into control/ingest/staging/, where promote-fw-images.sh checks them. Jenkins keeps
 # only the last three builds, so no build can be pinned in the repository. make lab-up runs both when the catalog is
 # missing. It writes only:
-#   lab/staging/gb200nvl-<build>.static.mtd.all.tar
+#   control/ingest/staging/gb200nvl-<build>.static.mtd.all.tar
 set -euo pipefail
-cd "$(dirname "$0")"  # lab/
+cd "$(dirname "$0")"  # control/ingest/
 job='https://jenkins.openbmc.org/job/latest-master/label=docker-builder,target=gb200nvl-obmc'
 files=artifact/openbmc/build/tmp/deploy/images/gb200nvl-obmc
 

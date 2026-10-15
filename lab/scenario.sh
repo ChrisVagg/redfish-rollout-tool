@@ -43,13 +43,13 @@ get() { curl -sfk -m 30 -u "$LAB_USERNAME:$LAB_PASSWORD" "https://$bmc$1"; }
 manager=$(get /redfish/v1/Managers |
   python3 -c 'import json, sys; print(json.load(sys.stdin)["Members"][0]["@odata.id"])')
 running=$(get "$manager" | python3 -c 'import json, sys; print(json.load(sys.stdin).get("FirmwareVersion") or "")')
-versions=$(sed -n 's/^    "\([^"]*\)": {file: .*/\1/p' lab/images.yaml)
-grep -qxF "$running" <<< "$versions" || { echo "$bmc runs '$running', which lab/images.yaml doesn't list" >&2; exit 1; }
+versions=$(sed -n 's/^    "\([^"]*\)": {file: .*/\1/p' control/catalog/lab/images.yaml)
+grep -qxF "$running" <<< "$versions" || { echo "$bmc runs '$running', which control/catalog/lab/images.yaml doesn't list" >&2; exit 1; }
 target=$(grep -vxF "$running" <<< "$versions")
 
 # The target approved, and for bad-checksum a catalog whose sha256 for it is wrong
 mkdir -p lab/scenario
-catalog=lab/images.yaml
+catalog=control/catalog/lab/images.yaml
 cat > lab/scenario/baseline.yaml <<EOF
 # Written by lab/scenario.sh for $scenario: the target of the bad update
 "- -":
@@ -57,7 +57,7 @@ cat > lab/scenario/baseline.yaml <<EOF
 EOF
 if [ "$scenario" = bad-checksum ]; then
   catalog=lab/scenario/images.yaml
-  sed "/\"$target\":/s/sha256: \"[0-9a-f]*\"/sha256: \"$(printf '0%.0s' {1..64})\"/" lab/images.yaml > "$catalog"
+  sed "/\"$target\":/s/sha256: \"[0-9a-f]*\"/sha256: \"$(printf '0%.0s' {1..64})\"/" control/catalog/lab/images.yaml > "$catalog"
 fi
 
 printf '\n━━━ scenario %s: %s → %s%s ━━━\n' "$scenario" "$running" "$target" \

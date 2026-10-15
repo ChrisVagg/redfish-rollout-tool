@@ -1,14 +1,11 @@
 -- The rollout state database: every event of every run, and a lock per host. PostgreSQL runs this file on its first
--- start, into an empty volume, as the owner rollout. Four accounts: rollout, the owner (make state, make unlock and
--- the retention); redfish_rollout_sa, rollout.py run's; grafana, Grafana's; viewer, pgAdmin's. Their passwords come
--- from state/.state.env.
+-- start, into an empty volume, as the owner rollout. Three accounts: rollout, the owner (make state and make unlock);
+-- redfish_rollout_sa, rollout.py run's; grafana, Grafana's. Their passwords come from control/state/.state.env.
 \getenv rollout_sa_password REDFISH_ROLLOUT_SA_PASSWORD
 \getenv grafana_password GRAFANA_PASSWORD
-\getenv viewer_password VIEWER_PASSWORD
 
 -- Every event of every run, as the run record (<site>/runs/<pipeline>-<stage>.jsonl) has it, the whole of it in event:
--- append-only, as redfish_rollout_sa may only add rows. The retention service deletes the events older than
--- RETENTION_DAYS
+-- append-only, as redfish_rollout_sa may only add rows. Kept until deleted: PostgreSQL has no retention of its own
 CREATE TABLE events (
   id       bigserial PRIMARY KEY,
   at       timestamptz NOT NULL,
@@ -31,7 +28,7 @@ CREATE VIEW host_state AS
 
 -- The one pipeline that may touch a host. A run takes the locks of every host of its stage before it starts, or none,
 -- and gives them back at its end; a host left for a person, or every host of a run that stopped halfway, keeps its
--- lock until make unlock. No retention: a lock never expires
+-- lock until make unlock: a lock never expires
 CREATE TABLE host_locks (
   host     text PRIMARY KEY,
   site     text NOT NULL,
@@ -50,7 +47,3 @@ GRANT SELECT, INSERT, DELETE ON host_locks TO redfish_rollout_sa;
 -- Grafana: reads only
 CREATE ROLE grafana LOGIN PASSWORD :'grafana_password';
 GRANT SELECT ON events, host_state, host_locks TO grafana;
-
--- People, in pgAdmin: read every table and view, the ones added later too, and change nothing
-CREATE ROLE viewer LOGIN PASSWORD :'viewer_password';
-GRANT pg_read_all_data TO viewer;

@@ -2663,7 +2663,7 @@
   {
    "type": "table",
    "title": "Every firmware update of $host",
-   "description": "From the state database's events, whatever the time range: each time a pipeline ended an update of this host, newest first, for as long as the database keeps events (RETENTION_DAYS, 15). before: the version it ran, target: the one approved, running: the one it ran after.",
+   "description": "From the state database's events, whatever the time range: each time a pipeline ended an update of this host, newest first, every one the database holds. before: the version it ran, target: the one approved, running: the one it ran after.",
    "datasource": {
     "type": "grafana-postgresql-datasource",
     "uid": "state"

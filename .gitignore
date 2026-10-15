@@ -12,9 +12,8 @@ images/
 lab/qemu-system-arm
 lab/bmc.mtd
 # the downloads promote-fw-images.sh hasn't promoted yet
-lab/staging/
-lab/images.yaml
-lab/baseline.yaml
+control/ingest/staging/
+control/catalog/lab/
 lab/scenario/
 /lab/runs/
 /prod/runs/
@@ -22,5 +21,5 @@ todo
 # local screenshots, taken through a see-through terminal: the README uses docs/runs/
 docs/lab-images/
 schemas/
-# made from the lab dashboards by make monitor-up
-observability/grafana/dashboards/prod/
+# made from the lab dashboards by make control-up
+control/observability/grafana/dashboards/prod/

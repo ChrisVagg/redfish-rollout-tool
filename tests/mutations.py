@@ -8,7 +8,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-HERE = Path(__file__).parent
+ROOT = Path(__file__).resolve().parent.parent  # the repository: rollout.py, the tools it imports, tests/
 # ponytail: hand-listed breaks of the safety rules only; a mutation tool (mutmut) once there are too many to list
 BREAKS = [  # (what a careless edit does, the line as it is, the line broken, the test that must fail)
     ("downgrade let through", 'test("direction", order > 0 or allowed,', 'test("direction", True,',
@@ -48,7 +48,8 @@ BREAKS = [  # (what a careless edit does, the line as it is, the line broken, th
     ("no drain for a host reset", 'test("drain", policy["drain"],', 'test("drain", True,', "test_drain"),
     ("undrain failure ignored", "if not ok:  # the firmware may be fine, but the host isn't back in service",
      "if False:", "test_drain"),
-    ("a gone manager passes", "                if u not in now),", "                if False),", "test_post_check"),
+    ("a gone manager passes", "for u, h in was.items() if u not in now),", "for u, h in was.items() if False),",
+     "test_post_check"),
     ("canary ignores the rack limit", 'key=lambda s: (full(s), s.get("canary") is not True)',
      'key=lambda s: (False, s.get("canary") is not True)', "test_canary_racks"),
     ("changed plan inputs ignored", "if sha256_of(f) != sha]", "if False]", "test_frozen_plan"),
@@ -63,20 +64,21 @@ BREAKS = [  # (what a careless edit does, the line as it is, the line broken, th
 ]
 
 if __name__ == "__main__":
-    original = (HERE / "rollout.py").read_text()
+    original = (ROOT / "rollout.py").read_text()
     missed = []
     with tempfile.TemporaryDirectory() as copy:
-        for f in HERE.glob("*.py"):
+        for f in ROOT.glob("*.py"):
             shutil.copy(f, copy)
-        shutil.copytree(HERE / "fixtures", Path(copy) / "fixtures")
-        (Path(copy) / "lab").mkdir()
-        shutil.copy2(HERE / "lab" / "promote-fw-images.sh", Path(copy) / "lab")  # the ingest gate's test runs it
+        shutil.copytree(ROOT / "tests", Path(copy) / "tests", ignore=shutil.ignore_patterns("__pycache__"))
+        (Path(copy) / "control" / "ingest").mkdir(parents=True)  # the ingest gate's test runs its script
+        shutil.copy2(ROOT / "control" / "ingest" / "promote-fw-images.sh", Path(copy) / "control" / "ingest")
         for what, line, broken, test in BREAKS:
             if original.count(line) != 1:
                 sys.exit(f"rollout.py changed: the line {what!r} breaks is there {original.count(line)} times, not "
                          "once. Update it in BREAKS.")
             (Path(copy) / "rollout.py").write_text(original.replace(line, broken))
-            out = subprocess.run([sys.executable, "test_rollout.py"], cwd=copy, capture_output=True, text=True).stdout
+            out = subprocess.run([sys.executable, "tests/test_rollout.py"], cwd=copy, capture_output=True,
+                                 text=True).stdout
             failing = re.findall(r"^FAIL  (\w+)", out, re.M)
             print(f"{'caught' if test in failing else 'MISSED'}  {what:32} {', '.join(failing) or 'no test failed'}")
             missed += [what] if test not in failing else []

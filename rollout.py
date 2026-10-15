@@ -36,12 +36,14 @@ unless --allow-downgrade, and a component without a rollback path unless --accep
 The site is the fleet: SITE=prod (the default) or SITE=lab, a folder with the inventory (inventory.yaml), the
 baseline (baseline.yaml), the image catalog (images.yaml, its files relative to the folder) and the run records."""
 import argparse
+import getpass
 import hashlib
 import json
 import logging
 import math
 import os
 import shlex
+import socket
 import subprocess
 import sys
 import threading
@@ -604,16 +606,37 @@ def prepare(args) -> dict:
 
 
 # Save the plan for a pipeline's later stages: what to update, from which files, with which options, in which waves
+# Who planned, ran or cancelled: ROLLOUT_ACTOR when what started it says (a CI's actor, an API's authenticated user),
+# else the account and host it runs as, the account sudo came from when it did. A claim, not an authentication
+def actor() -> str:
+    user = os.environ.get("SUDO_USER") or getpass.getuser()
+    return os.environ.get("ROLLOUT_ACTOR") or f"{user}@{socket.gethostname()}"
+
+
+# The git commit a catalog file was approved in: its last commit, by whom and when, and whether the file changed since.
+# None when git doesn't track it, as the lab's catalog, which the ingest writes
+def approval(path, repo=Path(__file__).parent) -> dict | None:
+    git = lambda *a: subprocess.run(["git", "-C", str(repo), *a, "--", os.path.abspath(path)], capture_output=True,
+                                    text=True, timeout=10).stdout.strip()
+    try:
+        commit, author, date = git("log", "-1", "--format=%H%x09%an%x09%aI").split("\t")
+        return {"commit": commit, "author": author, "date": date, "modified": bool(git("status", "--porcelain"))}
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return None
+
+
 def save_plan(args, servers, results, planned, rollout) -> None:
     """run --plan takes all of it from here, so the stages run what was planned: the files' sha256 and each host's
     inventory entry, so a run refuses either changed since, and each host's verdict with its identity, so a run blocks
     a host that isn't the one approved."""
     Path(args.save).write_text(json.dumps({
-        "created": datetime.now(timezone.utc).isoformat(timespec="seconds"), "component": args.component,
+        "created": datetime.now(timezone.utc).isoformat(timespec="seconds"), "planned_by": actor(),
+        "component": args.component,
         "inventory": os.path.relpath(args.inventory), "baseline": os.path.relpath(args.baseline),
         "images": os.path.relpath(args.images),
         "inputs": {os.path.relpath(f): sha256_of(f) for f in (args.inventory, args.baseline, args.images,
                                                                rollout["file"]) if f},
+        "approvals": {os.path.relpath(f): approval(f) for f in (args.baseline, args.images) if f},  # who approved
         "allow_downgrade": args.allow_downgrade, "accept_no_rollback": args.accept_no_rollback, "rollout": rollout,
         "waves": {name: [s["host"] for s in hosts] for name, hosts in planned},
         "servers": {s["host"]: s for s in servers},  # as the inventory had them: NetBox has no file to pin
@@ -716,7 +739,7 @@ def state_db() -> psycopg.Connection:
     try:
         return psycopg.connect(url, autocommit=True, connect_timeout=5)
     except psycopg.Error as e:
-        raise SystemExit(f"the state database: {e}. make state-up starts it")
+        raise SystemExit(f"the state database: {e}. make control-up starts it")
 
 
 # Take the locks of a stage's hosts for its pipeline, every one or none: [(host, the pipeline holding it)] when one is
@@ -955,10 +978,10 @@ def after_checks(found, key, want, before) -> tuple[bool, list[dict], str]:
     was = before["health"]
     jobs = [j for j in open_jobs(found) if j[0] not in before["jobs"]]
     checks = [{"check": "running version", "ok": running == want, "detail": f"{running}, target {want}"},
-              *({"check": "health", "ok": h == "OK" or h == was.get(u), "detail": f"{u}: {h}, before {was.get(u, '-')}"}
-                for u, h in now.items()),
-              *({"check": "health", "ok": False, "detail": f"{u}: gone, before {h}"} for u, h in was.items()
-                if u not in now),
+              *({"check": "health", "ok": h == "OK" or h == was.get(u), "detail": f"{u}: {h}, before {was.get(u, '-')}",
+                 "resource": u} for u, h in now.items()),
+              *({"check": "health", "ok": False, "detail": f"{u}: gone, before {h}", "resource": u}
+                for u, h in was.items() if u not in now),
               {"check": "new jobs and tasks", "ok": not jobs,
                "detail": ", ".join(f"{j[1]}: {j[2]}" for j in jobs) or "none"}]
     return all(c["ok"] for c in checks), checks, running
@@ -1115,8 +1138,12 @@ def versions_table(go, images) -> tuple[dict, Table | list]:
 
 # The soak after a wave: wait, then check its updated hosts again as the post-check did; a host that went bad since is
 # recorded and ends needs_attention. The hosts that failed it
-def soak(done, key, wait, rec) -> list[dict]:
-    time.sleep(wait)
+def soak(done, key, wait, rec, cancelled=lambda: False) -> list[dict]:
+    end = time.monotonic() + wait
+    while time.monotonic() < end and not cancelled():
+        time.sleep(min(5, max(0, end - time.monotonic())))
+    if cancelled():
+        return []
     soured = []
     for o in (o for o in done if o["state"] == "updated"):
         passed, checks, running = post_check(o["server"], key, o["target"], o["before"])
@@ -1213,16 +1240,22 @@ def run(args) -> list:
     rec("-", "run", "start", component=args.component, waves={name: [s["host"] for s in h] for name, h in planned},
         target=", ".join(sorted({r["want"] for r in results if r["verdict"] == "go" and r["want"]})),
         plan=args.plan, stage=args.stage, failure_rate=rollout["failure_rate"], rollout=rollout, apply_time=APPLY_TIME,
-        faults=policy["faults"])
+        faults=policy["faults"], actor=actor())
     last = list(saved["waves"])[-1]
     outcomes, halted = [], None
+    cancel = Path(args.plan).parent / "cancel"  # make cancel: a person asked this pipeline to stop
     for name, hosts in planned:
+        if cancel.is_file():
+            halted = f"cancelled before {name}, by {cancel.read_text().strip()}"
+            rec("-", "run", "cancelled", wave=name, detail=halted)
+            args.exit_code = 1
+            break
         with ThreadPoolExecutor(min(len(hosts), rollout["max_parallel"] or len(hosts))) as pool:
             # lambda s: a server of the wave -> its outcome; the wave's hosts run side by side, max_parallel at once
             done = list(pool.map(lambda s: run_host(s, args.component, baselines, policy, rec), hosts))
         soured = []
         if rollout["soak"] and name != last and not any(o["state"] in FAILED_STATES for o in done):
-            soured = soak(done, args.component, rollout["soak"], rec)
+            soured = soak(done, args.component, rollout["soak"], rec, cancel.is_file)
         outcomes += [(name, o) for o in done]
         g = gate(name, [o["state"] for _, o in outcomes], len(soured), rollout)
         rec("-", "gate", "halted" if g["halted"] else "passed", wave=name, failed=g["failed"], tried=g["tried"],
@@ -1281,11 +1314,12 @@ def metrics(doc) -> str:
                 if s["step"] in ("post-check", "soak", "rollback post-check"):
                     for c in s.get("checks") or []:
                         add("rollout_check_ok", int(c["ok"]), host=d["host"], step=s["step"], check=c["check"],
-                               detail=c["detail"])
+                            resource=c.get("resource", ""))
     add("rollout_hosts_drained", drained)
     if doc["seconds"] is not None:
         add("rollout_seconds", doc["seconds"])
     add("rollout_running", int(doc["result"] == "running"))
+    add("rollout_cancelled", int(doc["result"] == "cancelled"))
     return "\n".join(lines) + "\n"
 
 
@@ -1416,6 +1450,7 @@ def pipeline_report(plan, events, name, records) -> dict:
     runs = [e for e in events if e["host"] == "-"]
     starts = [e for e in runs if e["step"] == "run" and e["state"] == "start"]
     gates = {e["wave"]: e for e in runs if e["step"] == "gate"}
+    cancel = next((e for e in runs if e["step"] == "run" and e["state"] == "cancelled"), None)
     first = starts[0] if starts else {}
     live = len(starts) > sum(e["step"] == "run" and e["state"] == "end" for e in runs)  # a run started, not ended
     waves = plan["waves"] if plan else {w: hosts for s in starts for w, hosts in s["waves"].items()}
@@ -1423,21 +1458,25 @@ def pipeline_report(plan, events, name, records) -> dict:
     by_host = {}
     for e in events:
         by_host.setdefault(e["host"], []).append(e)
-    wave_docs, halted = [], None
+    wave_docs, halted, cancelled = [], None, False
     for wave, hosts in waves.items():
+        cancelled = cancelled or bool(cancel and wave == cancel.get("wave"))
         docs, gate = [outcome(h, wave, by_host.get(h, []), seen.get(h, {}), live) for h in hosts], gates.get(wave)
         for d in docs:
             if d["state"] == "untouched":
-                d["why"] = f"halted after {halted}: its wave never started" if halted else "its wave hasn't run yet"
+                d["why"] = (f"halted after {halted}: its wave never started" if halted else
+                            "cancelled: its wave never started" if cancelled else "its wave hasn't run yet")
         wave_docs.append({"name": wave, "totals": dict(Counter(d["state"] for d in docs)), "hosts": docs,
                           "gate": {k: gate.get(k) for k in ("failed", "tried", "limit", "strict", "soak_failed")}
                           | {"result": gate["state"]}
-                          if gate else {"result": "not run" if halted else "pending"}})
+                          if gate else {"result": "not run" if halted or cancelled else "pending"}})
         halted = halted or (wave if gate and gate["state"] == "halted" else None)
     left_out = [outcome(h, None, by_host.get(h, []), v) for h, v in seen.items() if v["verdict"] != "go"]
     everyone = [d for w in wave_docs for d in w["hosts"]] + left_out
     if halted:
         result = "halted"
+    elif cancel:
+        result = "cancelled"
     elif live:
         result = "running"
     elif wave_docs and all(w["gate"]["result"] == "passed" for w in wave_docs):
@@ -1453,12 +1492,13 @@ def pipeline_report(plan, events, name, records) -> dict:
         "schema": REPORT_SCHEMA, "generated": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "pipeline": name, "site": SITE.name, "component": (plan or {}).get("component") or first.get("component"),
         "targets": sorted({d["target"] for d in everyone if d["target"]}),
-        "plan": {k: plan.get(k) for k in ("created", "inventory", "baseline", "images", "allow_downgrade",
-                                          "accept_no_rollback", "rollout")} if plan else None,
-        "run": {"failure_rate": first.get("failure_rate"), "apply_time": first.get("apply_time"),
+        "plan": {k: plan.get(k) for k in ("created", "planned_by", "inventory", "baseline", "images", "approvals",
+                                          "allow_downgrade", "accept_no_rollback", "rollout")} if plan else None,
+        "run": {"actor": first.get("actor"), "failure_rate": first.get("failure_rate"),
+                "apply_time": first.get("apply_time"),
                 "faults": first.get("faults") or {}},
         "records": [Path(r).name for r in records], "started": started, "ended": ended,
-        "seconds": seconds(started, ended), "result": result,
+        "seconds": seconds(started, ended), "result": result, "cancelled": cancel.get("detail") if cancel else None,
         "stopped": {"after": halted, "failed": stop["failed"], "tried": stop["tried"], "limit": stop["limit"],
                     "rule": gate_rule(stop), "not_run": [w["name"] for w in wave_docs if
                                                           w["gate"]["result"] == "not run"]} if halted else None,
@@ -1537,6 +1577,13 @@ def render(doc, details=False, host=None) -> list:
              f"apply {run['apply_time']}" if run["apply_time"] else None]
     lines = [Text(f"Rollout {doc['pipeline']} · {doc['site']} · {doc['component']}", style="bold"),
              Text(" · ".join(filter(None, (when, *rules))))]
+    # who: planned it, started it, and approved what it installs
+    who = [f"planned by {plan['planned_by']}" if plan.get("planned_by") else None,
+           f"started by {run['actor']}" if run.get("actor") else None,
+           *(f"{os.path.basename(f)} from {a['commit'][:10]} by {a['author']}"
+             + (", changed since" if a["modified"] else "") for f, a in (plan.get("approvals") or {}).items() if a)]
+    if any(who):
+        lines.append(Text(" · ".join(filter(None, who))))
     if run["faults"]:
         faults = ", ".join(f"{h} {k}" for h, k in run["faults"].items())
         lines.append(Text(f"Faults injected (lab testing): {faults}", style="yellow"))
@@ -1547,6 +1594,8 @@ def render(doc, details=False, host=None) -> list:
                "halted": (halted if stop else "HALTED", "bold red"),
                "blocked": ("BLOCKED at the plan: every host to update is blocked", "bold red"),
                "running": ("RUNNING: the pipeline isn't done yet", "yellow"),
+               "cancelled": (f"CANCELLED: {(doc.get('cancelled') or '').capitalize() or 'a person stopped it'}",
+                             "yellow"),
                "incomplete": ("INCOMPLETE: a stage stopped in the middle, or hasn't run yet", "yellow"),
                "nothing to do": ("NOTHING TO DO: every host is on the baseline", "green")}[doc["result"]]
     lines += [Text(verdict[0], style=verdict[1]),

@@ -1,6 +1,6 @@
 """Prod's dashboards, made from lab's: dashboards/lab/*.json into dashboards/prod/, the same panels fixed to site prod,
 and on the pipeline a note that production is read-only. Not the update details, which document the lab's BMC. Edit
-the lab dashboards only; make monitor-up runs this."""
+the lab dashboards only; make control-up runs this."""
 import json
 import re
 from pathlib import Path

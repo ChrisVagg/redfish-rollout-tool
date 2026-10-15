@@ -1,21 +1,23 @@
 #!/usr/bin/env bash
 # The second half of the lab's firmware ingest, after download-fw-images.sh: promotes OpenBMC update packages into the
 # store. First the gate: a package must hold its MANIFEST, its key (publickey) and its image (image-bmc), each with an
-# RSA-SHA256 signature, and every signature in it must verify with the key pinned in lab/openbmc-dev.pub, never with
+# RSA-SHA256 signature, and every signature in it must verify with the key pinned in openbmc-dev.pub, beside it, never with
 # the key the package carries, which anyone could replace together with the image. A package that fails stops it, before
 # the store. The pinned key is OpenBMC's development key, and its private half is public in OpenBMC's source tree, so
 # anyone can sign a modified package with it: in the lab the gate shows how verification works, it doesn't protect.
 # Production pins the vendor's key, whose private half the vendor keeps secret. A package that passes is uploaded into the
 # store's bucket firmware, as images/<its name>, and its download deleted: the store holds the only copy. Then, from the
 # verified packages, it writes:
-#   lab/images.yaml    the catalog: each package's path in the store and its sha256
-#   lab/baseline.yaml  the newest build approved, so the first rollout is an update
-#   lab/bmc.mtd        the oldest build's image-bmc, its whole flash: the BMCs' initial firmware when the lab is created
-#   ./lab/promote-fw-images.sh lab/staging/*.tar
+#   control/catalog/lab/images.yaml    the catalog: each package's path in the store and its sha256
+#   control/catalog/lab/baseline.yaml  the newest build approved, so the first rollout is an update
+#   lab/bmc.mtd                        the oldest build's image-bmc, its whole flash: the lab BMCs' initial firmware
+#   ./control/ingest/promote-fw-images.sh control/ingest/staging/*.tar
 set -euo pipefail
-lab=$(dirname "$0")
-key=$lab/openbmc-dev.pub
-store() { docker compose -f "$lab/docker-compose.yaml" exec -T store "$@"; }
+ingest=$(dirname "$0")
+root=$ingest/../..
+key=$ingest/openbmc-dev.pub
+catalog=$root/control/catalog/lab
+store() { docker compose -f "$root/control/docker-compose.yaml" exec -T store "$@"; }
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 [ $# -gt 0 ] || { echo "Usage: $0 PACKAGE.tar...: make lab-up downloads them first" >&2; exit 1; }
@@ -50,16 +52,17 @@ while read -r package; do  # oldest build first
 done < <(printf '%s\n' "$@" | sort -V)
 
 old=${builds[0]} new=${builds[-1]}
-cp "$work/bmc.mtd" "$lab/bmc.mtd"
+mkdir -p "$catalog"
+cp "$work/bmc.mtd" "$root/lab/bmc.mtd"
 {
-  echo "# Written by lab/promote-fw-images.sh: the lab's firmware images, GB200 NVL whole-flash update packages of"
-  echo "# OpenBMC's Jenkins builds ${builds[*]}, each at its path in the store"
+  echo "# Written by control/ingest/promote-fw-images.sh: the lab's firmware images, GB200 NVL whole-flash update"
+  echo "# packages of OpenBMC's Jenkins builds ${builds[*]}, each at its path in the store"
   echo '"- -":'
   echo '  "Manager (BMC)":'
   printf '%s\n' "${entries[@]}"
-} > "$lab/images.yaml"
-cat > "$lab/baseline.yaml" <<EOF
-# Written by lab/promote-fw-images.sh: the lab's approved firmware. The emulated GB200 NVL reports no manufacturer or
+} > "$catalog/images.yaml"
+cat > "$catalog/baseline.yaml" <<EOF
+# Written by control/ingest/promote-fw-images.sh: the lab's approved firmware. The emulated GB200 NVL reports no manufacturer or
 # model, so its model reads "- -". The lab boots build $old and this approves build $new, so make update updates it. To
 # roll the lab back and forth, swap which line is commented.
 "- -":

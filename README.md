@@ -19,9 +19,9 @@ only, no vendor Oem code.
 |---|---|
 | [rollout.py](rollout.py), [pipeline.sh](pipeline.sh) | Plans and runs a rollout, and reports it |
 | [poller.py](poller.py) | Reads every BMC (health, firmware, inventory, sensors) into views, or serves it as Prometheus metrics. Read-only |
-| [lab/](lab/) | The emulated BMCs, the image store (SeaweedFS) and the image cache (nginx) |
-| [observability/](observability/docker-compose.yaml) | Exporters, Pushgateway, Loki, Prometheus, Grafana |
-| [state/](state/schema.sql) | PostgreSQL, the rollout state: a lock per host and every event of every run, 15 days; a Grafana data source; pgAdmin on http://127.0.0.1:5050 to look at it |
+| [control/](control/docker-compose.yaml) | The control plane, one per fleet: the ingest and the approved store (SeaweedFS), NetBox, the firmware catalog (YAML in git), the rollout state (PostgreSQL: a lock per host, every event of every run), Prometheus, Pushgateway, Loki, Grafana |
+| [site/](site/docker-compose.yaml) | A site, one per site: the exporter, a Prometheus agent that pushes to the control plane, the HTTPS image cache (nginx). It only connects out |
+| [lab/](lab/) | The lab's hardware, 10 emulated BMCs, and the lab site's settings |
 
 ## The rollout
 
@@ -63,7 +63,7 @@ a gate: [LAB.md](LAB.md#bad-updates).
 ## Quick start
 
 Needs Linux x86-64, Docker with Compose, Python 3.10+, `curl` and `openssl`, and Grafana's admin account in
-`observability/grafana/.grafana.env` (git-ignored):
+`control/observability/grafana/.grafana.env` (git-ignored):
 
 ```sh
 GRAFANA_ADMIN_USERNAME=...
@@ -73,8 +73,7 @@ GRAFANA_ADMIN_PASSWORD=...
 ```sh
 make setup        # venv
 make test         # the unit tests, no BMC needed
-make lab-up       # NetBox, the state database, the image store, OpenBMC's two newest builds, 10 BMCs (~10 min)
-make monitor-up   # exporters, Pushgateway, Loki, Prometheus, Grafana on http://127.0.0.1:3000
+make lab-up       # the control plane, the lab site, OpenBMC's two newest builds, 10 BMCs (~10 min)
 make collect      # read every BMC; then make health, make firmware, ...
 make dry-run      # plan, canary, waves; no firmware changes
 make update       # a canary of 1 BMC, then waves of 3 and 6
@@ -86,14 +85,15 @@ make lab-up       # boot the older build again; the image store is preserved
 A dry run still reads the BMCs, writes `plan.json` and the stages' HTML files, and can publish the plan and its
 pre-flight checks to Loki when `LOKI` is set. It previews the updates without applying firmware changes.
 
-`make help` lists every target. `SITE=prod` reads the real fleet; `make update` and `make fault` refuse it. To roll
-the lab back, swap the commented line in `lab/baseline.yaml` and run `make update` again.
+Grafana is on http://127.0.0.1:3000. `make help` lists every target. `SITE=prod` reads the real fleet, and
+`make site-up SITE=prod` starts its exporter and agent; `make update` and `make fault` refuse it. To roll the lab back,
+swap the commented line in `control/catalog/lab/baseline.yaml` and run `make update` again.
 
 ## Tests
 
 | Command | What it checks |
 |---|---|
-| `make test` | 24 tests, no BMC: pre-flight, post-check, rollback, gates, the frozen plan, the ingest gate, the image cache, on recorded Redfish data; host locks and append-only events, on the state database. `make update` runs it first |
+| `make test` | 26 tests, no BMC: pre-flight, post-check, rollback, gates, the frozen plan, the ingest gate, the image cache, on recorded Redfish data; host locks and append-only events, on the state database. `make update` runs it first |
 | `make mutations` | breaks 31 safety rules one at a time; every break fails a test |
 | `make fault SCENARIO=…` | the real pipeline on the lab, with a fault injected |
 
@@ -117,25 +117,24 @@ pipeline.sh         plan → canary → waves → report
 poller.py           collect, the views (health, firmware, inventory, telemetry, capabilities, diff) and the exporter
 redfish.py          the Redfish connection both tools share: session, token, GET, POST, DELETE
 rollout.py          plan, run, report
-test_rollout.py     the rollout's decisions on recorded Redfish data: make test
-mutations.py        breaks rollout.py one rule at a time; each break must fail a test: make mutations
-fixtures/           the lab BMC as a collect saved it, which the tests read
+tests/              test_rollout.py, the rollout's decisions on recorded Redfish data: make test;
+                    mutations.py, breaks rollout.py one rule at a time, each break must fail a test: make
+                    mutations; testdata/, the lab BMC as a collect saved it, which the tests read
 constants.py        what to crawl, table columns, rollout constants
 helpers.py          shared helpers
 schemas/            DMTF Redfish JSON Schemas for sensor units, downloaded on first use (git-ignored)
-lab/                the emulated BMCs: Dockerfile, docker-compose.yaml, scenario.sh, inventory.yaml, policy.yaml;
-                    download-fw-images.sh and promote-fw-images.sh, the ingest, with openbmc-dev.pub, the gate's
-                    pinned key; store/, the image store's read-only access; cache/, the image cache's nginx config
-prod/               the real fleet: baseline.yaml, policy.yaml; inventory.yaml and .env stay local
-netbox/             Compose for NetBox, the lab inventory's source of truth; seed.py loads lab/inventory.yaml into
-                    it once; .netbox.env, its secrets and the tools' read-only token, stays local
-state/              Compose for PostgreSQL, the rollout state, its 15-day retention, and pgAdmin; schema.sql: events,
-                    host_state, host_locks and the accounts redfish_rollout_sa, grafana and viewer; .state.env, their
-                    passwords, stays local
-observability/      Compose for the exporters, Pushgateway, Loki, Prometheus and Grafana; loki/loki.yaml; a Lab and a
-                    Prod dashboard folder;
-                    grafana/grafana.ini; grafana/.grafana.env, Grafana's admin account, stays local;
-                    grafana/prod_dashboards.py makes the prod dashboards from the lab ones
+control/            the control plane, Compose for one per fleet: ingest/, download-fw-images.sh and
+                    promote-fw-images.sh with openbmc-dev.pub, the gate's pinned key; store/, the store's read-only
+                    access; netbox/seed.py, which loads lab/inventory.yaml into NetBox once; state/schema.sql: events,
+                    host_state, host_locks and the accounts redfish_rollout_sa and grafana; observability/,
+                    Prometheus, Loki and Grafana: a Lab and a Prod dashboard folder, prod_dashboards.py making the prod
+                    ones from the lab's; catalog/<site>/, the firmware catalog: baseline.yaml, images.yaml. The
+                    secrets, .netbox.env, .state.env and .grafana.env, stay local
+site/               a site, Compose for one per site: the exporter's Dockerfile, the Prometheus agent, cache/, the
+                    image cache's nginx config
+lab/                the lab: its hardware, the BMCs' Dockerfile and docker-compose.yaml, and scenario.sh; its site,
+                    inventory.yaml, policy.yaml, prometheus-agent.yml
+prod/               the real fleet's site: policy.yaml, prometheus-agent.yml; inventory.yaml and .env stay local
 docs/               the diagrams: the rollout, the lab, production today, a production system, the lab on its
                     layout, one update as resources; grafana/, a screenshot of every panel; netbox/, the
                     lab's inventory in NetBox

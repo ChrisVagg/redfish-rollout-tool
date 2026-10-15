@@ -31,8 +31,10 @@ SCHEMAS = Path(__file__).with_name("schemas")  # DMTF JSON Schemas, fetched once
 # and image catalog, and what the tools write about it.
 SITE = Path(__file__).parent / os.environ.get("SITE", "prod")
 INVENTORY_FILE = SITE / "inventory.yaml"  # the BMCs and how to reach them
-BASELINE = SITE / "baseline.yaml"  # the approved firmware version per model and component
-IMAGES = SITE / "images.yaml"  # the firmware image files kept per model, component and version
+# The site's firmware catalog: the control plane's, YAML reviewed in git, a folder per site
+CATALOG = Path(__file__).parent / "control" / "catalog" / SITE.name
+BASELINE = CATALOG / "baseline.yaml"  # the approved firmware version per model and component
+IMAGES = CATALOG / "images.yaml"  # the firmware image files kept per model, component and version
 # The site's HTTPS image cache, which serves images.yaml's files under the same paths: the agent fetches each image it
 # needs into SPOOL, checks its sha256, and pushes it from there. Without one, the files are next to images.yaml
 IMAGE_CACHE = os.environ.get("IMAGE_CACHE")
@@ -150,7 +152,7 @@ STYLE = {"OK": "green", "Enabled": "green", "Connected": "green", "Warning": "ye
          "go": "green", "skip": "yellow", "block": "bold red",  # pre-flight verdicts
          "updated": "green", "rolled_back": "yellow", "needs_attention": "bold red", "failed": "bold red",  # run
          "passed": "green", "done": "green", "Completed": "green", "blocked": "bold red", "running": "yellow",
-         "halted": "bold red", "incomplete": "yellow", "skipped": "yellow", "untouched": "dim", "Exception": "bold red"}
+         "halted": "bold red", "cancelled": "yellow", "incomplete": "yellow", "skipped": "yellow", "untouched": "dim", "Exception": "bold red"}
 # What BIOS/BMC firmware reports instead of a real value (compared case-insensitively); skipped in the summary.
 PLACEHOLDERS = {"", "-", "n/a", "na", "none", "unknown", "not available", "not specified", "default string",
                 "to be filled by o.e.m.", "system manufacturer", "system product name", "no dimm", "nil"}

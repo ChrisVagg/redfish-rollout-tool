@@ -1,4 +1,4 @@
-<svg viewBox="0 0 900 892" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="The lab: ten emulated BMCs in three racks, where the rollout really updates firmware, and the observability stack that watches them. lab/policy.yaml plans a canary of one BMC, bmc1, marked canary: true; wave 1 of three, bmc2 to bmc4, strict; wave 2 of the other six; at most two BMCs of a rack in a wave, a halt over 10% failed, a 60 second soak, ten at once. Both read the hosts from NetBox, the inventory's source of truth on port 8000, over its REST API with a read-only token: each BMC's out-of-band IP, its rack and project. poller.py and pipeline.sh with rollout.py share the lab/ folder: the inventory file, which seeds NetBox with the ten BMCs once and keeps their connection defaults and writable, the policy, the baseline and the image catalog, and the snapshots, run records and reports. They speak Redfish over HTTPS: reads, updates and resets. The firmware's way in: OpenBMC's Jenkins builds each version as a signed .tar package. lab/download-fw-images.sh downloads the two newest into lab/staging/. lab/promote-fw-images.sh, the ingest gate, checks each one's signatures against the pinned key; only a package that passes is uploaded into the store, a SeaweedFS bucket that keeps the source copy, and its download deleted; it writes into lab/ the catalog images.yaml and the baseline, never the packages, and takes the older build's image-bmc out as bmc.mtd, which each BMC's flash volume starts from. The cache, nginx over HTTPS, fetches packages from the store on cache misses. rollout.py fetches a package from the cache into lab/spool/, its own copy, checks its sha256 against the catalog and pushes that copy to the BMC, which writes it into its flash. Docker Compose runs one container per BMC on its own loopback address, 127.1.0.1 to 127.1.0.10, port 443. In each, QEMU's gb200nvl-bmc machine stands in for the server, emulating only its BMC, an AST2600 chip, which runs OpenBMC's GB200 NVL firmware and bmcweb serving Redfish on port 443, from a 64 MiB flash volume kept across restarts. They boot in batches of four, each once the batch before is healthy, and a BMC whose boot comes up degraded boots again. At start-up, the two scripts fetch the two newest GB200 NVL builds from OpenBMC's Jenkins and check their signatures; the lab boots the older and approves the newer. The observability stack runs in Docker Compose, every service on 127.0.0.1: exporter-lab, poller.py exporter, reads the ten BMCs over Redfish every 10 seconds; rollout.py run pushes its metrics to the Pushgateway and sends every event of its run record to Loki; Prometheus pulls, scraping /metrics from the exporter every 10 seconds and the Pushgateway every 5; Loki is pushed to. Each BMC's Redfish EventService, its own events, isn't collected yet: this bmcweb build advertises a server-sent event stream but doesn't serve it. The rollout state is PostgreSQL: rollout.py run locks its hosts there before a stage touches them, and adds every event of its run, kept 15 days. Grafana reads Prometheus, Loki and, over SQL with an account that may only read, the state database, and shows them in a Lab folder, Lab · Fleet manager, Lab · Host and Lab · Pipeline, next to a Prod folder.">
+<svg viewBox="0 0 900 916" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="The lab: ten emulated BMCs in three racks, where the rollout really updates firmware, with the control plane and the lab site around them; a bar on each box says which plane it is in, blue the control plane, amber the site. lab/policy.yaml plans a canary of one BMC, bmc1, marked canary: true; wave 1 of three, bmc2 to bmc4, strict; wave 2 of the other six; at most two BMCs of a rack in a wave, a halt over 10% failed, a 60 second soak, ten at once. Both read the hosts from NetBox, the inventory's source of truth on port 8000, over its REST API with a read-only token: each BMC's out-of-band IP, its rack and project. poller.py and pipeline.sh with rollout.py share the lab/ folder, the lab site's: the inventory file, which seeds NetBox with the ten BMCs once and keeps their connection defaults and writable, the policy, the Prometheus agent's targets, the cache's certificate, and the snapshots, run records and reports; the baseline and the image catalog are the control plane's, in control/catalog/lab/. They speak Redfish over HTTPS: reads, updates and resets. The firmware's way in: OpenBMC's Jenkins builds each version as a signed .tar package. control/ingest/download-fw-images.sh downloads the two newest into control/ingest/staging/. control/ingest/promote-fw-images.sh, the ingest gate, checks each one's signatures against the pinned key; only a package that passes is uploaded into the store, a SeaweedFS bucket that keeps the source copy, and its download deleted; it writes the catalog images.yaml and the baseline into control/catalog/lab/, never the packages, and takes the older build's image-bmc out into lab/ as bmc.mtd, which each BMC's flash volume starts from. The cache, the lab site's nginx over HTTPS, fetches packages from the control plane's store on cache misses. rollout.py fetches a package from the cache into lab/spool/, its own copy, checks its sha256 against the catalog and pushes that copy to the BMC, which writes it into its flash. Docker Compose runs one container per BMC on its own loopback address, 127.1.0.1 to 127.1.0.10, port 443. In each, QEMU's gb200nvl-bmc machine stands in for the server, emulating only its BMC, an AST2600 chip, which runs OpenBMC's GB200 NVL firmware and bmcweb serving Redfish on port 443, from a 64 MiB flash volume kept across restarts. They boot in batches of four, each once the batch before is healthy, and a BMC whose boot comes up degraded boots again. At start-up, the two scripts fetch the two newest GB200 NVL builds from OpenBMC's Jenkins and check their signatures; the lab boots the older and approves the newer. The lab site runs the exporter, poller.py exporter, which reads the ten BMCs over Redfish every 10 seconds, and a Prometheus agent beside it; the control plane runs the observability stack, every service on 127.0.0.1; rollout.py run pushes its metrics to the Pushgateway and sends every event of its run record to Loki; the agent scrapes the exporter every 10 seconds and pushes each sample to Prometheus (remote write), so the control plane never connects into the site, and Prometheus scrapes the Pushgateway every 5; Loki is pushed to. Each BMC's Redfish EventService, its own events, isn't collected yet: this bmcweb build advertises a server-sent event stream but doesn't serve it. The rollout state is PostgreSQL: rollout.py run locks its hosts there before a stage touches them, and adds every event of its run. Grafana reads Prometheus, Loki and, over SQL with an account that may only read, the state database, and shows them in a Lab folder, Lab · Fleet manager, Lab · Host and Lab · Pipeline, next to a Prod folder.">
   <style>
     .rfl text { font-family: var(--mono, monospace); }
     .rfl .bg { fill: var(--bg-deep, #050708); }
@@ -9,6 +9,8 @@
     .rfl .band { fill: var(--dim, #6f8f97); font-size: 9.5px; letter-spacing: .14em; }
     .rfl .lbl { fill: var(--dim, #6f8f97); font-size: 10px; }
     .rfl .hi { fill: var(--teal, #00ffc8); }
+    /* which plane a box is in: a bar on its left, as in lab-solution-architecture.svg */
+    .rfl .pc { fill: #6ea8ff; } .rfl .ps { fill: #ffb454; }
     .rfl .wire { fill: none; stroke: var(--dim, #6f8f97); stroke-width: 1; }
     .rfl .wire-hi { fill: none; stroke: var(--teal, #00ffc8); stroke-width: 1.4; }
     .rfl .cut { fill: none; stroke: var(--teal, #00ffc8); stroke-width: 1; stroke-dasharray: 5 5; opacity: .75; }
@@ -45,32 +47,32 @@
     </marker>
   </defs>
   <g class="rfl">
-    <rect class="bg" x="0" y="0" width="900" height="892" rx="12"/>
+    <rect class="bg" x="0" y="0" width="900" height="916" rx="12"/>
 
 
     <!-- the firmware's way into the lab: what each script does, and what it feeds -->
     <g transform="translate(0 -60)">
     <rect class="cut" x="20" y="80" width="860" height="112" rx="10"/>
     <text class="band hi" x="36" y="97">FIRMWARE INTO THE LAB · WHAT EACH SCRIPT DOES AND FEEDS</text>
-    <text class="lbl" x="864" y="97" text-anchor="end">packages → the store · the catalog and bmc.mtd → lab/</text>
+    <text class="lbl" x="864" y="97" text-anchor="end">packages → the store · the catalog → control/catalog/ · bmc.mtd → lab/</text>
     <rect class="box" x="40" y="106" width="165" height="70" rx="8"/>
     <text class="name" x="122" y="126" text-anchor="middle">OpenBMC Jenkins</text>
     <text class="sub" x="122" y="144" text-anchor="middle">2 newest GB200 NVL builds</text>
     <text class="sub" x="122" y="158" text-anchor="middle">a signed .tar each</text>
-    <rect class="box" x="225" y="106" width="190" height="70" rx="8"/>
+    <rect class="box" x="225" y="106" width="190" height="70" rx="8"/><rect class="pc" x="225" y="114" width="3" height="54" rx="1.5"/>
     <text class="name" x="320" y="126" text-anchor="middle">download-fw-images.sh</text>
     <text class="sub" x="320" y="144" text-anchor="middle">downloads the 2 packages</text>
-    <text class="sub" x="320" y="158" text-anchor="middle">into lab/staging/</text>
+    <text class="sub" x="320" y="158" text-anchor="middle">into control/ingest/staging/</text>
     <!-- the ingest gate: a package goes on to the store only if its signatures verify with the pinned key -->
-    <rect class="box" x="435" y="106" width="185" height="70" rx="8"/>
+    <rect class="box" x="435" y="106" width="185" height="70" rx="8"/><rect class="pc" x="435" y="114" width="3" height="54" rx="1.5"/>
     <text class="name hi" x="527" y="126" text-anchor="middle">promote-fw-images.sh</text>
     <text class="sub" x="527" y="144" text-anchor="middle">checks the signatures</text>
     <text class="sub" x="527" y="158" text-anchor="middle">pass: uploads to the store</text>
-    <rect class="box" x="640" y="106" width="100" height="70" rx="8"/>
+    <rect class="box" x="640" y="106" width="100" height="70" rx="8"/><rect class="pc" x="640" y="114" width="3" height="54" rx="1.5"/>
     <text class="name" x="690" y="126" text-anchor="middle">Store</text>
     <text class="sub" x="690" y="144" text-anchor="middle">SeaweedFS</text>
     <text class="sub" x="690" y="158" text-anchor="middle">the source copy</text>
-    <rect class="box" x="760" y="106" width="100" height="70" rx="8"/>
+    <rect class="box" x="760" y="106" width="100" height="70" rx="8"/><rect class="ps" x="760" y="114" width="3" height="54" rx="1.5"/>
     <text class="name hi" x="810" y="126" text-anchor="middle">Cache</text>
     <text class="sub" x="810" y="144" text-anchor="middle">nginx · HTTPS</text>
     <text class="sub" x="810" y="158" text-anchor="middle">cached on miss</text>
@@ -80,15 +82,15 @@
     <path class="wire flow" d="M740 141H756" marker-end="url(#rfl-dim)"/>
     <!-- into the lab/ folder below, from the verified packages, and the cache to the rollout -->
     <path class="wire flow" d="M470 176V282" marker-end="url(#rfl-dim)"/>
-    <text class="lbl" x="478" y="203">the catalog: images.yaml, baseline.yaml</text>
-    <text class="lbl" x="478" y="216">bmc.mtd: what each BMC first boots</text>
+    <text class="lbl" x="478" y="203">the catalog → control/catalog/lab/</text>
+    <text class="lbl" x="478" y="216">bmc.mtd → lab/: what each BMC first boots</text>
     <path class="wire-hi flow" d="M810 176V282" marker-end="url(#rfl-teal)"/>
     <text class="lbl hi" x="802" y="205" text-anchor="end">rollout.py</text>
     <text class="lbl hi" x="802" y="217" text-anchor="end">fetches it</text>
     </g>
 
     <!-- the inventory: NetBox, the source of truth; the tools read the hosts over its REST API with a read-only token -->
-    <rect class="box" x="40" y="166" width="250" height="42" rx="8"/>
+    <rect class="box" x="40" y="166" width="250" height="42" rx="8"/><rect class="pc" x="40" y="174" width="3" height="26" rx="1.5"/>
     <text class="name hi" x="165" y="184" text-anchor="middle">NetBox · the inventory</text>
     <text class="sub" x="165" y="199" text-anchor="middle">hosts · racks · OOB IPs · :8000</text>
     <path class="wire flow" d="M165 208V222" marker-end="url(#rfl-dim)"/>
@@ -97,21 +99,21 @@
 
     <g transform="translate(0 140)">
     <!-- the tools and the lab/ folder they share -->
-    <rect class="box" x="40" y="86" width="250" height="76" rx="8"/>
+    <rect class="box" x="40" y="86" width="250" height="76" rx="8"/><rect class="ps" x="40" y="94" width="3" height="60" rx="1.5"/>
     <text class="name" x="165" y="108" text-anchor="middle">poller.py</text>
     <text class="sub" x="165" y="126" text-anchor="middle">collect: crawl each BMC's tree</text>
     <text class="sub" x="165" y="140" text-anchor="middle">health · firmware · inventory</text>
     <text class="sub" x="165" y="154" text-anchor="middle">telemetry · capabilities · diff</text>
 
-    <rect class="box" x="325" y="86" width="250" height="96" rx="8"/>
+    <rect class="box" x="325" y="86" width="250" height="96" rx="8"/><rect class="ps" x="325" y="94" width="3" height="80" rx="1.5"/>
     <text class="name" x="450" y="106" text-anchor="middle">Site folder · lab/</text>
     <text class="sub" x="450" y="123" text-anchor="middle">inventory.yaml: seeds NetBox; defaults</text>
     <text class="sub" x="450" y="136" text-anchor="middle">policy.yaml: canary, waves, gates</text>
-    <text class="sub" x="450" y="149" text-anchor="middle">baseline.yaml: the approved versions</text>
-    <text class="sub" x="450" y="162" text-anchor="middle">images.yaml: package paths, sha256</text>
+    <text class="sub" x="450" y="149" text-anchor="middle">prometheus-agent.yml: the site's agent</text>
+    <text class="sub" x="450" y="162" text-anchor="middle">cache/: the cache's TLS certificate</text>
     <text class="sub" x="450" y="175" text-anchor="middle">out: snapshots · runs · reports · spool</text>
 
-    <rect class="box" x="610" y="86" width="250" height="76" rx="8"/>
+    <rect class="box" x="610" y="86" width="250" height="76" rx="8"/><rect class="ps" x="610" y="94" width="3" height="60" rx="1.5"/>
     <text class="name" x="735" y="108" text-anchor="middle">pipeline.sh · rollout.py</text>
     <text class="sub" x="735" y="126" text-anchor="middle">plan → canary → waves → report</text>
     <text class="sub" x="735" y="140" text-anchor="middle">locks its hosts · records every step</text>
@@ -129,7 +131,7 @@
 
     <!-- docker compose: one container per BMC -->
     <rect class="cut" x="20" y="218" width="860" height="296" rx="10"/>
-    <text class="band hi" x="36" y="236">DOCKER COMPOSE · 10 QEMU SERVERS IN 3 RACKS, A BMC IN EACH · 127.1.0.1-10</text>
+    <text class="band hi" x="36" y="236">LAB HARDWARE · 10 QEMU SERVERS IN 3 RACKS, A BMC IN EACH · 127.1.0.1-10</text>
 
     <!-- every container: QEMU is the server, and the BMC runs inside it -->
     <rect class="grp" x="40" y="246" width="300" height="240" rx="8"/>
@@ -240,30 +242,30 @@
     <!-- observability: the exporter reads the BMCs on the same Redfish line; rollout.py sends its events to Loki and
          pushes its metrics to the Pushgateway -->
     <path class="wire-hi flow" d="M165 200H10V568H40"/>
-    <text class="lbl hi" x="26" y="212">exporter-lab: GET every 10 s</text>
+    <text class="lbl hi" x="26" y="212">exporter: GET every 10 s</text>
     <path class="wire flow" d="M860 124H890V568H864" marker-end="url(#rfl-dim)"/>
     <path class="wire flow" d="M890 538H565V543" marker-end="url(#rfl-dim)"/>
     <path class="wire flow" d="M890 568V702H864" marker-end="url(#rfl-dim)"/>
     <g transform="translate(0 -62)">
       <!-- Prometheus pulls: it scrapes /metrics from the exporter and the Pushgateway. Loki is pushed to -->
       <rect class="cut" x="20" y="592" width="860" height="206" rx="10"/>
-      <rect class="box" x="40" y="608" width="190" height="44" rx="8"/>
-      <text class="name" x="135" y="627" text-anchor="middle">exporter-lab</text>
-      <text class="sub" x="135" y="643" text-anchor="middle">polls each BMC every 10 s</text>
-      <rect class="box" x="255" y="608" width="190" height="44" rx="8"/>
+      <rect class="box" x="40" y="608" width="190" height="44" rx="8"/><rect class="ps" x="40" y="616" width="3" height="28" rx="1.5"/>
+      <text class="name" x="135" y="627" text-anchor="middle">exporter · agent</text>
+      <text class="sub" x="135" y="643" text-anchor="middle">the agent pushes every 10 s</text>
+      <rect class="box" x="255" y="608" width="190" height="44" rx="8"/><rect class="pc" x="255" y="616" width="3" height="28" rx="1.5"/>
       <text class="name hi" x="350" y="627" text-anchor="middle">Prometheus</text>
-      <text class="sub" x="350" y="643" text-anchor="middle">pulls /metrics every 5-10 s</text>
-      <rect class="box" x="470" y="608" width="190" height="44" rx="8"/>
+      <text class="sub" x="350" y="643" text-anchor="middle">remote write · Pushgateway</text>
+      <rect class="box" x="470" y="608" width="190" height="44" rx="8"/><rect class="pc" x="470" y="616" width="3" height="28" rx="1.5"/>
       <text class="name" x="565" y="627" text-anchor="middle">Pushgateway · metrics</text>
       <text class="sub" x="565" y="643" text-anchor="middle">pushed by rollout.py · PUT</text>
-      <rect class="box" x="685" y="608" width="175" height="44" rx="8"/>
+      <rect class="box" x="685" y="608" width="175" height="44" rx="8"/><rect class="pc" x="685" y="616" width="3" height="28" rx="1.5"/>
       <text class="name hi" x="772" y="627" text-anchor="middle">Loki · events</text>
-      <text class="sub" x="772" y="643" text-anchor="middle">pushed by rollout.py · POST</text>
+      <text class="sub" x="772" y="643" text-anchor="middle">pushed by rollout.py</text>
       <path class="wire flow" d="M230 630H251" marker-end="url(#rfl-dim)"/>
       <path class="wire flow" d="M470 630H449" marker-end="url(#rfl-dim)"/>
       <path class="wire flow" d="M350 652V666" marker-end="url(#rfl-dim)"/>
       <path class="wire flow" d="M772 652V666" marker-end="url(#rfl-dim)"/>
-      <rect class="grp" x="40" y="670" width="820" height="52" rx="8"/>
+      <rect class="grp" x="40" y="670" width="820" height="52" rx="8"/><rect class="pc" x="40" y="678" width="3" height="36" rx="1.5"/>
       <text class="name hi" x="100" y="700" text-anchor="middle">Grafana</text>
       <rect class="box" x="175" y="680" width="192" height="32" rx="6"/>
       <text class="name" x="271" y="700" text-anchor="middle">Lab · Fleet manager</text>
@@ -274,12 +276,18 @@
       <rect class="box" x="685" y="680" width="163" height="32" rx="6"/>
       <text class="name" x="766" y="700" text-anchor="middle" style="font-size:11px">Lab · Update details</text>
       <!-- the state DB: rollout.py locks its hosts in it and adds every event; Grafana reads it -->
-      <rect class="box" x="40" y="742" width="820" height="44" rx="8"/>
+      <rect class="box" x="40" y="742" width="820" height="44" rx="8"/><rect class="pc" x="40" y="750" width="3" height="28" rx="1.5"/>
       <text class="name hi" x="450" y="761" text-anchor="middle">State DB · PostgreSQL</text>
-      <text class="sub" x="450" y="777" text-anchor="middle">host_locks: a lock per host · events: every step of every run, kept 15 days</text>
+      <text class="sub" x="450" y="777" text-anchor="middle">host_locks: a lock per host · events: every step of every run</text>
       <path class="wire flow" d="M450 742V726" marker-end="url(#rfl-dim)"/>
       <text class="lbl" x="458" y="737">SQL · grafana, reads only</text>
     </g>
     </g>
+    <!-- the planes: which a box is in, by the bar on its left -->
+    <rect class="pc" x="36" y="895" width="3" height="12" rx="1.5"/>
+    <text class="lbl" x="46" y="905">control plane: control/, one per fleet</text>
+    <rect class="ps" x="306" y="895" width="3" height="12" rx="1.5"/>
+    <text class="lbl" x="316" y="905">site: site/ and the site's folder, one per site, connects out only</text>
+    <text class="lbl" x="864" y="905" text-anchor="end">lab hardware: lab/</text>
   </g>
 </svg>

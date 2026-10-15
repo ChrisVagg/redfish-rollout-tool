@@ -1,0 +1,9 @@
+# The production site's Prometheus agent (site/docker-compose.yaml): scrapes the site's exporter and pushes every sample
+# to the control plane's Prometheus, so the control plane never connects into the site
+global:
+  scrape_interval: 10s
+scrape_configs:
+  - job_name: redfish
+    static_configs: [{targets: ["127.0.0.1:9102"], labels: {site: prod}}]
+remote_write:
+  - url: http://127.0.0.1:9090/api/v1/write

@@ -1,14 +1,19 @@
-"""Checks of the rollout's decisions, the parts that decide how far a bad image can reach: python test_rollout.py
-(make test). No BMC is needed: pre-flight and the post-check read the lab BMC as a collect saved it, and the update
-itself is replaced, so what is tested is what the rollout decides, from real Redfish data."""
+"""Checks of the rollout's decisions, the parts that decide how far a bad image can reach: python
+tests/test_rollout.py (make test). No BMC is needed: pre-flight and the post-check read the lab BMC as a collect saved
+it, and the update itself is replaced, so what is tested is what the rollout decides, from real Redfish data."""
 import copy
 import hashlib
 import json
 import os
+import sys
 import tempfile
+import time
 from collections import Counter
 from pathlib import Path
 from unittest.mock import patch
+
+ROOT = Path(__file__).resolve().parent.parent  # the repository, where the tools under test are
+sys.path.insert(0, str(ROOT))
 
 import poller
 import rollout
@@ -54,7 +59,7 @@ def test_canary_racks():
 # ---- Pre-flight, the post-check, the rollback and the gate, on the lab BMC ----
 
 # The lab BMC as a collect read it: OpenBMC's GB200 NVL build 1754, healthy, no task open
-FIXTURE = json.loads((Path(__file__).parent / "fixtures" / "openbmc-gb200.json").read_text())["resources"]
+FIXTURE = json.loads((Path(__file__).parent / "testdata" / "openbmc-gb200.json").read_text())["resources"]
 BMC, MODEL = "Manager (BMC)", "- -"  # the emulated GB200 reports no manufacturer or model
 MGR, FW = "/redfish/v1/Managers/bmc", "/redfish/v1/UpdateService/FirmwareInventory/560e4d15"
 TASK = "/redfish/v1/TaskService/Tasks/1"
@@ -157,20 +162,21 @@ def test_image_cache():
     cache.shutdown()
 
 
-# The ingest gate, lab/promote-fw-images.sh, run in a copy of lab/ that pins a key made here, its store a fake docker
-# that records each upload. A package signed with that key passes, is uploaded and written into the catalog; one
-# without its image's signature, with a changed image, without a required file, signed with another key, or not signed
-# at all, is refused before the upload
+# The ingest gate, control/ingest/promote-fw-images.sh, run in a copy of the repo's layout that pins a key made here,
+# its store a fake docker that records each upload. A package signed with that key passes, is uploaded and written into
+# the catalog; one without its image's signature, with a changed image, without a required file, signed with another
+# key, or not signed at all, is refused before the upload
 def test_signature_gate():
     import shutil
     import subprocess
     run = lambda *cmd, **kw: subprocess.run([str(c) for c in cmd], capture_output=True, text=True, **kw)
     d = Path(tempfile.mkdtemp())
+    (d / "control" / "ingest").mkdir(parents=True)
     (d / "lab").mkdir()
-    shutil.copy2(Path(__file__).parent / "lab" / "promote-fw-images.sh", d / "lab")
+    shutil.copy2(ROOT / "control" / "ingest" / "promote-fw-images.sh", d / "control" / "ingest")
     for k in ("pinned", "other"):
         run("openssl", "genpkey", "-algorithm", "RSA", "-pkeyopt", "rsa_keygen_bits:1024", "-out", d / f"{k}.key")
-    run("openssl", "pkey", "-in", d / "pinned.key", "-pubout", "-out", d / "lab" / "openbmc-dev.pub")
+    run("openssl", "pkey", "-in", d / "pinned.key", "-pubout", "-out", d / "control" / "ingest" / "openbmc-dev.pub")
     (d / "docker").write_text('#!/bin/sh\ncat > /dev/null\necho "$@" >> "$0.uploads"\n')
     (d / "docker").chmod(0o755)
     env = {**os.environ, "PATH": f"{d}:{os.environ['PATH']}"}
@@ -190,7 +196,7 @@ def test_signature_gate():
         tar = d / f"gb200nvl-{build}.static.mtd.all.tar"
         run("tar", "-cf", tar, "-C", work, *names)
         return tar
-    gate = lambda tar: run(d / "lab" / "promote-fw-images.sh", tar, env=env)
+    gate = lambda tar: run(d / "control" / "ingest" / "promote-fw-images.sh", tar, env=env)
     refusals = [  # (package, what the gate says)
         (package(1, signed=("MANIFEST", "publickey")), "image-bmc or its signature image-bmc.sig is missing"),
         (package(2, changed=b"!"), "image-bmc: its signature doesn't verify with openbmc-dev.pub"),
@@ -205,7 +211,8 @@ def test_signature_gate():
     passed = gate(package(6))
     assert passed.returncode == 0, passed.stderr
     assert "gb200nvl-6.static.mtd.all.tar" in uploads.read_text()
-    assert '"2.6": {file: "images/gb200nvl-6.static.mtd.all.tar"' in (d / "lab" / "images.yaml").read_text()
+    catalog = (d / "control" / "catalog" / "lab" / "images.yaml").read_text()
+    assert '"2.6": {file: "images/gb200nvl-6.static.mtd.all.tar"' in catalog
     assert (d / "lab" / "bmc.mtd").read_bytes() == b"firmware"
     assert not (d / "gb200nvl-6.static.mtd.all.tar").exists()  # the store keeps the only copy
 
@@ -367,7 +374,7 @@ def test_gate():
 
 # A lock per host in the state database: a stage takes the locks of all its hosts or of none, so two pipelines never
 # touch one host; at its end it gives them back, but a host left for a person keeps its lock. Events are append-only to
-# the rollout's account, and a host's state is its latest. Needs the state database (make state-up), whose STATE_DB
+# the rollout's account, and a host's state is its latest. Needs the state database (make control-up), whose STATE_DB
 # make test sets: skipped without it
 def test_host_locks():
     try:
@@ -401,6 +408,60 @@ def test_host_locks():
                 pass
     finally:
         db.execute("DELETE FROM host_locks WHERE pipeline = ANY(%s)", ([a, b],))
+
+
+# make cancel: a pipeline asked to stop starts no wave after the one under way. Its report says CANCELLED and who asked,
+# the waves it never started didn't run, its metrics say so; and a soak under way ends at once, re-checking nothing
+def test_cancel():
+    at = lambda s: f"2026-10-15T10:00:{s}+00:00"
+    why = "cancelled before wave 1, by cvag@lab at 2026-10-15T10:00:04Z"
+    events = [
+        {"at": at("00"), "host": "-", "step": "run", "state": "start", "waves": {"canary": ["h1"], "wave 1": ["h2"]},
+         "failure_rate": 0.1},
+        {"at": at("01"), "host": "h1", "step": "pre-flight", "state": "go", "running": "1.0", "target": "2.0"},
+        {"at": at("02"), "host": "h1", "step": "done", "state": "updated", "running": "2.0", "target": "2.0",
+         "before": "1.0"},
+        {"at": at("03"), "host": "-", "step": "gate", "state": "passed", "wave": "canary", "failed": 0, "tried": 1,
+         "limit": 0.1, "strict": True, "soak_failed": 0},
+        {"at": at("04"), "host": "-", "step": "run", "state": "cancelled", "wave": "wave 1", "detail": why},
+        {"at": at("05"), "host": "-", "step": "run", "state": "end", "detail": why}]
+    doc = rollout.pipeline_report(None, events, "p", [])
+    assert (doc["result"], doc["cancelled"]) == ("cancelled", why), doc["result"]
+    wave1 = doc["waves"][1]
+    assert wave1["gate"]["result"] == "not run" and wave1["hosts"][0]["why"] == "cancelled: its wave never started"
+    text = rollout.metrics(doc)
+    assert "rollout_cancelled 1" in text and "rollout_running 0" in text
+    assert any("CANCELLED" in str(part) for part in rollout.render(doc))
+
+    def recheck(*args):
+        raise AssertionError("a cancelled soak re-checked a host")
+    with patch.object(rollout, "post_check", recheck):
+        started = time.monotonic()
+        assert rollout.soak([{"state": "updated"}], BMC, 600, lambda *a, **k: None, cancelled=lambda: True) == []
+        assert time.monotonic() - started < 1
+
+
+# Who: ROLLOUT_ACTOR when what started the run sets it, else the account sudo came from, else the account, at the host.
+# The commit a catalog file was approved in, by whom, and whether it changed since; nothing for a file git doesn't track
+def test_who():
+    import subprocess
+    with patch.dict(os.environ, {"ROLLOUT_ACTOR": "github:cvag"}):
+        assert rollout.actor() == "github:cvag"
+    with patch.dict(os.environ, {"ROLLOUT_ACTOR": "", "SUDO_USER": "alice"}):
+        assert rollout.actor().startswith("alice@")
+    repo = Path(tempfile.mkdtemp())
+    git = lambda *a: subprocess.run(["git", "-C", repo, "-c", "user.name=Reviewer", "-c", "user.email=r@example.com",
+                                     "-c", "commit.gpgsign=false", *a], capture_output=True, check=True)
+    git("init", "-q")
+    (repo / "baseline.yaml").write_text("approved\n")
+    git("add", "baseline.yaml")
+    git("commit", "-qm", "approve")
+    approved = rollout.approval(repo / "baseline.yaml", repo)
+    assert (approved["author"], approved["modified"], len(approved["commit"])) == ("Reviewer", False, 40), approved
+    (repo / "baseline.yaml").write_text("changed\n")
+    assert rollout.approval(repo / "baseline.yaml", repo)["modified"] is True
+    (repo / "images.yaml").write_text("not in git\n")
+    assert rollout.approval(repo / "images.yaml", repo) is None
 
 
 # NetBox's devices as inventory.yaml lists servers, page after page: a device without an out-of-band IP isn't read

@@ -1,7 +1,7 @@
 """Loads lab/inventory.yaml's servers into NetBox once: a site that already has devices is left as it is, so NetBox stays
 the source and its edits stay. Also makes the tools' account, redfish, which may only view devices, and its read-only
-API token from NETBOX_TOKEN in netbox/.netbox.env, so it survives a new NetBox volume. Runs in NetBox's Django shell:
-make netbox-up.
+API token from NETBOX_TOKEN in control/netbox/.netbox.env, so it survives a new NetBox volume. Runs in NetBox's Django
+shell: make control-up.
 
 A server becomes a device of site lab: named after its node, else its BMC address; its vendor the manufacturer, its
 project the tenant, its rack the rack, its model the device type (unspecified without one), canary: true the tag
