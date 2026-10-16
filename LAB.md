@@ -130,9 +130,11 @@ rollout read the devices of their site (`SITE`) over NetBox's REST API.
 | canary, writable | the tags `canary` and `writable`: only a tag makes a host writable |
 | how its BMC is reached | its config contexts, its site's and its platform's, which NetBox merges. `site lab`: `verify: false`, `retries: 1`, `deadline: 300` and its account's env vars, `LAB_USERNAME` and `LAB_PASSWORD`. `site prod`: `verify: false`; each prod platform, a vendor's BMC, names its account's env vars. Without them: HTTPS, the certificate checked |
 
-A device without an out-of-band IP, or without an account in its config context, is skipped with a warning. Each
-service reads as its own account, which can't log in and may only view devices, with its own read-only token: a
-write, or a read of anything but devices, gets 403.
+A device is skipped with a warning when it has no out-of-band IP, when its config context doesn't name its account
+as `X_USERNAME` and `X_PASSWORD`, one `X`, both set where the tool runs, or when it isn't reached over HTTPS: an
+edit in NetBox can't make a tool send another of its secrets (`STATE_DB`, `NETBOX_TOKEN`...) as a BMC login, or
+send one in clear. Each service reads as its own account, which can't log in and may only view devices, with its
+own read-only token: a write, or a read of anything but devices, gets 403.
 
 | Account | Its token | Used by |
 |---|---|---|
@@ -184,9 +186,9 @@ component) and `images.yaml` (the image file and sha256 per version).
    policy says ([Rollout policy](#rollout-policy)): a canary of each hardware model, then waves that grow, spread
    across racks. It saves `plan.json`, and the later stages run exactly that plan: it records the sha256 of every
    file it read (baseline, catalog, policy), each host's entry from NetBox and each BMC's identity, and a stage
-   refuses to start when one of those changed since. It also records who planned it (`ROLLOUT_ACTOR`, else the account and host `make`
-   runs as) and the git commit each catalog file was approved in; each stage records who started it, and
-   `make cancel` who cancelled.
+   refuses to start when one of those changed since. It also records who planned it (`ROLLOUT_ACTOR`, else the
+   account and host `make` runs as) and the git commit each catalog file was approved in; each stage records who
+   started it, and `make cancel` who cancelled.
 2. **canary**: updates the canary hosts. Gate: any failure stops the pipeline, so wave 1 never starts.
 3. **waves**: wave 1 starts only after the canary passed and soaked. After each wave, the gate: the first waves are
    strict like the canary (any failure stops the pipeline); later ones stop when more than `failure_rate` of the hosts
@@ -432,7 +434,7 @@ another canary. `docker compose -f lab/docker-compose.yaml restart bmc1` clears 
 
 ## Test-driven development
 
-`make test` runs 26 tests in [tests/test_rollout.py](tests/test_rollout.py), with no BMC. It tests the decisions that keep a
+`make test` runs 27 tests in [tests/test_rollout.py](tests/test_rollout.py), with no BMC. It tests the decisions that keep a
 bad image from spreading, on real Redfish data: the lab BMC as a collect saved it
 ([tests/testdata/openbmc-gb200.json](tests/testdata/openbmc-gb200.json)), with one fact changed per case.
 
@@ -442,7 +444,8 @@ bad image from spreading, on real Redfish data: the lab BMC as a collect saved i
 | Post-check (`after_checks`) | the target runs; health no worse than before; a manager gone since fails; no new failed task. A task that says `Completed` while the old firmware still runs fails it |
 | One host (`run_host`, `scheduler`) | a failure before the reset: the old firmware still runs, nothing to roll back; after it: the version that ran before is reinstalled, not the target; a failed rollback, or none possible: `needs_attention`; a drain that fails or runs past its timeout fails the host before any update; an undrain that fails: `needs_attention`; a BMC that isn't the one the plan approved is blocked |
 | The frozen plan (`changed_inputs`) | an input file changed or gone since the plan stops the run |
-| The inventory (`load_servers`) | NetBox's devices, page by page: a config context's connection keys merged in, `canary` and `writable` from tags only (a context's `writable` ignored); a device without an out-of-band IP or a BMC account skipped; no token, or a site with no host, stops collect and plan with why |
+| The writable gate (`run`) | `run --yes` refuses a planned host NetBox doesn't tag `writable`, before the state database, any lock or any update |
+| The inventory (`load_servers`) | NetBox's devices, page by page: a config context's connection keys merged in, `canary` and `writable` from tags only (a context's `writable` ignored); a device without an out-of-band IP, without an account named `X_USERNAME` and `X_PASSWORD` that is set (not another of the tool's secrets), or not reached over HTTPS skipped; no token, a site with no host, NetBox down or answering something else than JSON stops collect and plan with why |
 | The gate (`gate`) | any failure halts the canary and the strict waves; a later wave halts over `failure_rate`, exactly `failure_rate` passes; a host that failed its soak halts any wave; blocked and skipped hosts were never tried |
 | The ingest gate (`control/ingest/promote-fw-images.sh`) | a package signed with the pinned key is uploaded and written into the catalog; one without its image's signature, with its image changed after signing, without a required file, signed with another key, or not signed at all, is refused, and nothing reaches the store |
 | The image cache (`image_problems`) | an image fetched from a real HTTP server into the agent's copy and checked; one the cache doesn't have, or bytes that don't match, block, and the bad copy is deleted |
@@ -460,8 +463,9 @@ test first: the tests failed (there was no `gate` or `after_checks`), then the c
 breaks one rule of the tools at a time the way a careless edit would: a downgrade let through,
 versions compared as text, a sha256 mismatch ignored, the rollback installing the target, the gate halting at exactly
 `failure_rate`, an image never fetched from the cache, an A/B bank counted as a way back, a host reset with no drain, a
-changed plan run anyway, a held lock let through, `writable` taken from a config context, and 21 more. For each
-break, the test that guards the rule must fail: 32 of 32 do. Its first run found a
+changed plan run anyway, a held lock let through, `writable` taken from a config context, an untagged host run
+with `--yes`, any secret sent as a BMC login, and 22 more. For each break, the test that guards the rule must
+fail: 35 of 35 do. Its first run found a
 gap: the strict-wave case had enough failures to halt anyway, so it passed with wave 1 not strict; the case now has 1
 failure in 11 hosts.
 

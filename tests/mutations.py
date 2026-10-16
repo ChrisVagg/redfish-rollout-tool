@@ -62,6 +62,11 @@ BREAKS = [  # (what a careless edit does, the line as it is, the line broken, th
     ("writable from a config context",
      'context = {k: v for k, v in (d.get("config_context") or {}).items() if k in CONNECTION}',
      'context = dict(d.get("config_context") or {})', "test_netbox_inventory"),
+    ("an untagged host run with --yes", 'if s.get("writable") is not True]', "if False]", "test_run_writable"),
+    ("any secret sent as a BMC login", "elif not ACCOUNT.fullmatch(account) or not set(", "elif not set(",
+     "test_netbox_inventory"),
+    ("a BMC login sent over plain HTTP", 'elif context.get("scheme", "https") != "https":', "elif False:",
+     "test_netbox_inventory"),
     ("a held lock let through", "if taken == set(hosts):", "if True:", "test_host_locks"),
     ("a host left for a person unlocked", 'if o["state"] == "needs_attention")', "if False)", "test_host_locks"),
 ]

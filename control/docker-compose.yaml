@@ -9,24 +9,21 @@
 name: redfish-control
 x-netbox-secrets: &netbox-secrets
   env_file: netbox/.netbox.env
+
 services:
-  # NetBox, the inventory's only source: both sites' hosts, their racks, projects, BMC addresses and how each BMC is
-  # reached (config contexts). Its secrets are random, made once by make into control/netbox/.netbox.env: the admin's
-  # password is SUPERUSER_PASSWORD there. Each service reads as its own account, which may only view devices, with its
-  # read-only API token from control/netbox/.tokens.env, which seed.py gives it
+  # netbox used as service inventory
   netbox:
     image: netboxcommunity/netbox:v4.7.2-5.1.1
-    env_file: [netbox/.netbox.env, netbox/.tokens.env]  # the tokens for seed.py
+    env_file: [netbox/.netbox.env, netbox/.tokens.env] 
     restart: unless-stopped
     depends_on:
       netbox-postgres: {condition: service_healthy}
       netbox-redis: {condition: service_healthy}
     user: "netbox:root"
     ports: ["127.0.0.1:8000:8080"]
-    # GRANIAN_EXTRA_ARGS: the web server on IPv4, after the image's --host ::, which fails where Docker has no IPv6
     environment: [DB_HOST=netbox-postgres, DB_NAME=netbox, DB_USER=netbox, REDIS_HOST=netbox-redis,
                   SKIP_SUPERUSER=false, SUPERUSER_NAME=admin, GRANIAN_EXTRA_ARGS=--host=0.0.0.0]
-    healthcheck: {test: /opt/netbox/health.sh, start_period: 600s, timeout: 3s, interval: 5s}  # the first start migrates
+    healthcheck: {test: /opt/netbox/health.sh, start_period: 600s, timeout: 3s, interval: 5s}
   netbox-postgres:
     image: postgres:18-alpine
     <<: *netbox-secrets
@@ -43,9 +40,7 @@ services:
     healthcheck: {test: '[ "$$(valkey-cli --pass "$$REDIS_PASSWORD" --no-auth-warning ping)" = PONG ]', interval: 2s}
     volumes: ["netbox-redis:/data"]
 
-  # The rollout state: every event of every run, and a lock per host. schema.sql makes the tables and accounts on the
-  # first start; the passwords are random, made once by make into control/state/.state.env. rollout.py connects as
-  # redfish_rollout_sa (STATE_DB, which make sets), Grafana as grafana
+  # DB to store the rollout state, events and locks per host in the pipelines.
   state-postgres:
     image: postgres:18-alpine
     env_file: state/.state.env
@@ -69,14 +64,19 @@ services:
       interval: 5s
       retries: 30
 
-  # Observability. Prometheus keeps what the sites' Prometheus agents push (remote write) and scrapes the Pushgateway,
-  # where rollout.py run pushes each run's metrics; Loki keeps the events rollout.py sends; Grafana reads both and the
-  # state database
+  # rollout.py run pushes each run's metrics to pushgateway service and prometheus pulls them.
   pushgateway:
     image: prom/pushgateway:v1.11.3
     restart: unless-stopped
     network_mode: host
     command: [--web.listen-address=127.0.0.1:9091]
+  # rollout.py pushes events to loki.
+  loki:
+    image: grafana/loki:3.7.8
+    restart: unless-stopped
+    network_mode: host
+    command: [-config.file=/etc/loki/loki.yaml]
+    volumes: ["./observability/loki/loki.yaml:/etc/loki/loki.yaml:ro", "loki:/loki"]
   prometheus:
     image: prom/prometheus:v3.15.0
     restart: unless-stopped
@@ -86,12 +86,8 @@ services:
     command: [--config.file=/etc/prometheus/prometheus.yml, --storage.tsdb.path=/prometheus,
               --web.listen-address=127.0.0.1:9090, --web.enable-admin-api, --web.enable-remote-write-receiver]
     volumes: ["./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro", "prometheus:/prometheus"]
-  loki:
-    image: grafana/loki:3.7.8
-    restart: unless-stopped
-    network_mode: host
-    command: [-config.file=/etc/loki/loki.yaml]
-    volumes: ["./observability/loki/loki.yaml:/etc/loki/loki.yaml:ro", "loki:/loki"]
+  
+  # Data sources: Prometheus, loki, postgresDB
   grafana:
     image: grafana/grafana:13.2.3
     restart: unless-stopped

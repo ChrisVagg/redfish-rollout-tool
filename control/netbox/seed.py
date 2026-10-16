@@ -29,11 +29,15 @@ for service in ("poller", "exporter", "rollout"):
     view.object_types.set([ObjectType.objects.get_for_model(Device)])
     view.users.add(account)
     key, value = os.environ[f"NETBOX_TOKEN_{service.upper()}"].removeprefix("nbt_").split(".")
-    Token.objects.filter(key=key).exclude(user=account).delete()  # made for another account before
-    Token.objects.filter(user=account).exclude(key=key).delete()  # this account's old one, after a rotation
+    # the account's one token is the file's: another account's with its key, an older one, or its key with another
+    # secret (a rotation) goes; and it stays read-only, whatever was changed in NetBox since
+    for token in Token.objects.filter(user=account) | Token.objects.filter(key=key):
+        if token.user != account or token.key != key or not token.validate(value):
+            token.delete()
     if not Token.objects.filter(key=key).exists():
         Token.objects.create(user=account, key=key, token=value, write_enabled=False,
                              description=f"redfish {service}: read-only")
+    Token.objects.filter(key=key).update(write_enabled=False)
 
 # The sites, and how each one's BMCs are reached: its config context. Without one, HTTPS with the certificate checked.
 # The lab's account is OpenBMC's default, its values in LAB_USERNAME and LAB_PASSWORD (make)

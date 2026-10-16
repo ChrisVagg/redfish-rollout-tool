@@ -93,8 +93,8 @@ swap the commented line in `control/catalog/lab/baseline.yaml` and run `make upd
 
 | Command | What it checks |
 |---|---|
-| `make test` | 26 tests, no BMC: pre-flight, post-check, rollback, gates, the frozen plan, the ingest gate, the image cache, on recorded Redfish data; host locks and append-only events, on the state database. `make update` runs it first |
-| `make mutations` | breaks 32 safety rules one at a time; every break fails a test |
+| `make test` | 27 tests, no BMC: pre-flight, post-check, rollback, gates, the frozen plan, the ingest gate, the image cache, on recorded Redfish data; host locks and append-only events, on the state database. `make update` runs it first |
+| `make mutations` | breaks 35 safety rules one at a time; every break fails a test |
 | `make fault SCENARIO=…` | the real pipeline on the lab, with a fault injected |
 
 ## Not built yet

@@ -169,7 +169,7 @@ site-up: $(if $(filter lab,$(SITE)),lab/cache/tls.crt)
 	$(ENV) $(SITE_ENV) $(call token,EXPORTER) $(SITE_STACK) up --detach --build --wait
 
 site-logs:
-	$(ENV) $(SITE_ENV) $(SITE_STACK) logs --follow exporter agent
+	$(ENV) $(SITE_ENV) $(SITE_STACK) logs --follow exporter prometheus-site-agent
 
 site-down:
 	$(ENV) $(SITE_ENV) $(SITE_STACK) down

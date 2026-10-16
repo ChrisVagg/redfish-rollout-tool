@@ -467,8 +467,8 @@ def rollout_text(policy) -> str:
 # The plan's waves: a canary of each hardware model first, then waves that grow as the policy's cumulative percentages
 # say, the hosts spread over the racks in turn and never more than max_per_rack of one rack in a wave
 def waves(servers, models, policy) -> list[tuple[str, list[dict]]]:
-    """servers: the hosts that pass pre-flight; models: {host: its hardware model}. Hosts marked canary: true in the
-    inventory are the canary of their model first. The canary keeps to the rack limit too, unless every host of a model
+    """servers: the hosts that pass pre-flight; models: {host: its hardware model}. Hosts tagged canary in NetBox
+    are the canary of their model first. The canary keeps to the rack limit too, unless every host of a model
     is in a full rack. A wave the rack limit keeps short leaves its hosts to the next."""
     # lambda s: a host -> its rack, else its project: waves spread across them
     rack = lambda s: s.get("rack") or s.get("project") or "-"
@@ -482,7 +482,7 @@ def waves(servers, models, policy) -> list[tuple[str, list[dict]]]:
     for model in dict.fromkeys(models[s["host"]] for s in order):
         mine = [s for s in order if models[s["host"]] == model]
         for _ in range(min(policy["canary_per_model"], len(mine))):
-            # a rack with room first, then a host marked canary: true; a full rack only when the model has no other
+            # a rack with room first, then a host tagged canary; a full rack only when the model has no other
             canary.append(min((s for s in mine if s not in canary),
                               key=lambda s: (full(s), s.get("canary") is not True)))
     queue = [s for s in order if s not in canary]

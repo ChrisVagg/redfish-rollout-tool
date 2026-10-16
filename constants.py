@@ -34,6 +34,9 @@ SITE = Path(__file__).parent / os.environ.get("SITE", "prod")
 NETBOX_URL = os.environ.get("NETBOX_URL", "http://127.0.0.1:8000")
 # What a device's config context may set: how its BMC is reached. Whether it is canary or writable comes from its tags
 CONNECTION = ("scheme", "verify", "timeout", "retries", "max_failures", "deadline", "username_env", "password_env")
+# A BMC account as a config context may name it: the env vars X_USERNAME and X_PASSWORD, one X. So an edit in NetBox
+# can't make a tool send another of its secrets (STATE_DB, NETBOX_TOKEN...) to a BMC as a login
+ACCOUNT = re.compile(r"([A-Z][A-Z0-9_]*)_USERNAME \1_PASSWORD")
 # The site's firmware catalog: the control plane's, YAML reviewed in git, a folder per site
 CATALOG = Path(__file__).parent / "control" / "catalog" / SITE.name
 BASELINE = CATALOG / "baseline.yaml"  # the approved firmware version per model and component

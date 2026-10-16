@@ -4,7 +4,7 @@
 # report runs either way, over the records this pipeline wrote.
 #
 #   SITE=lab ./pipeline.sh COMPONENT [plan options]         every stage a dry run: the plan and what each host would get
-#   SITE=lab YES=1 ./pipeline.sh COMPONENT [plan options]   really update, on hosts marked writable: true only, each
+#   SITE=lab YES=1 ./pipeline.sh COMPONENT [plan options]   really update, on hosts tagged writable in NetBox only, each
 #                                                           stage once it holds its hosts' locks (the state database)
 #
 # SITE is the fleet's folder, prod (the default) or lab. On the lab: make dry-run and make update. The plan options

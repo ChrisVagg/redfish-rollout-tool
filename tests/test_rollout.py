@@ -351,6 +351,33 @@ def test_frozen_plan():
     assert (state, installed) == ("blocked", [])
 
 
+# The run side of "only a tag makes a host writable": run --yes refuses a planned host that NetBox doesn't tag
+# writable, before the state database, any lock or any update
+def test_run_writable():
+    server, found = {"host": "127.0.0.1:2441", "rack": "r1"}, lab()  # NetBox's entry, without the tag
+    policy = {"allow_downgrade": True, "accept_no_rollback": False, "images": catalog(), "drain": None}
+    result = rollout.check(found, {MODEL: {BMC: TARGET}}, BMC, policy)
+    plan = Path(tempfile.mkdtemp()) / "plan.json"
+    plan.write_text(json.dumps({
+        "component": BMC, "baseline": "-", "images": "-", "allow_downgrade": True, "accept_no_rollback": False,
+        "inputs": {}, "waves": {"canary": [server["host"]]}, "servers": {server["host"]: server},
+        "rollout": {**rollout.ROLLOUT_DEFAULTS, "file": None},
+        "verdicts": {server["host"]: {"identity": result.get("identity")}}}))
+    step = {"servers": [server], "reads": [(found, 0.0)], "results": [result], "baselines": {}, "policy": policy,
+            "read_at": "00:00:00 UTC"}
+
+    def reached():
+        raise AssertionError("run --yes reached the state database: the untagged host would be locked and updated")
+    with (patch.object(rollout, "load_servers", lambda: [server]), patch.object(rollout, "prepare", lambda args: step),
+          patch.object(rollout, "state_db", reached)):
+        try:
+            rollout.run(SimpleNamespace(plan=str(plan), stage="canary", yes=True, fault=None, reset_timeout=900))
+        except SystemExit as e:
+            assert "not tagged writable in NetBox: 127.0.0.1:2441" in str(e), e
+        else:
+            raise AssertionError("run --yes went on with a host NetBox doesn't tag writable")
+
+
 # The gate after each wave, the lab's policy: the canary and wave 1 strict, later waves halt over 10% failed.
 # states: every host tried so far, every wave up to this one
 def test_gate():
@@ -467,8 +494,9 @@ def test_who():
 
 # NetBox's devices as the tools' servers, page after page: a device's config context gives how its BMC is reached
 # (else HTTPS, the certificate checked: every entry says, as each reader takes it), canary and writable come from its
-# tags only; a device without an out-of-band IP or a BMC account isn't read. No token, or a site with no host, stops
-# collect and plan with why
+# tags only; a device without an out-of-band IP, a usable BMC account (X_USERNAME and X_PASSWORD, set here: not any
+# other of the tool's secrets) or HTTPS isn't read. No token, a site with no host, NetBox down or answering something
+# else than JSON stops collect and plan with why
 def test_netbox_inventory():
     lab = {"verify": False, "retries": 1, "deadline": 300, "username_env": "LAB_USERNAME",
            "password_env": "LAB_PASSWORD"}
@@ -482,8 +510,14 @@ def test_netbox_inventory():
                                "workers": 4}}
     pages = {"http://nb/api/dcim/devices/?site=lab&limit=1000": {"results": [device], "next": "http://nb/2"},
              "http://nb/2": {"results": [bare, {**device, "display": "spare", "oob_ip": None},
-                                         {**device, "display": "no account", "config_context": {"verify": False}}],
+                                         {**device, "display": "no account", "config_context": {"verify": False}},
+                                         {**device, "display": "foreign", "config_context": {
+                                             "username_env": "LAB_USERNAME", "password_env": "STATE_DB"}},
+                                         {**device, "display": "unset", "config_context": {
+                                             "username_env": "GONE_USERNAME", "password_env": "GONE_PASSWORD"}},
+                                         {**device, "display": "plain", "config_context": {**lab, "scheme": "http"}}],
                              "next": None}}
+    accounts = {"LAB_USERNAME": "u", "LAB_PASSWORD": "p", "DELL_USERNAME": "u", "DELL_PASSWORD": "p", "STATE_DB": "s"}
 
     class Answer:  # one page of NetBox's answer
         def __init__(self, url, **_):
@@ -495,7 +529,7 @@ def test_netbox_inventory():
         def json(self):
             return self.body
 
-    with patch.dict(os.environ, {"NETBOX_TOKEN": "nbt_key.token"}), patch("poller.requests.get", Answer):
+    with patch.dict(os.environ, {"NETBOX_TOKEN": "nbt_key.token", **accounts}), patch("poller.requests.get", Answer):
         assert poller.load_servers("http://nb/", "lab") == [
             {"host": "127.1.0.1", "vendor": "NVIDIA", "project": "lab", "rack": "r1", "canary": True,
              "writable": True, "node": "bmc1", "scheme": "https", **lab},
@@ -508,6 +542,21 @@ def test_netbox_inventory():
             assert ".tokens.env" in str(e), e
         else:
             raise AssertionError("NetBox read without a token")
+
+    class Html(Answer):  # NETBOX_URL at something else than NetBox: a page, not JSON
+        def json(self):
+            raise poller.requests.exceptions.JSONDecodeError("Expecting value", "<html>", 0)
+
+    def down(url, **_):
+        raise poller.requests.ConnectionError("[Errno 111] Connection refused")
+    for get in (Html, down):
+        with patch.dict(os.environ, {"NETBOX_TOKEN": "nbt_key.token"}), patch("poller.requests.get", get):
+            try:
+                poller.load_servers("http://nb/", "lab")
+            except SystemExit as e:
+                assert str(e).startswith("NetBox at http://nb/:") and "make control-up" in str(e), e
+            else:
+                raise AssertionError(f"{get.__name__}: no answer from NetBox, yet no stop")
     with patch("poller.load_servers", lambda: []):
         try:
             poller.collect(None)

@@ -53,10 +53,11 @@ from rich.rule import Rule
 from rich.table import Column, Table
 from rich.text import Text
 
-from constants import (ACTION, ALLOWED, BASELINE, CAPABILITIES_ROW, CHASSIS, COMPLIANCE_ROW, CONNECTION, CRITICAL, DMTF,
-                       FIELDS, FW_PARTS, INVENTORY_ROW, JOBS_ROW, JOB_TYPES, KIND, LIMIT, LINKS, MANAGER, NETBOX_URL,
-                       OEM_PATH, PREVIOUS, PROPS, READINGS, ROOT, SCHEMAS, SENSORS, SERVICE, SEVERITY, SITE, SKIP,
-                       STATUS_LEAF, SUMMARY, SYSTEM, TELEMETRY_ROW, TEMPLATES, THRESHOLD, VOLATILE, WILDCARD)
+from constants import (ACCOUNT, ACTION, ALLOWED, BASELINE, CAPABILITIES_ROW, CHASSIS, COMPLIANCE_ROW, CONNECTION,
+                       CRITICAL, DMTF, FIELDS, FW_PARTS, INVENTORY_ROW, JOBS_ROW, JOB_TYPES, KIND, LIMIT, LINKS,
+                       MANAGER, NETBOX_URL, OEM_PATH, PREVIOUS, PROPS, READINGS, ROOT, SCHEMAS, SENSORS, SERVICE,
+                       SEVERITY, SITE, SKIP, STATUS_LEAF, SUMMARY, SYSTEM, TELEMETRY_ROW, TEMPLATES, THRESHOLD,
+                       VOLATILE, WILDCARD)
 from helpers import (at, block, choose, connection, details, discrete, first_of, first_real, identity, items, label,
                      link, load, named, norm, obj, of, output_options, per_host, pick, pointer, previous, properties,
                      reachable, real, reason, rollup, rtype, sample, show, snapshot_path, tally, text, uri_of)
@@ -385,17 +386,21 @@ def load_servers(url=NETBOX_URL, site=SITE.name) -> list[dict]:
         try:
             r = requests.get(page, headers={"Authorization": f"Bearer {token}"}, timeout=10)
             r.raise_for_status()
+            body = r.json()  # something else than NetBox at the URL answers a page, not JSON
         except requests.RequestException as e:
             raise SystemExit(f"NetBox at {url}: {reason(str(e))}. make control-up starts it")
-        body = r.json()
         for d in body["results"]:
             # only how its BMC is reached: a context can't make a host canary or writable, only a tag can
             context = {k: v for k, v in (d.get("config_context") or {}).items() if k in CONNECTION}
+            account = f"{context.get('username_env')} {context.get('password_env')}"
             if not d["oob_ip"]:
                 log.warning("NetBox: %s has no out-of-band IP, so its BMC isn't read", d["display"])
-            elif not {"username_env", "password_env"} <= context.keys():
-                log.warning("NetBox: %s has no BMC account in its config context (username_env, password_env), so "
-                            "its BMC isn't read", d["display"])
+            elif not ACCOUNT.fullmatch(account) or not set(account.split()) <= os.environ.keys():
+                log.warning("NetBox: %s has no BMC account to use: its config context must name X_USERNAME and "
+                            "X_PASSWORD, both set here, so its BMC isn't read", d["display"])
+            elif context.get("scheme", "https") != "https":
+                log.warning("NetBox: %s isn't reached over HTTPS, so its BMC isn't read: its account would cross in "
+                            "clear", d["display"])
             else:
                 host, tags = d["oob_ip"]["address"].split("/")[0], {t["slug"] for t in d["tags"]}
                 server = {"host": host, "vendor": d["device_type"]["manufacturer"]["name"],

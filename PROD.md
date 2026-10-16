@@ -30,6 +30,11 @@ DELL_REDFISH_USERNAME=...
 DELL_REDFISH_PASSWORD=...
 ```
 
+The tools skip a host whose account isn't named `X_USERNAME` and `X_PASSWORD` (one `X`, both set) or that isn't
+reached over HTTPS, so an edit in NetBox can't send another of their secrets, or send one in clear. A device's
+out-of-band IP still decides where its account is sent: who may edit devices in NetBox is part of who holds the
+BMC accounts.
+
 The proposed production rollout, from the whole fleet down to one host (rings and scheduler integration are not
 implemented here):
 
