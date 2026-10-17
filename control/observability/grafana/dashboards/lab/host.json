@@ -1,7 +1,7 @@
 {
  "uid": "lab-host",
  "title": "Lab · Host",
- "description": "One BMC, read by poller.py exporter: its firmware and what Redfish can update, the health of every component, and every reading by where it lives in the Redfish tree, with its unit and thresholds.",
+ "description": "One BMC, read by poller.py exporter: its firmware and what Redfish can update, the health of every component, its network interfaces and ports with their links, and every reading by where it lives in the Redfish tree, with its unit and thresholds.",
  "schemaVersion": 39,
  "editable": false,
  "time": {
@@ -924,12 +924,281 @@
   },
   {
    "type": "row",
+   "title": "Network",
+   "collapsed": false,
+   "id": 30,
+   "gridPos": {
+    "x": 0,
+    "y": 22,
+    "w": 24,
+    "h": 1
+   },
+   "panels": []
+  },
+  {
+   "type": "table",
+   "title": "Network interfaces and ports",
+   "id": 31,
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 23,
+    "w": 24,
+    "h": 9
+   },
+   "description": "Every EthernetInterface, the BMC's own (Managers) and the host's (Systems), and the network Ports of each NetworkAdapter and of the Manager (DedicatedNetworkPorts), as the BMC reports them: LinkStatus, the speed (SpeedMbps, a Port's CurrentSpeedGbps), InterfaceEnabled, the MAC and the first IPv4 address. - is not reported. Their Health and State are in Health of every component.",
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "redfish_network_link{site=\"$site\",host=\"$host\"}",
+     "legendFormat": "",
+     "refId": "A",
+     "instant": true,
+     "range": false,
+     "format": "table"
+    },
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "redfish_network_speed_mbps{site=\"$site\",host=\"$host\"}",
+     "legendFormat": "",
+     "refId": "B",
+     "instant": true,
+     "range": false,
+     "format": "table"
+    }
+   ],
+   "transformations": [
+    {
+     "id": "merge",
+     "options": {}
+    },
+    {
+     "id": "organize",
+     "options": {
+      "excludeByName": {
+       "Time": true,
+       "__name__": true,
+       "job": true,
+       "instance": true,
+       "site": true,
+       "pipeline": true,
+       "host": true
+      },
+      "renameByName": {
+       "Value #A": "Link",
+       "Value #B": "Speed",
+       "enabled": "InterfaceEnabled",
+       "type": "Type",
+       "name": "Name",
+       "mac": "MAC",
+       "ipv4": "IPv4",
+       "resource": "Resource"
+      },
+      "indexByName": {
+       "Value #A": 0,
+       "Value #B": 1,
+       "enabled": 2,
+       "type": 3,
+       "name": 4,
+       "mac": 5,
+       "ipv4": 6,
+       "resource": 7
+      }
+     }
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {},
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "Link"
+      },
+      "properties": [
+       {
+        "id": "mappings",
+        "value": [
+         {
+          "type": "value",
+          "options": {
+           "4": {
+            "text": "LinkUp",
+            "color": "green",
+            "index": 0
+           },
+           "3": {
+            "text": "Training",
+            "color": "orange",
+            "index": 1
+           },
+           "2": {
+            "text": "Starting",
+            "color": "orange",
+            "index": 2
+           },
+           "1": {
+            "text": "LinkDown",
+            "color": "red",
+            "index": 3
+           },
+           "0": {
+            "text": "NoLink",
+            "color": "text",
+            "index": 4
+           },
+           "-1": {
+            "text": "-",
+            "color": "text",
+            "index": 5
+           }
+          }
+         }
+        ]
+       },
+       {
+        "id": "custom.cellOptions",
+        "value": {
+         "type": "color-text"
+        }
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "Speed"
+      },
+      "properties": [
+       {
+        "id": "unit",
+        "value": "Mbits"
+       }
+      ]
+     }
+    ]
+   },
+   "options": {
+    "showHeader": true,
+    "cellHeight": "sm",
+    "sortBy": [
+     {
+      "displayName": "Resource",
+      "desc": false
+     }
+    ]
+   },
+   "transparent": true
+  },
+  {
+   "type": "state-timeline",
+   "title": "Link over time",
+   "id": 32,
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 32,
+    "w": 24,
+    "h": 10
+   },
+   "description": "Each interface's and port's LinkStatus at every read: a flap shorter than the exporter's interval goes unseen.",
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "redfish_network_link{site=\"$site\",host=\"$host\"}",
+     "legendFormat": "{{resource}}",
+     "refId": "A",
+     "instant": false,
+     "range": true
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "mappings": [
+      {
+       "type": "value",
+       "options": {
+        "4": {
+         "text": "LinkUp",
+         "color": "green",
+         "index": 0
+        },
+        "3": {
+         "text": "Training",
+         "color": "orange",
+         "index": 1
+        },
+        "2": {
+         "text": "Starting",
+         "color": "orange",
+         "index": 2
+        },
+        "1": {
+         "text": "LinkDown",
+         "color": "red",
+         "index": 3
+        },
+        "0": {
+         "text": "NoLink",
+         "color": "text",
+         "index": 4
+        },
+        "-1": {
+         "text": "-",
+         "color": "text",
+         "index": 5
+        }
+       }
+      }
+     ],
+     "color": {
+      "mode": "thresholds"
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "text",
+        "value": null
+       }
+      ]
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "showValue": "never",
+    "mergeValues": true,
+    "rowHeight": 0.8,
+    "legend": {
+     "showLegend": false
+    }
+   },
+   "transparent": true
+  },
+  {
+   "type": "row",
    "title": "Chassis · Thermal",
    "collapsed": false,
    "id": 10,
    "gridPos": {
     "x": 0,
-    "y": 22,
+    "y": 42,
     "w": 24,
     "h": 1
    },
@@ -940,7 +1209,7 @@
    "title": "$thermal_kind",
    "gridPos": {
     "x": 0,
-    "y": 23,
+    "y": 43,
     "w": 12,
     "h": 12
    },
@@ -981,7 +1250,8 @@
       "fillOpacity": 0,
       "spanNulls": true,
       "showPoints": "never"
-     }
+     },
+     "noValue": "This BMC reports no such reading under /redfish/v1/Chassis"
     },
     "overrides": [
      {
@@ -1277,7 +1547,7 @@
    "id": 13,
    "gridPos": {
     "x": 0,
-    "y": 35,
+    "y": 55,
     "w": 24,
     "h": 1
    },
@@ -1288,7 +1558,7 @@
    "title": "$power_kind",
    "gridPos": {
     "x": 0,
-    "y": 36,
+    "y": 56,
     "w": 12,
     "h": 12
    },
@@ -1329,7 +1599,8 @@
       "fillOpacity": 0,
       "spanNulls": true,
       "showPoints": "never"
-     }
+     },
+     "noValue": "This BMC reports no such reading under /redfish/v1/Chassis"
     },
     "overrides": [
      {
@@ -1625,7 +1896,7 @@
    "id": 16,
    "gridPos": {
     "x": 0,
-    "y": 48,
+    "y": 68,
     "w": 24,
     "h": 1
    },
@@ -1636,7 +1907,7 @@
    "title": "$system_kind",
    "gridPos": {
     "x": 0,
-    "y": 49,
+    "y": 69,
     "w": 12,
     "h": 12
    },
@@ -1677,7 +1948,8 @@
       "fillOpacity": 0,
       "spanNulls": true,
       "showPoints": "never"
-     }
+     },
+     "noValue": "This BMC reports no such reading under /redfish/v1/Systems"
     },
     "overrides": [
      {
@@ -1973,7 +2245,7 @@
    "id": 19,
    "gridPos": {
     "x": 0,
-    "y": 61,
+    "y": 81,
     "w": 24,
     "h": 1
    },
@@ -1984,7 +2256,7 @@
    "title": "$manager_kind",
    "gridPos": {
     "x": 0,
-    "y": 62,
+    "y": 82,
     "w": 12,
     "h": 12
    },
@@ -2025,7 +2297,8 @@
       "fillOpacity": 0,
       "spanNulls": true,
       "showPoints": "never"
-     }
+     },
+     "noValue": "This BMC reports no such reading under /redfish/v1/Managers"
     },
     "overrides": [
      {
@@ -2321,7 +2594,7 @@
    "id": 22,
    "gridPos": {
     "x": 0,
-    "y": 74,
+    "y": 94,
     "w": 24,
     "h": 1
    },
@@ -2332,7 +2605,7 @@
    "title": "BMC memory",
    "gridPos": {
     "x": 0,
-    "y": 75,
+    "y": 95,
     "w": 6,
     "h": 9
    },
@@ -2393,7 +2666,7 @@
    "title": "BMC free storage",
    "gridPos": {
     "x": 6,
-    "y": 75,
+    "y": 95,
     "w": 6,
     "h": 9
    },
@@ -2454,7 +2727,7 @@
    "title": "Crawl time",
    "gridPos": {
     "x": 12,
-    "y": 75,
+    "y": 95,
     "w": 6,
     "h": 9
    },
@@ -2515,7 +2788,7 @@
    "title": "Failed GETs per read",
    "gridPos": {
     "x": 18,
-    "y": 75,
+    "y": 95,
     "w": 6,
     "h": 9
    },
@@ -2576,7 +2849,7 @@
    "title": "Answering Redfish",
    "gridPos": {
     "x": 0,
-    "y": 84,
+    "y": 104,
     "w": 24,
     "h": 4
    },
@@ -2655,7 +2928,7 @@
    "id": 28,
    "gridPos": {
     "x": 0,
-    "y": 88,
+    "y": 108,
     "w": 24,
     "h": 1
    }
@@ -2738,7 +3011,7 @@
    "id": 29,
    "gridPos": {
     "x": 0,
-    "y": 89,
+    "y": 109,
     "w": 24,
     "h": 8
    }

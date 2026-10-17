@@ -166,7 +166,7 @@ unlock:
 # ---- Site ----
 # The site's exporter and agent, and on the lab the image cache; SITE_ENV sets each site's ports
 site-up: $(if $(filter lab,$(SITE)),lab/cache/tls.crt)
-	$(ENV) $(SITE_ENV) $(call token,EXPORTER) $(SITE_STACK) up --detach --build --wait
+	$(ENV) $(SITE_ENV) $(call token,EXPORTER) $(SITE_STACK) up --detach --build --wait --remove-orphans
 
 site-logs:
 	$(ENV) $(SITE_ENV) $(SITE_STACK) logs --follow exporter prometheus-site-agent

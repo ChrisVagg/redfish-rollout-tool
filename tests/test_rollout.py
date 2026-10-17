@@ -741,6 +741,27 @@ def test_exposition():
                for line in poller.exposition({"host": "h"}, found, 1.0))
 
 
+# The network: every EthernetInterface and a NetworkAdapter's Ports, their LinkStatus and speed in Mbit/s; not the
+# Manager's USB ports
+def test_network():
+    import poller
+    port = lambda status, gbps: {"@odata.type": "#Port.v1_8_0.Port", "LinkStatus": status, "CurrentSpeedGbps": gbps,
+                                 "Ethernet": {"AssociatedMACAddresses": ["6C:FE:54:9C:AD:D0"]}}
+    found = {poller.ROOT: {},
+             "/redfish/v1/Managers/1/EthernetInterfaces/eth0": {
+                 "@odata.type": "#EthernetInterface.v1_9_0.EthernetInterface", "LinkStatus": "LinkUp",
+                 "SpeedMbps": 1000, "MACAddress": "52:54:00:12:34:56", "IPv4Addresses": [{"Address": "10.0.2.15"}]},
+             "/redfish/v1/Chassis/1/NetworkAdapters/1/Ports/1": port("LinkDown", 25),
+             "/redfish/v1/Managers/1/USBPorts/usb0": port(None, None)}
+    out = [line for line in poller.exposition({"host": "h"}, found, 1.0) if line.startswith("redfish_network")]
+    assert len(out) == 4 and not any("USBPorts" in line for line in out), out
+    assert any('ipv4="10.0.2.15"' in line and line.startswith("redfish_network_link{") and line.endswith(" 4")
+               for line in out), out
+    assert any('mac="6C:FE:54:9C:AD:D0"' in line and line.startswith("redfish_network_link{") and line.endswith(" 1")
+               for line in out), out
+    assert sorted(line.rsplit(" ", 1)[1] for line in out if "speed" in line) == ["1000", "25000"], out
+
+
 if __name__ == "__main__":
     failed = 0
     for name, test in list(globals().items()):

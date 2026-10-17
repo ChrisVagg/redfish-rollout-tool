@@ -143,8 +143,9 @@ not implement. It is not evidence of production updates; [Not built yet](#not-bu
 
 The Prod folder over two days of the real fleet, read-only. The fleet manager shows which BMCs answer, their health,
 equipment and firmware, and how each component can be updated; the host dashboard shows one host in full: its
-firmware, the health of every component, and every reading against its thresholds. Its Hosts table is grouped by
-project: a row per project with its hosts' count and the worst Redfish and health among them, open for its hosts.
+firmware, the health of every component, its network links, and every reading against its thresholds. Its Hosts
+table is grouped by project: a row per project with its hosts' count and the worst Redfish and health among them, open
+for its hosts.
 
 ### Fleet manager
 

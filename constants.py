@@ -103,6 +103,11 @@ FIELDS = ("resource", "name", "property", "role", "value", "unit", "critical", "
           "state", "source")
 DISCRETE = ("Health", "HealthRollup", "State")  # the discrete values of a Redfish Status, shown exactly as reported
 STATUS_LEAF = re.compile(r"^(?:(.*)/)?Status/(?:Health|HealthRollup|State)$")  # path of an object that has a Status
+# The network's Ports, by their DMTF URIs: a NetworkAdapter's and a Manager's dedicated ones, not USB, PCIe or fabric
+# ports; with every EthernetInterface, the host's network. Not NetworkPort, deprecated for Port
+NETWORK_PORT = re.compile(r"/(NetworkAdapters/[^/]+/Ports|DedicatedNetworkPorts)/[^/]+$")
+# LinkStatus (EthernetInterface, Port) by how far the link got; -1 not reported
+LINK = {"NoLink": 0, "LinkDown": 1, "Starting": 2, "Training": 3, "LinkUp": 4}
 INVENTORY_ROW = ("Host", "Vendor", "Project", "Manufacturer", "Model", "Serial", "UUID", "CPUs", "Cores", "GPUs",
                  "Memory GiB", "DIMMs", "Drives", "NICs", "PSUs")
 TELEMETRY_ROW = ("Host", "Vendor", "Project", "Readings", "Hottest", "°C", "Critical", "Margin", "Power W",

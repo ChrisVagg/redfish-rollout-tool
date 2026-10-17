@@ -54,10 +54,10 @@ from rich.table import Column, Table
 from rich.text import Text
 
 from constants import (ACCOUNT, ACTION, ALLOWED, BASELINE, CAPABILITIES_ROW, CHASSIS, COMPLIANCE_ROW, CONNECTION,
-                       CRITICAL, DMTF, FIELDS, FW_PARTS, INVENTORY_ROW, JOBS_ROW, JOB_TYPES, KIND, LIMIT, LINKS,
-                       MANAGER, NETBOX_URL, OEM_PATH, PREVIOUS, PROPS, READINGS, ROOT, SCHEMAS, SENSORS, SERVICE,
-                       SEVERITY, SITE, SKIP, STATUS_LEAF, SUMMARY, SYSTEM, TELEMETRY_ROW, TEMPLATES, THRESHOLD,
-                       VOLATILE, WILDCARD)
+                       CRITICAL, DMTF, FIELDS, FW_PARTS, INVENTORY_ROW, JOBS_ROW, JOB_TYPES, KIND, LIMIT, LINK, LINKS,
+                       MANAGER, NETBOX_URL, NETWORK_PORT, OEM_PATH, PREVIOUS, PROPS, READINGS, ROOT, SCHEMAS, SENSORS,
+                       SERVICE, SEVERITY, SITE, SKIP, STATUS_LEAF, SUMMARY, SYSTEM, TELEMETRY_ROW, TEMPLATES,
+                       THRESHOLD, VOLATILE, WILDCARD)
 from helpers import (at, block, choose, connection, details, discrete, first_of, first_real, identity, items, label,
                      link, load, named, norm, obj, of, output_options, per_host, pick, pointer, previous, properties,
                      reachable, real, reason, rollup, rtype, sample, show, snapshot_path, tally, text, uri_of)
@@ -539,6 +539,17 @@ def exposition(server, found, seconds) -> list[str]:
     for resource, kind, name, health, health_rollup, state in components(found):
         out.append(sample("redfish_health", {"OK": 0, "Warning": 1, "Critical": 2}.get(health, -1), host=host,
                           resource=resource, type=kind, name=name, health=health, rollup=health_rollup, state=state))
+    for uri, d in found.items():
+        kind = rtype(d)[0]
+        if kind == "EthernetInterface" or kind == "Port" and NETWORK_PORT.search(uri):
+            macs = [d.get("MACAddress"), *(obj(d.get("Ethernet")).get("AssociatedMACAddresses") or [])]
+            labels = {"host": host, "resource": uri, "type": kind, "name": text(named(d)),
+                      "mac": text(next(filter(None, macs), None)), "enabled": text(d.get("InterfaceEnabled")),
+                      "ipv4": text(obj(next(iter(d.get("IPv4Addresses") or []), None)).get("Address"))}
+            out.append(sample("redfish_network_link", LINK.get(d.get("LinkStatus"), -1), **labels))
+            speed, scale = (d.get("SpeedMbps"), 1) if kind == "EthernetInterface" else (d.get("CurrentSpeedGbps"), 1000)
+            if isinstance(speed, (int, float)):
+                out.append(sample("redfish_network_speed_mbps", speed * scale, **labels))
     ids, targets = software_ids(found), update_targets(found)
     for component, (version, _) in firmware(found).items():
         push, pull = ways_in(found, component) if component in targets else ("-", "-")
