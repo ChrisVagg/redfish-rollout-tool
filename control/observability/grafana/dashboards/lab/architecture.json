@@ -1,0 +1,46 @@
+{
+ "uid": "lab-architecture",
+ "title": "Lab · Architecture",
+ "tags": [
+  "redfish",
+  "lab"
+ ],
+ "editable": false,
+ "description": "The site's three diagrams from docs/: the stack, the rollout step by step, and the solution architecture. Click one to open it full size",
+ "schemaVersion": 39,
+ "time": {
+  "from": "now-24h",
+  "to": "now"
+ },
+ "refresh": "",
+ "links": [
+  {
+   "type": "dashboards",
+   "tags": [
+    "lab"
+   ],
+   "title": "Lab",
+   "asDropdown": false,
+   "includeVars": false,
+   "keepTime": true
+  }
+ ],
+ "panels": [
+  {
+   "id": 1,
+   "type": "text",
+   "title": "",
+   "transparent": true,
+   "gridPos": {
+    "x": 0,
+    "y": 0,
+    "w": 24,
+    "h": 78
+   },
+   "options": {
+    "mode": "markdown",
+    "content": "### Stack\n\n<a href=\"/public/docs/lab-stack.svg\" target=\"_blank\"><img src=\"/public/docs/lab-stack.svg\" alt=\"The stack: the control plane, the site and its BMCs\" width=\"900\" style=\"display:block;margin:auto;max-width:100%\"></a>\n\n### Rollout\n\n<a href=\"/public/docs/lab-rollout.svg\" target=\"_blank\"><img src=\"/public/docs/lab-rollout.svg\" alt=\"The rollout, step by step\" width=\"900\" style=\"display:block;margin:auto;max-width:100%\"></a>\n\n### Solution architecture\n\n<a href=\"/public/docs/lab-solution-architecture.svg\" target=\"_blank\"><img src=\"/public/docs/lab-solution-architecture.svg\" alt=\"The solution architecture\" width=\"900\" style=\"display:block;margin:auto;max-width:100%\"></a>"
+   }
+  }
+ ]
+}

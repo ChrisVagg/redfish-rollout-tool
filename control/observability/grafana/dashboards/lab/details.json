@@ -71,7 +71,7 @@
  },
  "panels": [
   {
-   "transparent": false,
+   "transparent": true,
    "type": "text",
    "title": "A BMC firmware update on this lab, checked against Redfish",
    "options": {
@@ -87,7 +87,7 @@
    }
   },
   {
-   "transparent": false,
+   "transparent": true,
    "type": "text",
    "title": "Rollback, per resource the rollout updates",
    "options": {
@@ -116,10 +116,9 @@
    }
   },
   {
-   "transparent": false,
+   "transparent": true,
    "type": "table",
    "title": "Plan · every host's pre-flight, before any stage runs",
-   "description": "The plan stage reads every BMC live and pre-flights it: go, into the canary or a wave; skip, nothing to do now; block, a person has to look. Only the hosts that go get into the waves",
    "datasource": {
     "type": "loki",
     "uid": "loki"
@@ -264,7 +263,7 @@
           "type": "value",
           "options": {
            "go": {
-            "color": "#559f77",
+            "color": "#00c9a7",
             "index": 0
            },
            "skip": {
@@ -300,14 +299,13 @@
     "w": 24,
     "h": 12
    },
-   "timeFrom": "15d",
+   "timeFrom": "30d",
    "hideTimeOverride": true
   },
   {
-   "transparent": false,
+   "transparent": true,
    "type": "table",
    "title": "Plan · each pre-flight check, on every host",
-   "description": "What the plan's pre-flight checked on each host: the live read, the baseline, the version and its direction, Updateable, nothing staged, the image in the catalog and its sha256, the rollback path, the update service and the push, the health and open tasks. ✓ passed; ✗ failed, with why",
    "datasource": {
     "type": "loki",
     "uid": "loki"
@@ -379,7 +377,7 @@
        "options": {
         "pattern": "^✓.*",
         "result": {
-         "color": "#559f77",
+         "color": "#00c9a7",
          "index": 0
         }
        }
@@ -432,14 +430,13 @@
     "w": 24,
     "h": 19
    },
-   "timeFrom": "15d",
+   "timeFrom": "30d",
    "hideTimeOverride": true
   },
   {
-   "transparent": false,
+   "transparent": true,
    "type": "table",
    "title": "1 · Pre-flight again, right before each host is touched",
-   "description": "Step 1 of every host, in its stage: a fresh read and the same checks again, since the host may have changed since the plan, and the BMC must be the one the plan approved (its identity: the Redfish service UUID)",
    "datasource": {
     "type": "loki",
     "uid": "loki"
@@ -613,7 +610,7 @@
           "type": "value",
           "options": {
            "go": {
-            "color": "#559f77",
+            "color": "#00c9a7",
             "index": 0
            },
            "skip": {
@@ -671,14 +668,13 @@
     "w": 24,
     "h": 12
    },
-   "timeFrom": "15d",
+   "timeFrom": "30d",
    "hideTimeOverride": true
   },
   {
-   "transparent": false,
+   "transparent": true,
    "type": "table",
    "title": "1 · Each pre-flight check again, on every host",
-   "description": "The same checks on the fresh read of step 1, in the canary and the waves: a host that changed since the plan fails here, before anything is written",
    "datasource": {
     "type": "loki",
     "uid": "loki"
@@ -750,7 +746,7 @@
        "options": {
         "pattern": "^✓.*",
         "result": {
-         "color": "#559f77",
+         "color": "#00c9a7",
          "index": 0
         }
        }
@@ -803,14 +799,13 @@
     "w": 24,
     "h": 19
    },
-   "timeFrom": "15d",
+   "timeFrom": "30d",
    "hideTimeOverride": true
   },
   {
-   "transparent": false,
+   "transparent": true,
    "type": "table",
    "title": "2 · Drain: the host keeps running",
-   "description": "A BMC firmware update resets the Manager, the BMC alone: the host is not restarted, so it isn't drained",
    "datasource": {
     "type": "loki",
     "uid": "loki"
@@ -950,14 +945,13 @@
     "w": 24,
     "h": 12
    },
-   "timeFrom": "15d",
+   "timeFrom": "30d",
    "hideTimeOverride": true
   },
   {
-   "transparent": false,
+   "transparent": true,
    "type": "table",
    "title": "3 · The update request: a multipart push, applied on reset",
-   "description": "What rollout.py sent: the method, the BMC's MultipartHttpPushUri, @Redfish.OperationApplyTime in the UpdateParameters part, and the package, by the catalog's file and sha256",
    "datasource": {
     "type": "loki",
     "uid": "loki"
@@ -1140,14 +1134,13 @@
     "w": 24,
     "h": 13
    },
-   "timeFrom": "15d",
+   "timeFrom": "30d",
    "hideTimeOverride": true
   },
   {
-   "transparent": false,
+   "transparent": true,
    "type": "table",
    "title": "3 · What tracks it: a Task of the TaskService, never a Job",
-   "description": "The 202 Accepted's Task, as it ended: its URI under TaskService/Tasks, its TaskState and TaskStatus and its last message. The lab BMC has no JobService, so no Job is created and the Task carries every message",
    "datasource": {
     "type": "loki",
     "uid": "loki"
@@ -1308,7 +1301,7 @@
           "type": "value",
           "options": {
            "Completed": {
-            "color": "#559f77",
+            "color": "#00c9a7",
             "index": 0
            },
            "Exception": {
@@ -1348,14 +1341,13 @@
     "w": 24,
     "h": 12
    },
-   "timeFrom": "15d",
+   "timeFrom": "30d",
    "hideTimeOverride": true
   },
   {
-   "transparent": false,
+   "transparent": true,
    "type": "table",
    "title": "4 · Activation: the Manager's reset",
-   "description": "The reset that applies an OnReset update: the action, its target, the ResetType chosen from the ResetActionInfo, and how long the BMC took to answer again",
    "datasource": {
     "type": "loki",
     "uid": "loki"
@@ -1495,14 +1487,13 @@
     "w": 24,
     "h": 12
    },
-   "timeFrom": "15d",
+   "timeFrom": "30d",
    "hideTimeOverride": true
   },
   {
-   "transparent": false,
+   "transparent": true,
    "type": "table",
    "title": "Rollback per host, as the plan computed it",
-   "description": "The plan's answer for each host's component: the activation, whether the host restarts (then it is drained), an A/B bank if the BMC reports one, and the rollback the rollout would carry out",
    "datasource": {
     "type": "loki",
     "uid": "loki"
@@ -1697,7 +1688,7 @@
     "w": 24,
     "h": 12
    },
-   "timeFrom": "15d",
+   "timeFrom": "30d",
    "hideTimeOverride": true
   }
  ]

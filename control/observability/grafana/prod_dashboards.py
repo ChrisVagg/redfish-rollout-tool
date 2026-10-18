@@ -23,14 +23,15 @@ BY_PROJECT = [
         "Value #I (count)": "Hosts", "Value #I (min)": "Redfish", "Value #J (max)": "Worst health"}}}]
 
 
-# A dashboard with lab's site, title, folder link, ids and links between dashboards made prod's
+# A dashboard with lab's site, title, folder link, ids, links between dashboards and diagrams made prod's
 def prod(x):
     if isinstance(x, dict):
         return {k: prod(v) for k, v in x.items()}
     if isinstance(x, list):
         return [prod(v) for v in x]
     if isinstance(x, str):
-        return re.sub(r"\blab-(?=fleet|host|pipeline)", "prod-", re.sub(r"^Lab\b", "Prod", re.sub(r"^lab$", "prod", x)))
+        return re.sub(r"\blab-(?=fleet|host|pipeline|architecture|stack|rollout|solution)", "prod-",
+                      re.sub(r"^Lab\b", "Prod", re.sub(r"^lab$", "prod", x)))
     return x
 
 
@@ -49,8 +50,6 @@ if __name__ == "__main__":
             redfish, health = hosts["targets"][:2]
             hosts["targets"] += [{**redfish, "refId": "I"}, {**health, "refId": "J"}]
             hosts["transformations"] += BY_PROJECT
-            hosts["description"] += (" Grouped by project: a row each, with its hosts' count and the worst Redfish and "
-                                     "health among them; open it for its hosts.")
             for panel in doc["panels"]:  # taller, room for an open project under the projects: the rest below it
                 if panel["gridPos"]["y"] > hosts["gridPos"]["y"]:
                     panel["gridPos"]["y"] += 6
@@ -59,7 +58,7 @@ if __name__ == "__main__":
             overrides += [{**o, "matcher": {**o["matcher"], "scope": "nested"}} for o in overrides]
             hosts["options"]["sortBy"] = [{"displayName": "Project", "desc": False}]
         text = json.dumps(doc, indent=1, ensure_ascii=False) + "\n"
-        left = re.findall(r'"[Ll]ab"|"Lab |lab-(?:fleet|host|pipeline)', text)
+        left = re.findall(r'"[Ll]ab"|"Lab |lab-(?:fleet|host|pipeline|architecture|stack|rollout|solution)', text)
         if left:
             raise SystemExit(f"{lab.name}: lab left in the prod dashboard, {sorted(set(left))}: extend prod()")
         (DASHBOARDS / "prod" / lab.name).write_text(text)

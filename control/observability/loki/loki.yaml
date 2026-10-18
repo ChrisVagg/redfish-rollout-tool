@@ -1,4 +1,4 @@
-# Loki for the rollout's events: one process, on 127.0.0.1 only, its data in the loki volume, kept 15 days like
+# Loki for the rollout's events: one process, on 127.0.0.1 only, its data in the loki volume, kept 30 days like
 # Prometheus. rollout.py run sends every event of its run record here (LOKI); Grafana reads them with LogQL.
 auth_enabled: false
 server:
@@ -21,8 +21,9 @@ schema_config:
   configs:
     - {from: 2026-01-01, store: tsdb, object_store: filesystem, schema: v13, index: {prefix: index_, period: 24h}}
 limits_config:
-  retention_period: 360h
-  # a query split by day, not by hour: Grafana already asks day by day, and the dashboards read 15 days
+  # 30 days: the compactor deletes older chunks. A 30-day query fits max_query_length's default, 721h
+  retention_period: 720h
+  # a query split by day, not by hour: Grafana already asks day by day, and the dashboards read 30 days
   split_queries_by_interval: 24h
 compactor:
   working_directory: /loki/compactor

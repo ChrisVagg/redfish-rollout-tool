@@ -64,8 +64,8 @@
     "includeAll": false
    },
    {
-    "name": "thermal_kind",
-    "label": "Chassis · Thermal",
+    "name": "thermal_context",
+    "label": "Thermal context",
     "type": "query",
     "datasource": {
      "type": "prometheus",
@@ -73,8 +73,8 @@
     },
     "hide": 2,
     "query": {
-     "query": "label_values(redfish_reading{site=\"$site\",host=\"$host\",resource=~\"/redfish/v1/Chassis/.*\",kind!~\"Power|Voltage|Current|Energy.*|Frequency|ChargeAh\"}, kind)",
-     "refId": "thermal_kind"
+     "query": "label_values(redfish_reading{site=\"$site\",host=\"$host\",resource=~\"/redfish/v1/Chassis/.*\",kind!~\"Power|Voltage|Current|Energy.*|Frequency|ChargeAh\"}, context)",
+     "refId": "thermal_context"
     },
     "refresh": 2,
     "sort": 1,
@@ -205,7 +205,6 @@
      "range": true
     }
    ],
-   "description": "The inventory's vendor and project, the BMC's Manufacturer and Model (- until it answers)",
    "fieldConfig": {
     "defaults": {},
     "overrides": []
@@ -257,7 +256,7 @@
        "options": {
         "1": {
          "text": "up",
-         "color": "green",
+         "color": "#00c9a7",
          "index": 0
         },
         "0": {
@@ -310,7 +309,6 @@
      "range": true
     }
    ],
-   "description": "The worst Status.Health of any of its components",
    "fieldConfig": {
     "defaults": {
      "mappings": [
@@ -319,7 +317,7 @@
        "options": {
         "0": {
          "text": "OK",
-         "color": "green",
+         "color": "#00c9a7",
          "index": 0
         },
         "1": {
@@ -389,7 +387,7 @@
       "mode": "absolute",
       "steps": [
        {
-        "color": "green",
+        "color": "#00c9a7",
         "value": null
        },
        {
@@ -440,7 +438,6 @@
      "range": true
     }
    ],
-   "description": "The furthest any reading is past its thresholds, upper or lower",
    "fieldConfig": {
     "defaults": {
      "mappings": [
@@ -449,7 +446,7 @@
        "options": {
         "0": {
          "text": "within",
-         "color": "green",
+         "color": "#00c9a7",
          "index": 0
         },
         "1": {
@@ -513,7 +510,6 @@
      "range": true
     }
    ],
-   "description": "Since its last reset (Manager.LastResetTime)",
    "fieldConfig": {
     "defaults": {
      "mappings": [],
@@ -560,7 +556,6 @@
      "range": true
     }
    ],
-   "description": "How long its last read took, and how many resources it has",
    "fieldConfig": {
     "defaults": {
      "mappings": [],
@@ -608,7 +603,6 @@
      "format": "table"
     }
    ],
-   "description": "What the BMC reports as firmware: the firmware inventory (UpdateService.FirmwareInventory), the System's BIOS, the Manager's own firmware and the parts' (drives, controllers, NICs, PSUs). Whether Redfish can update each (Updateable, WriteProtected) and how an image gets in: push to MultipartHttpPushUri, or pull with SimpleUpdate, against its Targets and TransferProtocol AllowableValues. The same checks as rollout.py plan.",
    "transformations": [
     {
      "id": "organize",
@@ -659,7 +653,7 @@
           "options": {
            "pattern": "^yes.*",
            "result": {
-            "color": "green",
+            "color": "#00c9a7",
             "index": 0
            }
           }
@@ -708,7 +702,7 @@
           "options": {
            "pattern": "^yes.*",
            "result": {
-            "color": "green",
+            "color": "#00c9a7",
             "index": 0
            }
           }
@@ -757,7 +751,7 @@
           "options": {
            "pattern": "^yes.*",
            "result": {
-            "color": "green",
+            "color": "#00c9a7",
             "index": 0
            }
           }
@@ -829,7 +823,6 @@
      "format": "table"
     }
    ],
-   "description": "Every object with a Status, as the BMC reports it: resources and the objects inside them (each fan, power supply, sensor). Worst first; - is not reported.",
    "transformations": [
     {
      "id": "sortBy",
@@ -890,7 +883,7 @@
           "type": "value",
           "options": {
            "OK": {
-            "color": "green",
+            "color": "#00c9a7",
             "index": 0
            },
            "Warning": {
@@ -924,12 +917,177 @@
   },
   {
    "type": "row",
+   "title": "Component integrity · SPDM, TPM",
+   "collapsed": false,
+   "gridPos": {
+    "x": 0,
+    "y": 22,
+    "w": 24,
+    "h": 1
+   },
+   "panels": [],
+   "id": 34
+  },
+  {
+   "type": "table",
+   "title": "ComponentIntegrity",
+   "gridPos": {
+    "x": 0,
+    "y": 23,
+    "w": 24,
+    "h": 6
+   },
+   "transparent": true,
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "redfish_component_integrity{site=\"$site\",host=\"$host\"}",
+     "legendFormat": "",
+     "refId": "A",
+     "instant": true,
+     "range": false,
+     "format": "table"
+    }
+   ],
+   "transformations": [
+    {
+     "id": "organize",
+     "options": {
+      "excludeByName": {
+       "Time": true,
+       "Value": true,
+       "__name__": true,
+       "job": true,
+       "instance": true,
+       "site": true,
+       "host": true
+      },
+      "renameByName": {
+       "id": "Id",
+       "type": "ComponentIntegrityType",
+       "type_version": "ComponentIntegrityTypeVersion",
+       "target": "TargetComponentURI",
+       "protects": "ComponentsProtected",
+       "enabled": "ComponentIntegrityEnabled",
+       "identity": "IdentityAuthentication.VerificationStatus",
+       "resource": "Resource"
+      },
+      "indexByName": {
+       "id": 0,
+       "type": 1,
+       "type_version": 2,
+       "target": 3,
+       "protects": 4,
+       "enabled": 5,
+       "identity": 6,
+       "resource": 7
+      }
+     }
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "noValue": "This BMC reports no ComponentIntegrity: its firmware versions are self-reported"
+    },
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "IdentityAuthentication.VerificationStatus"
+      },
+      "properties": [
+       {
+        "id": "mappings",
+        "value": [
+         {
+          "type": "value",
+          "options": {
+           "Success": {
+            "color": "#00c9a7",
+            "index": 0
+           },
+           "Failed": {
+            "color": "red",
+            "index": 1
+           },
+           "-": {
+            "text": "not reported",
+            "color": "text",
+            "index": 2
+           }
+          }
+         }
+        ]
+       },
+       {
+        "id": "custom.cellOptions",
+        "value": {
+         "type": "color-text"
+        }
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "ComponentIntegrityEnabled"
+      },
+      "properties": [
+       {
+        "id": "mappings",
+        "value": [
+         {
+          "type": "value",
+          "options": {
+           "true": {
+            "color": "#00c9a7",
+            "index": 0
+           },
+           "false": {
+            "color": "orange",
+            "index": 1
+           }
+          }
+         }
+        ]
+       },
+       {
+        "id": "custom.cellOptions",
+        "value": {
+         "type": "color-text"
+        }
+       }
+      ]
+     }
+    ]
+   },
+   "options": {
+    "showHeader": true,
+    "cellHeight": "sm",
+    "sortBy": [
+     {
+      "displayName": "Id",
+      "desc": false
+     }
+    ]
+   },
+   "id": 35
+  },
+  {
+   "type": "row",
    "title": "Network",
    "collapsed": false,
    "id": 30,
    "gridPos": {
     "x": 0,
-    "y": 22,
+    "y": 29,
     "w": 24,
     "h": 1
    },
@@ -945,11 +1103,10 @@
    },
    "gridPos": {
     "x": 0,
-    "y": 23,
+    "y": 30,
     "w": 24,
     "h": 9
    },
-   "description": "Every EthernetInterface, the BMC's own (Managers) and the host's (Systems), and the network Ports of each NetworkAdapter and of the Manager (DedicatedNetworkPorts), as the BMC reports them: LinkStatus, the speed (SpeedMbps, a Port's CurrentSpeedGbps), InterfaceEnabled, the MAC and the first IPv4 address. - is not reported. Their Health and State are in Health of every component.",
    "targets": [
     {
      "datasource": {
@@ -1033,7 +1190,7 @@
           "options": {
            "4": {
             "text": "LinkUp",
-            "color": "green",
+            "color": "#00c9a7",
             "index": 0
            },
            "3": {
@@ -1109,11 +1266,10 @@
    },
    "gridPos": {
     "x": 0,
-    "y": 32,
+    "y": 39,
     "w": 24,
     "h": 10
    },
-   "description": "Each interface's and port's LinkStatus at every read: a flap shorter than the exporter's interval goes unseen.",
    "targets": [
     {
      "datasource": {
@@ -1135,7 +1291,7 @@
        "options": {
         "4": {
          "text": "LinkUp",
-         "color": "green",
+         "color": "#00c9a7",
          "index": 0
         },
         "3": {
@@ -1198,7 +1354,7 @@
    "id": 10,
    "gridPos": {
     "x": 0,
-    "y": 42,
+    "y": 49,
     "w": 24,
     "h": 1
    },
@@ -1206,25 +1362,25 @@
   },
   {
    "type": "timeseries",
-   "title": "$thermal_kind",
+   "title": "$thermal_context",
    "gridPos": {
     "x": 0,
-    "y": 43,
+    "y": 50,
     "w": 12,
-    "h": 12
+    "h": 10
    },
    "datasource": {
     "type": "prometheus",
     "uid": "prometheus"
    },
-   "id": 11,
+   "id": 33,
    "targets": [
     {
      "datasource": {
       "type": "prometheus",
       "uid": "prometheus"
      },
-     "expr": "redfish_reading{site=\"$site\",host=\"$host\",resource=~\"/redfish/v1/Chassis/.*\",kind!~\"Power|Voltage|Current|Energy.*|Frequency|ChargeAh\",kind=\"$thermal_kind\"}",
+     "expr": "redfish_reading{site=\"$site\",host=\"$host\",resource=~\"/redfish/v1/Chassis/.*\",kind!~\"Power|Voltage|Current|Energy.*|Frequency|ChargeAh\",context=\"$thermal_context\"}",
      "legendFormat": "{{sensor}} · {{property}} ({{unit}})",
      "refId": "A",
      "instant": false,
@@ -1235,23 +1391,27 @@
       "type": "prometheus",
       "uid": "prometheus"
      },
-     "expr": "redfish_reading_threshold{site=\"$site\",host=\"$host\",resource=~\"/redfish/v1/Chassis/.*\",kind!~\"Power|Voltage|Current|Energy.*|Frequency|ChargeAh\",kind=\"$thermal_kind\",threshold!~\".*Fatal\"}",
+     "expr": "redfish_reading_threshold{site=\"$site\",host=\"$host\",resource=~\"/redfish/v1/Chassis/.*\",kind!~\"Power|Voltage|Current|Energy.*|Frequency|ChargeAh\",context=\"$thermal_context\",threshold!~\".*Fatal\"}",
      "legendFormat": "{{sensor}} · {{property}} {{threshold}} ({{unit}})",
      "refId": "B",
      "instant": false,
      "range": true
     }
    ],
-   "description": "Temperatures, fans and the chassis' other environment readings (Thermal, ThermalSubsystem, Sensors). Each reading's unit comes from the BMC's MetricDefinition, else the DMTF schema of the resource, else its ReadingUnits. Dashed: its thresholds (orange caution, red critical; not fatal, where some BMCs report -128 and 127), named in the tooltip.",
    "fieldConfig": {
     "defaults": {
      "custom": {
       "lineWidth": 1,
-      "fillOpacity": 0,
+      "fillOpacity": 20,
       "spanNulls": true,
-      "showPoints": "never"
+      "showPoints": "never",
+      "gradientMode": "opacity"
      },
-     "noValue": "This BMC reports no such reading under /redfish/v1/Chassis"
+     "noValue": "This BMC reports no thermal reading under /redfish/v1/Chassis",
+     "color": {
+      "mode": "shades",
+      "fixedColor": "#00ffc8"
+     }
     },
     "overrides": [
      {
@@ -1481,6 +1641,10 @@
          "tooltip": false,
          "viz": false
         }
+       },
+       {
+        "id": "custom.fillOpacity",
+        "value": 0
        }
       ]
      },
@@ -1535,10 +1699,10 @@
      "sort": "desc"
     }
    },
-   "repeat": "thermal_kind",
+   "transparent": true,
+   "repeat": "thermal_context",
    "repeatDirection": "h",
-   "maxPerRow": 2,
-   "transparent": true
+   "maxPerRow": 2
   },
   {
    "type": "row",
@@ -1547,7 +1711,7 @@
    "id": 13,
    "gridPos": {
     "x": 0,
-    "y": 55,
+    "y": 60,
     "w": 24,
     "h": 1
    },
@@ -1558,7 +1722,7 @@
    "title": "$power_kind",
    "gridPos": {
     "x": 0,
-    "y": 56,
+    "y": 61,
     "w": 12,
     "h": 12
    },
@@ -1591,16 +1755,20 @@
      "range": true
     }
    ],
-   "description": "Power, voltage, current, energy and line frequency of the chassis and its power supplies (Power, PowerSubsystem, Sensors). Each reading's unit comes from the BMC's MetricDefinition, else the DMTF schema of the resource, else its ReadingUnits. Dashed: its thresholds (orange caution, red critical; not fatal, where some BMCs report -128 and 127), named in the tooltip.",
    "fieldConfig": {
     "defaults": {
      "custom": {
       "lineWidth": 1,
-      "fillOpacity": 0,
+      "fillOpacity": 20,
       "spanNulls": true,
-      "showPoints": "never"
+      "showPoints": "never",
+      "gradientMode": "opacity"
      },
-     "noValue": "This BMC reports no such reading under /redfish/v1/Chassis"
+     "noValue": "This BMC reports no such reading under /redfish/v1/Chassis",
+     "color": {
+      "mode": "shades",
+      "fixedColor": "#00ffc8"
+     }
     },
     "overrides": [
      {
@@ -1830,6 +1998,10 @@
          "tooltip": false,
          "viz": false
         }
+       },
+       {
+        "id": "custom.fillOpacity",
+        "value": 0
        }
       ]
      },
@@ -1896,7 +2068,7 @@
    "id": 16,
    "gridPos": {
     "x": 0,
-    "y": 68,
+    "y": 73,
     "w": 24,
     "h": 1
    },
@@ -1907,7 +2079,7 @@
    "title": "$system_kind",
    "gridPos": {
     "x": 0,
-    "y": 69,
+    "y": 74,
     "w": 12,
     "h": 12
    },
@@ -1940,16 +2112,20 @@
      "range": true
     }
    ],
-   "description": "Readings of the computer system: processors, memory, drives (ProcessorMetrics, MemoryMetrics, Drive). Each reading's unit comes from the BMC's MetricDefinition, else the DMTF schema of the resource, else its ReadingUnits. Dashed: its thresholds (orange caution, red critical; not fatal, where some BMCs report -128 and 127), named in the tooltip.",
    "fieldConfig": {
     "defaults": {
      "custom": {
       "lineWidth": 1,
-      "fillOpacity": 0,
+      "fillOpacity": 20,
       "spanNulls": true,
-      "showPoints": "never"
+      "showPoints": "never",
+      "gradientMode": "opacity"
      },
-     "noValue": "This BMC reports no such reading under /redfish/v1/Systems"
+     "noValue": "This BMC reports no such reading under /redfish/v1/Systems",
+     "color": {
+      "mode": "shades",
+      "fixedColor": "#00ffc8"
+     }
     },
     "overrides": [
      {
@@ -2179,6 +2355,10 @@
          "tooltip": false,
          "viz": false
         }
+       },
+       {
+        "id": "custom.fillOpacity",
+        "value": 0
        }
       ]
      },
@@ -2245,7 +2425,7 @@
    "id": 19,
    "gridPos": {
     "x": 0,
-    "y": 81,
+    "y": 86,
     "w": 24,
     "h": 1
    },
@@ -2256,7 +2436,7 @@
    "title": "$manager_kind",
    "gridPos": {
     "x": 0,
-    "y": 82,
+    "y": 87,
     "w": 12,
     "h": 12
    },
@@ -2289,16 +2469,20 @@
      "range": true
     }
    ],
-   "description": "The BMC's own CPU, memory and storage (ManagerDiagnosticData). Each reading's unit comes from the BMC's MetricDefinition, else the DMTF schema of the resource, else its ReadingUnits. Dashed: its thresholds (orange caution, red critical; not fatal, where some BMCs report -128 and 127), named in the tooltip.",
    "fieldConfig": {
     "defaults": {
      "custom": {
       "lineWidth": 1,
-      "fillOpacity": 0,
+      "fillOpacity": 20,
       "spanNulls": true,
-      "showPoints": "never"
+      "showPoints": "never",
+      "gradientMode": "opacity"
      },
-     "noValue": "This BMC reports no such reading under /redfish/v1/Managers"
+     "noValue": "This BMC reports no such reading under /redfish/v1/Managers",
+     "color": {
+      "mode": "shades",
+      "fixedColor": "#00ffc8"
+     }
     },
     "overrides": [
      {
@@ -2528,6 +2712,10 @@
          "tooltip": false,
          "viz": false
         }
+       },
+       {
+        "id": "custom.fillOpacity",
+        "value": 0
        }
       ]
      },
@@ -2594,7 +2782,7 @@
    "id": 22,
    "gridPos": {
     "x": 0,
-    "y": 94,
+    "y": 99,
     "w": 24,
     "h": 1
    },
@@ -2605,7 +2793,7 @@
    "title": "BMC memory",
    "gridPos": {
     "x": 0,
-    "y": 95,
+    "y": 100,
     "w": 6,
     "h": 9
    },
@@ -2627,16 +2815,20 @@
      "range": true
     }
    ],
-   "description": "ManagerDiagnosticData.MemoryStatistics: total and available",
    "fieldConfig": {
     "defaults": {
      "custom": {
       "lineWidth": 1,
-      "fillOpacity": 0,
+      "fillOpacity": 20,
       "spanNulls": true,
-      "showPoints": "never"
+      "showPoints": "never",
+      "gradientMode": "opacity"
      },
-     "unit": "bytes"
+     "unit": "bytes",
+     "color": {
+      "mode": "shades",
+      "fixedColor": "#00ffc8"
+     }
     },
     "overrides": []
    },
@@ -2666,7 +2858,7 @@
    "title": "BMC free storage",
    "gridPos": {
     "x": 6,
-    "y": 95,
+    "y": 100,
     "w": 6,
     "h": 9
    },
@@ -2688,16 +2880,20 @@
      "range": true
     }
    ],
-   "description": "ManagerDiagnosticData.FreeStorageSpaceKiB",
    "fieldConfig": {
     "defaults": {
      "custom": {
       "lineWidth": 1,
-      "fillOpacity": 0,
+      "fillOpacity": 20,
       "spanNulls": true,
-      "showPoints": "never"
+      "showPoints": "never",
+      "gradientMode": "opacity"
      },
-     "unit": "bytes"
+     "unit": "bytes",
+     "color": {
+      "mode": "shades",
+      "fixedColor": "#00ffc8"
+     }
     },
     "overrides": []
    },
@@ -2727,7 +2923,7 @@
    "title": "Crawl time",
    "gridPos": {
     "x": 12,
-    "y": 95,
+    "y": 100,
     "w": 6,
     "h": 9
    },
@@ -2749,16 +2945,20 @@
      "range": true
     }
    ],
-   "description": "How long each read of its Redfish tree took",
    "fieldConfig": {
     "defaults": {
      "custom": {
       "lineWidth": 1,
-      "fillOpacity": 0,
+      "fillOpacity": 20,
       "spanNulls": true,
-      "showPoints": "never"
+      "showPoints": "never",
+      "gradientMode": "opacity"
      },
-     "unit": "s"
+     "unit": "s",
+     "color": {
+      "mode": "shades",
+      "fixedColor": "#00ffc8"
+     }
     },
     "overrides": []
    },
@@ -2788,7 +2988,7 @@
    "title": "Failed GETs per read",
    "gridPos": {
     "x": 18,
-    "y": 95,
+    "y": 100,
     "w": 6,
     "h": 9
    },
@@ -2810,16 +3010,20 @@
      "range": true
     }
    ],
-   "description": "GETs of a read the BMC didn't answer, or answered with an error: what they would have read (a Thermal resource, a sensor) is missing from that read",
    "fieldConfig": {
     "defaults": {
      "custom": {
       "lineWidth": 1,
-      "fillOpacity": 0,
+      "fillOpacity": 20,
       "spanNulls": true,
-      "showPoints": "never"
+      "showPoints": "never",
+      "gradientMode": "opacity"
      },
-     "unit": "none"
+     "unit": "none",
+     "color": {
+      "mode": "shades",
+      "fixedColor": "#00ffc8"
+     }
     },
     "overrides": []
    },
@@ -2849,7 +3053,7 @@
    "title": "Answering Redfish",
    "gridPos": {
     "x": 0,
-    "y": 104,
+    "y": 109,
     "w": 24,
     "h": 4
    },
@@ -2871,7 +3075,6 @@
      "range": true
     }
    ],
-   "description": "A firmware update shows as the reset's gap",
    "fieldConfig": {
     "defaults": {
      "mappings": [
@@ -2880,7 +3083,7 @@
        "options": {
         "1": {
          "text": "up",
-         "color": "green",
+         "color": "#00c9a7",
          "index": 0
         },
         "0": {
@@ -2902,7 +3105,7 @@
         "value": null
        },
        {
-        "color": "green",
+        "color": "#00c9a7",
         "value": 1
        }
       ]
@@ -2928,7 +3131,7 @@
    "id": 28,
    "gridPos": {
     "x": 0,
-    "y": 108,
+    "y": 113,
     "w": 24,
     "h": 1
    }
@@ -2936,7 +3139,6 @@
   {
    "type": "table",
    "title": "Every firmware update of $host",
-   "description": "From the state database's events, whatever the time range: each time a pipeline ended an update of this host, newest first, every one the database holds. before: the version it ran, target: the one approved, running: the one it ran after.",
    "datasource": {
     "type": "grafana-postgresql-datasource",
     "uid": "state"
@@ -2975,7 +3177,7 @@
           "type": "value",
           "options": {
            "updated": {
-            "color": "#559f77",
+            "color": "#00c9a7",
             "index": 0
            },
            "rolled_back": {
@@ -3011,10 +3213,11 @@
    "id": 29,
    "gridPos": {
     "x": 0,
-    "y": 109,
+    "y": 114,
     "w": 24,
     "h": 8
-   }
+   },
+   "transparent": true
   }
  ]
 }

@@ -132,6 +132,36 @@ The proposed flow is `BMC EventService → event receiver → Loki → Grafana`.
 defines subscriptions and notifications; its [Redfish Event Listener](https://github.com/DMTF/Redfish-Event-Listener)
 is a starting point for evaluating a receiver.
 
+### Future work: SPDM attestation in the post-check
+
+Today the post-check says how it knows the running version: `self-reported`, the firmware's own word, or
+`SPDM offered (<uri>), not verified` when the BMC has a `ComponentIntegrity` resource for the component
+([the rollout](LAB.md#how-the-rollout-works)). No model of the production fleet offers one: `make capabilities
+SITE=prod` shows Attestation `-` for all seven. Verifying it needs what software can't add: a device that answers
+[SPDM](https://www.dmtf.org/standards/spdm) (DSP0274) from a hardware root of trust, with a device certificate its
+vendor provisioned at manufacturing, and BMC firmware that asks it over MCTP and exposes the answer. The rollout's
+part, the verifier, is software; this design has not been implemented or tested:
+
+1. **Reference values, at qualification.** On a lab host of the model, once the release is qualified, request signed
+   measurements (step 2) and record each measurement index's digest in the release's catalog entry, beside its
+   sha256, reviewed in the same pull request. A vendor's reference manifest (RIM, CoRIM), where one is published, is
+   compared with them.
+2. **Request, in the post-check.** For each enabled SPDM `ComponentIntegrity` that covers the updated component, POST
+   `ComponentIntegrity.SPDMGetSignedMeasurements` with a fresh 32-byte `Nonce` (hex), the `SlotId`, and the
+   `MeasurementIndices` the catalog names. The answer holds `SignedMeasurements` (the SPDM exchange, base64),
+   `Version`, `HashingAlgorithm`, `SigningAlgorithm` and a link to the device's `Certificate`. It is a POST, outside
+   the current read-only production setup.
+3. **Verify, on the agent.** With an SPDM library (DMTF's libspdm): the certificate chain up to the vendor's root, the
+   signature over the exchange and its nonce, so an old answer can't be replayed, then each digest against the
+   catalog's reference values. A mismatch fails the post-check like a wrong version, and the host rolls back. The
+   BMC's own verdict, `SPDM.IdentityAuthentication.VerificationStatus`, is a second opinion, not a substitute.
+4. **Mark it.** The running-version check then reads `SPDM verified` with the matched release; a component without
+   attestation stays `self-reported`, so every report shows where the fleet relies on the firmware's word.
+
+The BMC asks the devices behind it: GPUs, NICs, NVSwitches, retimers. The BMC's own firmware is attested only where
+a root of trust outside the BMC measures it: an ERoT, Caliptra, or a platform root of trust such as Lattice's
+MachXO3D. Validate each model before relying on it, as with the event flow.
+
 ## The update, resource by resource
 
 The diagram is the target production design, including capability-dependent flows that the current runner does
@@ -188,6 +218,8 @@ for its hosts.
 - **A rollout API**: an operator starts and approves a rollout only from the CLI (`make`, `YES=1`).
 - **BMC events into Loki**: an event receiver, Redfish subscriptions and forwarding of `Event` payloads, validated
   per model; see [the proposed event flow](#future-work-bmc-events-into-loki).
+- **SPDM attestation**: the post-check marks the running version `self-reported` or `SPDM offered`, but never
+  requests or checks signed measurements; see [the proposed verification](#future-work-spdm-attestation-in-the-post-check).
 
 ## A production system - scaling for a large fleet
 
@@ -197,11 +229,13 @@ The target at fleet scale, in four parts. The numbered badges are the rollout's 
 before any rollout; 1 to 6 are every host's steps, as in [the rollout](LAB.md#how-the-rollout-works). The BMC stays the
 only truth about what runs: a host is read again over Redfish before anything acts on it.
 
-### Supply chain: before any rollout
+### Supply chain: firmware image lifecycle
 
 | Part | Tool | What it does |
 |---|---|---|
-| Ingest | a promote script, as `control/ingest/promote-fw-images.sh` | downloads the vendor package, checks its checksum and its signature against the vendor's pinned key |
+| Fetch, in quarantine | a download script, as `control/ingest/download-fw-package.sh`, on the only internet-facing host, whose egress allows the vendor's domains only | downloads the release a ticket names over the vendor's authenticated channel; never opens it |
+| Sandbox, in quarantine | a container with no network, a read-only root, no privileges and only the packages read-only, as the lab's `sandbox` service running `control/ingest/verify-fw-package.sh` | unpacks each package only once it holds nothing but the package's regular files, checks every signature against the vendor's pinned key and the model the package targets, and lists only what passed |
+| Promotion | a script, as `control/ingest/promote-store-fw-package.sh` | checks each listed package's sha256 again, then writes it into the approved store and its entry into the catalog |
 | Lab test | lab hosts of every model | runs the image on each model before it is approved |
 | Approved store | S3 or Artifactory | keeps each approved image under its sha256; the storage policy prevents replacing one |
 
@@ -315,7 +349,8 @@ file first and the catalog entry after it; cache and store availability must sti
 
 | In the system | In this repository today | Next |
 |---|---|---|
-| Approved store, site cache | the control plane's store, a SeaweedFS bucket populated by the signature-checking ingest script, and the lab site's nginx over HTTPS caching it: `rollout.py` fetches each image into `lab/spool/`, checks its sha256 against `images.yaml` and pushes it. A URL in `images.yaml` is handed to `SimpleUpdate` where the BMC allows it | the approved store on S3 or Artifactory, and the same nginx cache in each site |
+| Ingest | three scripts in `control/ingest/`: the download, on the control host over HTTPS from OpenBMC's Jenkins; the checks, in the `sandbox` service (no network, read-only, `nobody`), against OpenBMC's development key, whose private half is public; the promotion, which checks each package's sha256 again | the download on a quarantine host, the vendor's key pinned per model, a lab test before approval |
+| Approved store, site cache | the control plane's store, a SeaweedFS bucket populated by the ingest's three steps, and the lab site's nginx over HTTPS caching it: `rollout.py` fetches each image into `lab/spool/`, checks its sha256 against `images.yaml` and pushes it. A URL in `images.yaml` is handed to `SimpleUpdate` where the BMC allows it | the approved store on S3 or Artifactory, and the same nginx cache in each site |
 | Firmware catalog | `control/catalog/<site>/`: prod's `baseline.yaml` is tracked; the lab's baseline and images catalog are written by the ingest, git-ignored | stays YAML reviewed in git, beside NetBox, not in it: prod's `images.yaml` beside its baseline, and a check of every change (each baseline version in the catalog, each entry with its sha256, each file in the store); the plan keeps the entries it used in `plan.json`, and each stage compares them again |
 | Inventory / CMDB | NetBox holds both sites' hosts, each BMC's account named in its platform's config context; each service reads it with its own read-only account. The poller's snapshots are the observed versions, and `make firmware SITE=prod` shows drift from the baseline | the exporter re-reading NetBox while it runs; people's accounts and roles in NetBox, through SSO; NetBox backed up |
 | Rollout API and CLI | the CLI only: the `make` targets and `pipeline.sh`; `YES=1` is the approval. Who planned, started or cancelled a run is recorded (`ROLLOUT_ACTOR`, else the account and host), with the commit each catalog file was approved in | an API, and an approval between the canary and wave 1; `ROLLOUT_ACTOR` from what authorized the run, a CI's actor or the API's authenticated user |

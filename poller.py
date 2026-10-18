@@ -158,7 +158,8 @@ def reading(uri, doc, definitions, path, value) -> dict:
         unit = unit or item.get("ReadingUnits") or reading_type_unit(item.get("ReadingType"))
         kind = kind or KIND.get(unit) or item.get("ReadingType")
     flat = properties(item)
-    return {"kind": kind, "resource": pointer(uri, keys[:i]), "name": named(item), "property": prop,
+    return {"kind": kind, "context": item.get("PhysicalContext"), "resource": pointer(uri, keys[:i]),
+            "name": named(item), "property": prop,
             "role": "limit" if LIMIT.search(prop) else "reading", "value": value,
             "unit": unit, "critical": flat.get(choose(flat, CRITICAL)), "precision": md.get("Precision"),
             "definition": md.get("Id"), "health": obj(item.get("Status")).get("Health"),
@@ -525,10 +526,11 @@ def exposition(server, found, seconds) -> list[str]:
         name = r["role"] == "limit" and threshold(r["property"])
         if name and isinstance(r["value"], (int, float)) and r["value"]:
             limits.setdefault((r["resource"], r["kind"]), {})[name] = r["value"]
-    for r in records:
-        if r["role"] == "reading" and isinstance(r["value"], (int, float)):
-            labels = {"host": host, "kind": r["kind"], "resource": r["resource"], "sensor": r["name"] or "-",
-                      "property": r["property"], "unit": r["unit"] or "-"}
+    for r in records:  # an Absent part's reading (iLO 4 reports 0 °C for one) is no reading
+        if r["role"] == "reading" and isinstance(r["value"], (int, float)) and r["state"] != "Absent":
+            # context: the reading's PhysicalContext (CPU, GPU, Memory...), '-' when the BMC reports none
+            labels = {"host": host, "kind": r["kind"], "context": r["context"] or "-", "resource": r["resource"],
+                      "sensor": r["name"] or "-", "property": r["property"], "unit": r["unit"] or "-"}
             out.append(sample("redfish_reading", r["value"], **labels))
             th, v = limits.get((r["resource"], r["kind"]), {}), r["value"]
             out += [sample("redfish_reading_threshold", t, **labels, threshold=name) for name, t in th.items()]
@@ -890,20 +892,28 @@ def view_telemetry(args) -> list:
 
 
 # What a hardware model can do, from one of its hosts
+# Update service methods: push | & pull
+# Metrics Definition
+# Services
+# Component Integrity - BMC requester
 def capabilities(model, snaps) -> tuple[str, ...]:
     snap = snaps[0]
     found = snap["resources"]
     types = sorted({rtype(d)[0] for d in found.values()})
-    offered = ", ".join(t.removesuffix("Service") for t in filter(lambda t: t.endswith("Service"), types))
+    offered = ", ".join(t.removesuffix("Service") for t in filter(lambda t: t.endswith("Service"), types)) # services
     acts = action_list(found)
     simple = map(lambda k: parameters(found, acts[k]), filter(lambda k: k[1] == "#UpdateService.SimpleUpdate", acts))
     update = first_of(found, "UpdateService")
     telemetry = (f"{len(of(found, 'MetricDefinition'))} metric, {len(of(found, 'MetricReportDefinition'))} report "
                  f"definitions · {len(of(found, 'Triggers'))} triggers")
+    # The components whose integrity the BMC reports (ComponentIntegrity), by type: SPDM, TPM, - if None.
+    attested = Counter(text(d.get("ComponentIntegrityType")) for _, d in of(found, "ComponentIntegrity")
+                       if d.get("ComponentIntegrityEnabled") is not False)
     return (" ".join(model), str(len(snaps)), snap["host"], text(found.get(ROOT, {}).get("RedfishVersion")),
             str(len(types)), offered or "-", str(len(acts)), next(simple, "-"),
             ", ".join(filter(update.__contains__, ("HttpPushUri", "MultipartHttpPushUri"))) or "-",
-            telemetry if first_of(found, "TelemetryService") else "-", str(len(of(found, "Sensor"))))
+            telemetry if first_of(found, "TelemetryService") else "-", str(len(of(found, "Sensor"))),
+            " · ".join(f"{kind} {n}" for kind, n in sorted(attested.items())) or "-")
 
 
 # View capabilities: one row per hardware model

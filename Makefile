@@ -57,8 +57,8 @@ Control plane: one per fleet, every port on 127.0.0.1; the sites connect to it, 
                            Prometheus, the Pushgateway, Loki and Grafana (http://127.0.0.1:3000, account:
                            control/observability/grafana/.grafana.env). Give NetBox the services' read-only accounts
                            (tokens: control/netbox/.tokens.env) and, when it has none, the lab's ten BMCs; ingest
-                           OpenBMC's two newest builds into the store when the catalog is missing (download, check
-                           their signatures, upload)
+                           OpenBMC's two newest builds into the store when the catalog is missing (download; check
+                           them in a sandbox with no network; upload)
   make control-down        stop it; its data stays in volumes
   make state               every host's lock, then each host's latest state
   make unlock HOST=...     give back a host's lock once a person checked it; several: HOST="a b"
@@ -131,9 +131,11 @@ mutations: control/netbox/.netbox.env control/netbox/.tokens.env control/state/.
 
 # ---- Control plane ----
 # Up, then NetBox's seed (the services' accounts and tokens, the sites, and the lab's BMCs when it has none), then
-# the ingest into the store when the catalog is missing: download-fw-images.sh downloads, promote-fw-images.sh checks and
-# uploads. Every package the catalog names must then be in the store: a store that just started answers before its
-# volumes are registered, so each read is retried for 30 s
+# the ingest into the store when the catalog is missing: download-fw-package.sh downloads, verify-fw-package.sh checks
+# in the sandbox, with no network, and lists what passed, promote-store-fw-package.sh uploads what it listed. The
+# sandbox's image is built first, as a build inside run would print onto the list. Every package the catalog names must
+# then be in the store: a store that just started answers before its volumes are registered, so each read is retried
+# for 30 s
 control-up: control/netbox/.netbox.env control/netbox/.tokens.env control/state/.state.env \
             control/observability/grafana/.grafana.env
 	python3 control/observability/grafana/prod_dashboards.py
@@ -141,7 +143,9 @@ control-up: control/netbox/.netbox.env control/netbox/.tokens.env control/state/
 	$(CONTROL) exec -T netbox /opt/netbox/venv/bin/python /opt/netbox/netbox/manage.py shell --no-startup --no-imports \
 	  --interface python < control/netbox/seed.py
 	[ -f control/catalog/lab/images.yaml ] && [ -f control/catalog/lab/baseline.yaml ] && [ -f lab/bmc.mtd ] || \
-	  { ./control/ingest/download-fw-images.sh && ./control/ingest/promote-fw-images.sh control/ingest/staging/*.tar; }
+	  { ./control/ingest/download-fw-package.sh && $(CONTROL) build sandbox && \
+	    $(CONTROL) run --rm -T sandbox > control/ingest/staging/verified && \
+	    ./control/ingest/promote-store-fw-package.sh control/ingest/staging/verified; }
 	@for f in $$(sed -n 's/.*{file: "\([^"]*\)".*/\1/p' control/catalog/lab/images.yaml); do \
 	  ok=; for i in 1 2 3 4 5 6 7 8 9 10; do \
 	    $(CONTROL) exec -T store wget -q --spider "http://127.0.0.1:8888/buckets/firmware/$$f" && { ok=1; break; }; sleep 3; \

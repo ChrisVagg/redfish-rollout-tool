@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# The first half of the lab's firmware ingest: downloads OpenBMC's two newest successful GB200 NVL builds from its
-# Jenkins, each a whole-flash update package, into control/ingest/staging/, where promote-fw-images.sh checks them. Jenkins keeps
-# only the last three builds, so no build can be pinned in the repository. make lab-up runs both when the catalog is
-# missing. It writes only:
+# The first of the lab's three ingest steps: downloads OpenBMC's two newest successful GB200 NVL builds over HTTPS from
+# its Jenkins, the lab's vendor channel, each a whole-flash update package, into control/ingest/staging/, where
+# verify-fw-package.sh checks them in the sandbox. It never opens a package: nothing it downloads is unpacked or read
+# outside the sandbox. Jenkins keeps only the last three builds, so no build can be pinned in the repository. make
+# control-up runs the three steps when the catalog is missing. It writes only:
 #   control/ingest/staging/gb200nvl-<build>.static.mtd.all.tar
 set -euo pipefail
 cd "$(dirname "$0")"  # control/ingest/

@@ -1,4 +1,4 @@
-<svg viewBox="0 0 900 916" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="The lab: ten emulated BMCs in three racks, where the rollout really updates firmware, with the control plane and the lab site around them; a bar on each box says which plane it is in, blue the control plane, amber the site. lab/policy.yaml plans a canary of one BMC, bmc1, tagged canary in NetBox; wave 1 of three, bmc2 to bmc4, strict; wave 2 of the other six; at most two BMCs of a rack in a wave, a halt over 10% failed, a 60 second soak, ten at once. Both read the hosts from NetBox, the inventory's source of truth on port 8000, over its REST API, each tool with its own read-only account: each BMC's out-of-band IP, its rack and project, its tags and how it is reached. poller.py and pipeline.sh with rollout.py share the lab/ folder, the lab site's: the bad-update scenarios, the policy, the Prometheus agent's targets, the cache's certificate, and the snapshots, run records and reports; the baseline and the image catalog are the control plane's, in control/catalog/lab/. They speak Redfish over HTTPS: reads, updates and resets. The firmware's way in: OpenBMC's Jenkins builds each version as a signed .tar package. control/ingest/download-fw-images.sh downloads the two newest into control/ingest/staging/. control/ingest/promote-fw-images.sh, the ingest gate, checks each one's signatures against the pinned key; only a package that passes is uploaded into the store, a SeaweedFS bucket that keeps the source copy, and its download deleted; it writes the catalog images.yaml and the baseline into control/catalog/lab/, never the packages, and takes the older build's image-bmc out into lab/ as bmc.mtd, which each BMC's flash volume starts from. The cache, the lab site's nginx over HTTPS, fetches packages from the control plane's store on cache misses. rollout.py fetches a package from the cache into lab/spool/, its own copy, checks its sha256 against the catalog and pushes that copy to the BMC, which writes it into its flash. Docker Compose runs one container per BMC on its own loopback address, 127.1.0.1 to 127.1.0.10, port 443. In each, QEMU's gb200nvl-bmc machine stands in for the server, emulating only its BMC, an AST2600 chip, which runs OpenBMC's GB200 NVL firmware and bmcweb serving Redfish on port 443, from a 64 MiB flash volume kept across restarts. They boot in batches of four, each once the batch before is healthy, and a BMC whose boot comes up degraded boots again. At start-up, the two scripts fetch the two newest GB200 NVL builds from OpenBMC's Jenkins and check their signatures; the lab boots the older and approves the newer. The lab site runs the exporter, poller.py exporter, which reads the ten BMCs over Redfish every 10 seconds, and a Prometheus agent beside it; the control plane runs the observability stack, every service on 127.0.0.1; rollout.py run pushes its metrics to the Pushgateway and sends every event of its run record to Loki; the agent scrapes the exporter every 10 seconds and pushes each sample to Prometheus (remote write), so the control plane never connects into the site, and Prometheus scrapes the Pushgateway every 5; Loki is pushed to. Each BMC's Redfish EventService, its own events, isn't collected yet: this bmcweb build advertises a server-sent event stream but doesn't serve it. The rollout state is PostgreSQL: rollout.py run locks its hosts there before a stage touches them, and adds every event of its run. Grafana reads Prometheus, Loki and, over SQL with an account that may only read, the state database, and shows them in a Lab folder, Lab · Fleet manager, Lab · Host and Lab · Pipeline, next to a Prod folder.">
+<svg viewBox="0 0 900 916" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="The lab: ten emulated BMCs in three racks, where the rollout really updates firmware, with the control plane and the lab site around them; a bar on each box says which plane it is in, blue the control plane, amber the site. lab/policy.yaml plans a canary of one BMC, bmc1, tagged canary in NetBox; wave 1 of three, bmc2 to bmc4, strict; wave 2 of the other six; at most two BMCs of a rack in a wave, a halt over 10% failed, a 60 second soak, ten at once. Both read the hosts from NetBox, the inventory's source of truth on port 8000, over its REST API, each tool with its own read-only account: each BMC's out-of-band IP, its rack and project, its tags and how it is reached. poller.py and pipeline.sh with rollout.py share the lab/ folder, the lab site's: the bad-update scenarios, the policy, the Prometheus agent's targets, the cache's certificate, and the snapshots, run records and reports; the baseline and the image catalog are the control plane's, in control/catalog/lab/. They speak Redfish over HTTPS: reads, updates and resets. The firmware's way in: OpenBMC's Jenkins builds each version as a signed .tar package. control/ingest/download-fw-package.sh downloads the two newest over HTTPS into control/ingest/staging/. control/ingest/verify-fw-package.sh, the ingest gate, runs in the sandbox, a container with no network, a read-only root and no privileges: it accepts only an OpenBMC package's regular files, checks each one's signatures against the pinned key and its MANIFEST's machine, and lists only the packages that pass. control/ingest/promote-store-fw-package.sh checks each listed package's sha256 again, uploads it into the store, a SeaweedFS bucket that keeps the source copy, and deletes its download; it writes the catalog images.yaml and the baseline into control/catalog/lab/, never the packages, and takes the older build's image-bmc out into lab/ as bmc.mtd, which each BMC's flash volume starts from. The cache, the lab site's nginx over HTTPS, fetches packages from the control plane's store on cache misses. rollout.py fetches a package from the cache into lab/spool/, its own copy, checks its sha256 against the catalog and pushes that copy to the BMC, which writes it into its flash. Docker Compose runs one container per BMC on its own loopback address, 127.1.0.1 to 127.1.0.10, port 443. In each, QEMU's gb200nvl-bmc machine stands in for the server, emulating only its BMC, an AST2600 chip, which runs OpenBMC's GB200 NVL firmware and bmcweb serving Redfish on port 443, from a 64 MiB flash volume kept across restarts. They boot in batches of four, each once the batch before is healthy, and a BMC whose boot comes up degraded boots again. At start-up, the two scripts fetch the two newest GB200 NVL builds from OpenBMC's Jenkins and check their signatures; the lab boots the older and approves the newer. The lab site runs the exporter, poller.py exporter, which reads the ten BMCs over Redfish every 10 seconds, and a Prometheus agent beside it; the control plane runs the observability stack, every service on 127.0.0.1; rollout.py run pushes its metrics to the Pushgateway and sends every event of its run record to Loki; the agent scrapes the exporter every 10 seconds and pushes each sample to Prometheus (remote write), so the control plane never connects into the site, and Prometheus scrapes the Pushgateway every 5; Loki is pushed to. Each BMC's Redfish EventService, its own events, isn't collected yet: this bmcweb build advertises a server-sent event stream but doesn't serve it. The rollout state is PostgreSQL: rollout.py run locks its hosts there before a stage touches them, and adds every event of its run. Grafana reads Prometheus, Loki and, over SQL with an account that may only read, the state database, and shows them in a Lab folder, Lab · Fleet manager, Lab · Host and Lab · Pipeline, next to a Prod folder.">
   <style>
     .rfl text { font-family: var(--mono, monospace); }
     .rfl .bg { fill: var(--bg-deep, #050708); }
@@ -55,35 +55,40 @@
     <rect class="cut" x="20" y="80" width="860" height="112" rx="10"/>
     <text class="band hi" x="36" y="97">FIRMWARE INTO THE LAB · WHAT EACH SCRIPT DOES AND FEEDS</text>
     <text class="lbl" x="864" y="97" text-anchor="end">packages → the store · the catalog → control/catalog/ · bmc.mtd → lab/</text>
-    <rect class="box" x="40" y="106" width="165" height="70" rx="8"/>
-    <text class="name" x="122" y="126" text-anchor="middle">OpenBMC Jenkins</text>
-    <text class="sub" x="122" y="144" text-anchor="middle">2 newest GB200 NVL builds</text>
-    <text class="sub" x="122" y="158" text-anchor="middle">a signed .tar each</text>
-    <rect class="box" x="225" y="106" width="190" height="70" rx="8"/><rect class="pc" x="225" y="114" width="3" height="54" rx="1.5"/>
-    <text class="name" x="320" y="126" text-anchor="middle">download-fw-images.sh</text>
-    <text class="sub" x="320" y="144" text-anchor="middle">downloads the 2 packages</text>
-    <text class="sub" x="320" y="158" text-anchor="middle">into control/ingest/staging/</text>
-    <!-- the ingest gate: a package goes on to the store only if its signatures verify with the pinned key -->
-    <rect class="box" x="435" y="106" width="185" height="70" rx="8"/><rect class="pc" x="435" y="114" width="3" height="54" rx="1.5"/>
-    <text class="name hi" x="527" y="126" text-anchor="middle">promote-fw-images.sh</text>
-    <text class="sub" x="527" y="144" text-anchor="middle">checks the signatures</text>
-    <text class="sub" x="527" y="158" text-anchor="middle">pass: uploads to the store</text>
-    <rect class="box" x="640" y="106" width="100" height="70" rx="8"/><rect class="pc" x="640" y="114" width="3" height="54" rx="1.5"/>
-    <text class="name" x="690" y="126" text-anchor="middle">Store</text>
-    <text class="sub" x="690" y="144" text-anchor="middle">SeaweedFS</text>
-    <text class="sub" x="690" y="158" text-anchor="middle">the source copy</text>
-    <rect class="box" x="760" y="106" width="100" height="70" rx="8"/><rect class="ps" x="760" y="114" width="3" height="54" rx="1.5"/>
-    <text class="name hi" x="810" y="126" text-anchor="middle">Cache</text>
-    <text class="sub" x="810" y="144" text-anchor="middle">nginx · HTTPS</text>
-    <text class="sub" x="810" y="158" text-anchor="middle">cached on miss</text>
-    <path class="wire flow" d="M205 141H221" marker-end="url(#rfl-dim)"/>
-    <path class="wire flow" d="M415 141H431" marker-end="url(#rfl-dim)"/>
-    <path class="wire flow" d="M620 141H636" marker-end="url(#rfl-dim)"/>
-    <path class="wire flow" d="M740 141H756" marker-end="url(#rfl-dim)"/>
-    <!-- into the lab/ folder below, from the verified packages, and the cache to the rollout -->
-    <path class="wire flow" d="M470 176V282" marker-end="url(#rfl-dim)"/>
-    <text class="lbl" x="478" y="203">the catalog → control/catalog/lab/</text>
-    <text class="lbl" x="478" y="216">bmc.mtd → lab/: what each BMC first boots</text>
+    <rect class="box" x="40" y="106" width="100" height="70" rx="8"/>
+    <text class="name" x="90" y="126" text-anchor="middle">Jenkins</text>
+    <text class="sub" x="90" y="144" text-anchor="middle">2 newest builds</text>
+    <text class="sub" x="90" y="158" text-anchor="middle">signed .tar</text>
+    <rect class="box" x="155" y="106" width="150" height="70" rx="8"/><rect class="pc" x="155" y="114" width="3" height="54" rx="1.5"/>
+    <text class="name" x="230" y="126" text-anchor="middle">Download</text>
+    <text class="sub" x="230" y="144" text-anchor="middle">download-fw-package.sh</text>
+    <text class="sub" x="230" y="158" text-anchor="middle">into ingest/staging/</text>
+    <!-- the ingest gate, in the sandbox: no network, a read-only root, as nobody; it lists only the packages that pass -->
+    <rect class="box" x="320" y="106" width="146" height="70" rx="8"/><rect class="pc" x="320" y="114" width="3" height="54" rx="1.5"/>
+    <text class="name hi" x="393" y="126" text-anchor="middle">Sandbox</text>
+    <text class="sub" x="393" y="144" text-anchor="middle">verify-fw-package.sh</text>
+    <text class="sub" x="393" y="158" text-anchor="middle">offline · signatures</text>
+    <rect class="box" x="481" y="106" width="178" height="70" rx="8"/><rect class="pc" x="481" y="114" width="3" height="54" rx="1.5"/>
+    <text class="name" x="570" y="126" text-anchor="middle">Promote</text>
+    <text class="sub" x="570" y="144" text-anchor="middle">promote-store-fw-package.sh</text>
+    <text class="sub" x="570" y="158" text-anchor="middle">sha256 again · upload</text>
+    <rect class="box" x="674" y="106" width="80" height="70" rx="8"/><rect class="pc" x="674" y="114" width="3" height="54" rx="1.5"/>
+    <text class="name" x="714" y="126" text-anchor="middle">Store</text>
+    <text class="sub" x="714" y="144" text-anchor="middle">SeaweedFS</text>
+    <text class="sub" x="714" y="158" text-anchor="middle">source copy</text>
+    <rect class="box" x="768" y="106" width="92" height="70" rx="8"/><rect class="ps" x="768" y="114" width="3" height="54" rx="1.5"/>
+    <text class="name hi" x="814" y="126" text-anchor="middle">Cache</text>
+    <text class="sub" x="814" y="144" text-anchor="middle">nginx · HTTPS</text>
+    <text class="sub" x="814" y="158" text-anchor="middle">fetch on miss</text>
+    <path class="wire flow" d="M140 141H151" marker-end="url(#rfl-dim)"/>
+    <path class="wire flow" d="M305 141H316" marker-end="url(#rfl-dim)"/>
+    <path class="wire flow" d="M466 141H477" marker-end="url(#rfl-dim)"/>
+    <path class="wire flow" d="M659 141H670" marker-end="url(#rfl-dim)"/>
+    <path class="wire flow" d="M754 141H764" marker-end="url(#rfl-dim)"/>
+    <!-- into the lab/ folder below, from the promoted packages, and the cache to the rollout -->
+    <path class="wire flow" d="M500 176V282" marker-end="url(#rfl-dim)"/>
+    <text class="lbl" x="508" y="203">the catalog → control/catalog/lab/</text>
+    <text class="lbl" x="508" y="216">bmc.mtd → lab/: the BMCs' first boot</text>
     <path class="wire-hi flow" d="M810 176V282" marker-end="url(#rfl-teal)"/>
     <text class="lbl hi" x="802" y="205" text-anchor="end">rollout.py</text>
     <text class="lbl hi" x="802" y="217" text-anchor="end">fetches it</text>

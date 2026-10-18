@@ -96,11 +96,12 @@ def grab(tunnel, uri, found) -> dict:
 # The resources pre-flight reads, as {uri: document}, like a snapshot's resources but fresh
 def live_read(tunnel) -> dict[str, dict]:
     """The service root; systems, chassis and managers; the update service with its firmware inventory and the
-    SimpleUpdate ActionInfo; every task and job; the reset ActionInfo of each manager and system, which lists the
-    reset types. ServiceRoot links the TaskService as "Tasks"."""
+    SimpleUpdate ActionInfo; every task and job; the components whose integrity the BMC reports (ComponentIntegrity);
+    the reset ActionInfo of each manager and system, which lists the reset types. ServiceRoot links the TaskService as
+    "Tasks"."""
     found = {}
     root = grab(tunnel, ROOT, found)
-    for key in ("Systems", "Chassis", "Managers", "UpdateService", "Tasks", "JobService"):
+    for key in ("Systems", "Chassis", "Managers", "UpdateService", "Tasks", "JobService", "ComponentIntegrity"):
         if link(root, key):
             grab(tunnel, link(root, key), found)
     services = ((link(root, "UpdateService"), "FirmwareInventory"), (link(root, "Tasks"), "Tasks"),
@@ -978,7 +979,8 @@ def after_checks(found, key, want, before) -> tuple[bool, list[dict], str]:
     now = {u: health(d) for kind in ("ComputerSystem", "Manager") for u, d in of(found, kind)}
     was = before["health"]
     jobs = [j for j in open_jobs(found) if j[0] not in before["jobs"]]
-    checks = [{"check": "running version", "ok": running == want, "detail": f"{running}, target {want}"},
+    checks = [{"check": "running version", "ok": running == want,
+               "detail": f"{running}, target {want} · {evidence(found, resolve(found, key))}"},
               *({"check": "health", "ok": h == "OK" or h == was.get(u), "detail": f"{u}: {h}, before {was.get(u, '-')}",
                  "resource": u} for u, h in now.items()),
               *({"check": "health", "ok": False, "detail": f"{u}: gone, before {h}", "resource": u}
@@ -986,6 +988,22 @@ def after_checks(found, key, want, before) -> tuple[bool, list[dict], str]:
               {"check": "new jobs and tasks", "ok": not jobs,
                "detail": ", ".join(f"{j[1]}: {j[2]}" for j in jobs) or "none"}]
     return all(c["ok"] for c in checks), checks, running
+
+
+# How the post-check knows the running version: the firmware reports it itself, "self-reported", unless the BMC
+# reports SPDM integrity for the component, a ComponentIntegrity that targets or protects one of its firmware inventory
+# entries or what they belong to (RelatedItem). That is only offered here: checking its signed measurements against the
+# release's reference values is production's (PROD.md)
+def evidence(found, component) -> str:
+    docs = entries(found, component)
+    mine = {uri_of(d) for d in docs} | {uri_of(i) for d in docs for i in d.get("RelatedItem") or []}
+    for uri, d in of(found, "ComponentIntegrity"):
+        targets = {norm(d.get("TargetComponentURI") or ""),
+                   *map(uri_of, obj(d.get("Links")).get("ComponentsProtected") or [])} - {"", None}
+        spdm = d.get("ComponentIntegrityType") == "SPDM" and d.get("ComponentIntegrityEnabled") is not False
+        if spdm and mine & targets:
+            return f"SPDM offered ({uri}), not verified"
+    return "self-reported"
 
 
 # Steps 3 to 5 for one image: update, reset, post-check; (passed, activated, what happened), each step recorded

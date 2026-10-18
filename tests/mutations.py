@@ -68,6 +68,7 @@ BREAKS = [  # (what a careless edit does, the line as it is, the line broken, th
     ("a BMC login sent over plain HTTP", 'elif context.get("scheme", "https") != "https":', "elif False:",
      "test_netbox_inventory"),
     ("a held lock let through", "if taken == set(hosts):", "if True:", "test_host_locks"),
+    ("SPDM claimed for another part", "if spdm and mine & targets:", "if spdm:", "test_attestation"),
     ("a host left for a person unlocked", 'if o["state"] == "needs_attention")', "if False)", "test_host_locks"),
 ]
 
@@ -78,8 +79,9 @@ if __name__ == "__main__":
         for f in ROOT.glob("*.py"):
             shutil.copy(f, copy)
         shutil.copytree(ROOT / "tests", Path(copy) / "tests", ignore=shutil.ignore_patterns("__pycache__"))
-        (Path(copy) / "control" / "ingest").mkdir(parents=True)  # the ingest gate's test runs its script
-        shutil.copy2(ROOT / "control" / "ingest" / "promote-fw-images.sh", Path(copy) / "control" / "ingest")
+        (Path(copy) / "control" / "ingest").mkdir(parents=True)  # the ingest's test runs its scripts
+        for script in ("verify-fw-package.sh", "promote-store-fw-package.sh"):
+            shutil.copy2(ROOT / "control" / "ingest" / script, Path(copy) / "control" / "ingest")
         for what, line, broken, test in BREAKS:
             where = [name for name, text in tools.items() if line in text]
             if len(where) != 1 or tools[where[0]].count(line) != 1:

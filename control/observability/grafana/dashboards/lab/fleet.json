@@ -110,7 +110,7 @@
       "mode": "absolute",
       "steps": [
        {
-        "color": "green",
+        "color": "#00c9a7",
         "value": null
        }
       ]
@@ -175,7 +175,7 @@
       "mode": "absolute",
       "steps": [
        {
-        "color": "green",
+        "color": "#00c9a7",
         "value": null
        },
        {
@@ -198,11 +198,11 @@
          "mode": "absolute",
          "steps": [
           {
-           "color": "green",
+           "color": "#00c9a7",
            "value": null
           },
           {
-           "color": "blue",
+           "color": "#3ee6c4",
            "value": 1
           }
          ]
@@ -222,8 +222,7 @@
     "graphMode": "none",
     "textMode": "value_and_name"
    },
-   "transparent": true,
-   "description": "BMCs not answering Redfish. down: a real outage; updating: not answering while a pipeline updates it (its reset), from the rollout's pushed steps: a host in a step from pre-flight to undrain of a stage still running and pushed in the last 20 minutes, and a minute after"
+   "transparent": true
   },
   {
    "type": "stat",
@@ -252,7 +251,6 @@
      "range": true
     }
    ],
-   "description": "The worst Status.Health of any component of the selected hosts",
    "fieldConfig": {
     "defaults": {
      "mappings": [
@@ -261,7 +259,7 @@
        "options": {
         "0": {
          "text": "OK",
-         "color": "green",
+         "color": "#00c9a7",
          "index": 0
         },
         "1": {
@@ -324,7 +322,6 @@
      "range": true
     }
    ],
-   "description": "Readings at or past a critical or fatal threshold, upper or lower",
    "fieldConfig": {
     "defaults": {
      "mappings": [],
@@ -332,7 +329,7 @@
       "mode": "absolute",
       "steps": [
        {
-        "color": "green",
+        "color": "#00c9a7",
         "value": null
        },
        {
@@ -383,7 +380,6 @@
      "range": true
     }
    ],
-   "description": "Since the last reset of a BMC (Manager.LastResetTime): short after an update",
    "fieldConfig": {
     "defaults": {
      "mappings": [],
@@ -430,7 +426,6 @@
      "range": true
     }
    ],
-   "description": "The longest read of one BMC's Redfish tree",
    "fieldConfig": {
     "defaults": {
      "mappings": [],
@@ -562,7 +557,6 @@
      "format": "table"
     }
    ],
-   "description": "One row per BMC: the equipment (the inventory's vendor, project and rack, the BMC's Manufacturer and Model), answering Redfish, its worst health, how many components aren't OK, how far its readings are past their thresholds, time since its last reset, how long its crawl took, how many resources it has and how many GETs failed (what they would have read is missing). A host opens its own dashboard. Redfish: up, down, or updating: not answering while a pipeline updates it (its reset), from the rollout's pushed steps: a host in a step from pre-flight to undrain of a stage still running and pushed in the last 20 minutes, and a minute after.",
    "transformations": [
     {
      "id": "merge",
@@ -641,7 +635,7 @@
           "options": {
            "1": {
             "text": "up",
-            "color": "green",
+            "color": "#00c9a7",
             "index": 0
            },
            "0": {
@@ -651,12 +645,12 @@
            },
            "2": {
             "text": "updating",
-            "color": "blue",
+            "color": "#3ee6c4",
             "index": 2
            },
            "3": {
             "text": "up",
-            "color": "green",
+            "color": "#00c9a7",
             "index": 3
            }
           }
@@ -685,7 +679,7 @@
           "options": {
            "0": {
             "text": "OK",
-            "color": "green",
+            "color": "#00c9a7",
             "index": 0
            },
            "1": {
@@ -729,7 +723,7 @@
           "options": {
            "0": {
             "text": "within",
-            "color": "green",
+            "color": "#00c9a7",
             "index": 0
            },
            "1": {
@@ -795,7 +789,7 @@
          "mode": "absolute",
          "steps": [
           {
-           "color": "green",
+           "color": "#00c9a7",
            "value": null
           },
           {
@@ -854,7 +848,6 @@
      "range": true
     }
    ],
-   "description": "Each BMC over time: up, down, or updating: not answering while a pipeline updates it (its reset), from the rollout's pushed steps: a host in a step from pre-flight to undrain of a stage still running and pushed in the last 20 minutes, and a minute after",
    "fieldConfig": {
     "defaults": {
      "mappings": [
@@ -863,7 +856,7 @@
        "options": {
         "1": {
          "text": "up",
-         "color": "green",
+         "color": "#00c9a7",
          "index": 0
         },
         "0": {
@@ -873,12 +866,12 @@
         },
         "2": {
          "text": "updating",
-         "color": "blue",
+         "color": "#3ee6c4",
          "index": 2
         },
         "3": {
          "text": "up",
-         "color": "green",
+         "color": "#00c9a7",
          "index": 3
         }
        }
@@ -895,7 +888,7 @@
         "value": null
        },
        {
-        "color": "green",
+        "color": "#00c9a7",
         "value": 1
        }
       ]
@@ -941,7 +934,6 @@
      "format": "table"
     }
    ],
-   "description": "Per hardware model, every firmware component's running versions and how many hosts run each: two rows for one component of one model is drift",
    "transformations": [
     {
      "id": "organize",
@@ -1012,7 +1004,6 @@
      "format": "table"
     }
    ],
-   "description": "Each host's firmware components, whether Redfish can update them and how an image gets in, as rollout.py plan reports them",
    "transformations": [
     {
      "id": "organize",
@@ -1091,7 +1082,7 @@
           "options": {
            "pattern": "^yes.*",
            "result": {
-            "color": "green",
+            "color": "#00c9a7",
             "index": 0
            }
           }
@@ -1140,7 +1131,7 @@
           "options": {
            "pattern": "^yes.*",
            "result": {
-            "color": "green",
+            "color": "#00c9a7",
             "index": 0
            }
           }
@@ -1189,7 +1180,7 @@
           "options": {
            "pattern": "^yes.*",
            "result": {
-            "color": "green",
+            "color": "#00c9a7",
             "index": 0
            }
           }
@@ -1235,10 +1226,99 @@
   },
   {
    "type": "table",
-   "title": "Closest to their upper critical threshold",
+   "title": "ComponentIntegrity by host",
    "gridPos": {
     "x": 0,
     "y": 30,
+    "w": 24,
+    "h": 6
+   },
+   "transparent": true,
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "legendFormat": "",
+     "refId": "A",
+     "instant": true,
+     "range": false,
+     "format": "table",
+     "expr": "count by (host, type) (redfish_component_integrity{site=\"$site\",host=~\"$host\",enabled!=\"false\"}) * on (host) group_left (manufacturer, model) redfish_host_info{site=\"$site\",host=~\"$host\"}"
+    }
+   ],
+   "transformations": [
+    {
+     "id": "organize",
+     "options": {
+      "excludeByName": {
+       "Time": true
+      },
+      "renameByName": {
+       "host": "Host",
+       "manufacturer": "Manufacturer",
+       "model": "Model",
+       "type": "ComponentIntegrityType",
+       "Value": "Parts"
+      },
+      "indexByName": {
+       "host": 0,
+       "manufacturer": 1,
+       "model": 2,
+       "type": 3,
+       "Value": 4
+      }
+     }
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "noValue": "No BMC in this site reports ComponentIntegrity: every firmware version is self-reported"
+    },
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "Host"
+      },
+      "properties": [
+       {
+        "id": "links",
+        "value": [
+         {
+          "title": "${__value.text}: the host's dashboard",
+          "targetBlank": false,
+          "url": "/d/lab-host/lab-host?var-host=${__value.raw}&${__url_time_range}"
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   },
+   "options": {
+    "showHeader": true,
+    "cellHeight": "sm",
+    "sortBy": [
+     {
+      "displayName": "Host",
+      "desc": false
+     }
+    ]
+   },
+   "id": 17
+  },
+  {
+   "type": "table",
+   "title": "Closest to their upper critical threshold",
+   "gridPos": {
+    "x": 0,
+    "y": 36,
     "w": 24,
     "h": 9
    },
@@ -1261,7 +1341,6 @@
      "format": "table"
     }
    ],
-   "description": "The readings nearest their upper critical threshold, as a share of it",
    "transformations": [
     {
      "id": "organize",
@@ -1378,7 +1457,7 @@
          "mode": "absolute",
          "steps": [
           {
-           "color": "green",
+           "color": "#00c9a7",
            "value": null
           },
           {
@@ -1419,7 +1498,7 @@
    "title": "Not OK",
    "gridPos": {
     "x": 0,
-    "y": 39,
+    "y": 45,
     "w": 24,
     "h": 9
    },
@@ -1442,7 +1521,6 @@
      "format": "table"
     }
    ],
-   "description": "Every component whose Status.Health is Warning or Critical",
    "transformations": [
     {
      "id": "organize",
@@ -1544,7 +1622,7 @@
    "title": "BMC memory available",
    "gridPos": {
     "x": 0,
-    "y": 48,
+    "y": 54,
     "w": 8,
     "h": 9
    },
@@ -1566,16 +1644,20 @@
      "range": true
     }
    ],
-   "description": "ManagerDiagnosticData.MemoryStatistics.AvailableBytes: a leaking BMC service shows here",
    "fieldConfig": {
     "defaults": {
      "custom": {
       "lineWidth": 1,
-      "fillOpacity": 0,
+      "fillOpacity": 20,
       "spanNulls": true,
-      "showPoints": "never"
+      "showPoints": "never",
+      "gradientMode": "opacity"
      },
-     "unit": "bytes"
+     "unit": "bytes",
+     "color": {
+      "mode": "shades",
+      "fixedColor": "#00ffc8"
+     }
     },
     "overrides": []
    },
@@ -1605,7 +1687,7 @@
    "title": "BMC free storage",
    "gridPos": {
     "x": 8,
-    "y": 48,
+    "y": 54,
     "w": 8,
     "h": 9
    },
@@ -1627,16 +1709,20 @@
      "range": true
     }
    ],
-   "description": "ManagerDiagnosticData.FreeStorageSpaceKiB",
    "fieldConfig": {
     "defaults": {
      "custom": {
       "lineWidth": 1,
-      "fillOpacity": 0,
+      "fillOpacity": 20,
       "spanNulls": true,
-      "showPoints": "never"
+      "showPoints": "never",
+      "gradientMode": "opacity"
      },
-     "unit": "bytes"
+     "unit": "bytes",
+     "color": {
+      "mode": "shades",
+      "fixedColor": "#00ffc8"
+     }
     },
     "overrides": []
    },
@@ -1666,7 +1752,7 @@
    "title": "Crawl time",
    "gridPos": {
     "x": 16,
-    "y": 48,
+    "y": 54,
     "w": 8,
     "h": 9
    },
@@ -1688,16 +1774,20 @@
      "range": true
     }
    ],
-   "description": "How long each read of a BMC's Redfish tree took",
    "fieldConfig": {
     "defaults": {
      "custom": {
       "lineWidth": 1,
-      "fillOpacity": 0,
+      "fillOpacity": 20,
       "spanNulls": true,
-      "showPoints": "never"
+      "showPoints": "never",
+      "gradientMode": "opacity"
      },
-     "unit": "s"
+     "unit": "s",
+     "color": {
+      "mode": "shades",
+      "fixedColor": "#00ffc8"
+     }
     },
     "overrides": []
    },

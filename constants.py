@@ -157,7 +157,7 @@ FAILED_STATES = {"failed", "rolled_back", "needs_attention"}
 HOST_STATES = ("running", "untouched", "updated", "rolled_back", "failed", "needs_attention", "blocked", "skipped",
                "incomplete")
 CAPABILITIES_ROW = ("Model", "Hosts", "Sample", "Redfish", "Types", "Services", "Actions", "SimpleUpdate",
-                    "Push update", "Telemetry", "Sensors")
+                    "Push update", "Telemetry", "Sensors", "Attestation")
 STYLE = {"OK": "green", "Enabled": "green", "Connected": "green", "Warning": "yellow", "Critical": "bold red",
          "Failed": "bold red", "Stopped": "bold red",
          "go": "green", "skip": "yellow", "block": "bold red",  # pre-flight verdicts

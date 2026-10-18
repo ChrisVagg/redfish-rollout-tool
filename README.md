@@ -93,7 +93,7 @@ swap the commented line in `control/catalog/lab/baseline.yaml` and run `make upd
 
 | Command | What it checks |
 |---|---|
-| `make test` | 27 tests, no BMC: pre-flight, post-check, rollback, gates, the frozen plan, the ingest gate, the image cache, on recorded Redfish data; host locks and append-only events, on the state database. `make update` runs it first |
+| `make test` | 29 tests, no BMC: pre-flight, post-check and its attestation mark, rollback, gates, the frozen plan, the ingest's sandbox checks, the image cache, on recorded Redfish data; host locks and append-only events, on the state database. `make update` runs it first |
 | `make mutations` | breaks 35 safety rules one at a time; every break fails a test |
 | `make fault SCENARIO=…` | the real pipeline on the lab, with a fault injected |
 
@@ -123,9 +123,10 @@ tests/              test_rollout.py, the rollout's decisions on recorded Redfish
 constants.py        what to crawl, table columns, rollout constants
 helpers.py          shared helpers
 schemas/            DMTF Redfish JSON Schemas for sensor units, downloaded on first use (git-ignored)
-control/            the control plane, Compose for one per fleet: ingest/, download-fw-images.sh and
-                    promote-fw-images.sh with openbmc-dev.pub, the gate's pinned key; store/, the store's read-only
-                    access; netbox/seed.py: NetBox's service accounts, sites and the lab's ten BMCs;
+control/            the control plane, Compose for one per fleet: ingest/, the ingest's three steps,
+                    download-fw-package.sh, verify-fw-package.sh, run in the sandbox service with no network, and
+                    promote-store-fw-package.sh, with openbmc-dev.pub, the sandbox's pinned key; store/, the store's
+                    read-only access; netbox/seed.py: NetBox's service accounts, sites and the lab's ten BMCs;
                     state/schema.sql: events, host_state, host_locks and the accounts redfish_rollout_sa and grafana;
                     observability/, Prometheus, Loki and Grafana: a Lab and a Prod dashboard folder, prod_dashboards.py
                     making the prod ones from the lab's; catalog/<site>/, the firmware catalog: baseline.yaml,

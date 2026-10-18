@@ -27,10 +27,9 @@
  ],
  "panels": [
   {
-   "transparent": false,
+   "transparent": true,
    "type": "stat",
    "title": "Run",
-   "description": "The latest stage's start: the site, the component, the target and the update's OperationApplyTime, OnReset: the image waits for the rollout's own reset",
    "datasource": {
     "type": "loki",
     "uid": "loki"
@@ -102,14 +101,13 @@
     "w": 12,
     "h": 3
    },
-   "timeFrom": "15d",
+   "timeFrom": "30d",
    "hideTimeOverride": true
   },
   {
    "id": 28,
    "type": "stat",
    "title": "Scenario",
-   "description": "The bad update make fault ran (lab/scenario.sh), each named in LAB.md, Bad updates. none: no fault injected, a plain update or rollback.",
    "datasource": {
     "type": "prometheus",
     "uid": "prometheus"
@@ -160,13 +158,13 @@
      "valueSize": 22
     },
     "showPercentChange": false
-   }
+   },
+   "transparent": true
   },
   {
-   "transparent": false,
+   "transparent": true,
    "type": "stat",
    "title": "Elapsed",
-   "description": "From each stage's first event to its last, the stages added up",
    "datasource": {
     "type": "prometheus",
     "uid": "prometheus"
@@ -227,10 +225,9 @@
    }
   },
   {
-   "transparent": false,
+   "transparent": true,
    "type": "stat",
    "title": "Last event",
-   "description": "How fresh this is: a running pipeline writes an event every few seconds",
    "datasource": {
     "type": "loki",
     "uid": "loki"
@@ -289,14 +286,13 @@
     "w": 4,
     "h": 3
    },
-   "timeFrom": "15d",
+   "timeFrom": "30d",
    "hideTimeOverride": true
   },
   {
-   "transparent": false,
+   "transparent": true,
    "type": "stat",
    "title": "Result",
-   "description": "HALTED: a gate stopped the pipeline. RUNNING: a stage runs. PASSED: every gate passed",
    "datasource": {
     "type": "prometheus",
     "uid": "prometheus"
@@ -322,12 +318,12 @@
        "options": {
         "0": {
          "text": "PASSED",
-         "color": "#559f77",
+         "color": "#00c9a7",
          "index": 0
         },
         "1": {
          "text": "RUNNING",
-         "color": "#5989b7",
+         "color": "#3ee6c4",
          "index": 1
         },
         "2": {
@@ -398,10 +394,9 @@
    ]
   },
   {
-   "transparent": false,
+   "transparent": true,
    "type": "stat",
    "title": "How it ended: the latest stage",
-   "description": "A gate's decision in words: which wave, how many of its hosts failed. The hosts that need a person, with their next step, are in Host evidence below",
    "datasource": {
     "type": "loki",
     "uid": "loki"
@@ -436,7 +431,7 @@
        "options": {
         "pattern": ".*every wave done.*",
         "result": {
-         "color": "#559f77",
+         "color": "#00c9a7",
          "index": 1
         }
        }
@@ -480,14 +475,13 @@
     "w": 19,
     "h": 4
    },
-   "timeFrom": "15d",
+   "timeFrom": "30d",
    "hideTimeOverride": true
   },
   {
-   "transparent": false,
+   "transparent": true,
    "type": "stat",
    "title": "Updated and verified",
-   "description": "The target runs and the post-check passed",
    "datasource": {
     "type": "prometheus",
     "uid": "prometheus"
@@ -521,7 +515,7 @@
      "noValue": "0",
      "color": {
       "mode": "fixed",
-      "fixedColor": "#559f77"
+      "fixedColor": "#00c9a7"
      },
      "thresholds": {
       "mode": "absolute",
@@ -558,10 +552,9 @@
    }
   },
   {
-   "transparent": false,
+   "transparent": true,
    "type": "stat",
    "title": "Rolled back · failed",
-   "description": "Rolled back: the post-check failed, the version before is back and verified. Failed: the update failed before the reset, the old firmware still runs",
    "datasource": {
     "type": "prometheus",
     "uid": "prometheus"
@@ -632,10 +625,9 @@
    }
   },
   {
-   "transparent": false,
+   "transparent": true,
    "type": "stat",
    "title": "Needs a person · blocked",
-   "description": "Needs attention: no verified outcome, left drained. Blocked: pre-flight refused it",
    "datasource": {
     "type": "prometheus",
     "uid": "prometheus"
@@ -706,10 +698,9 @@
    }
   },
   {
-   "transparent": false,
+   "transparent": true,
    "type": "stat",
    "title": "Running · not started",
-   "description": "Not started: its wave hasn't run, or a gate halted before it, the waves of a halted canary too",
    "datasource": {
     "type": "prometheus",
     "uid": "prometheus"
@@ -743,7 +734,7 @@
      "noValue": "0",
      "color": {
       "mode": "fixed",
-      "fixedColor": "#5989b7"
+      "fixedColor": "#3ee6c4"
      },
      "thresholds": {
       "mode": "absolute",
@@ -780,10 +771,9 @@
    }
   },
   {
-   "transparent": false,
+   "transparent": true,
    "type": "stat",
    "title": "Still drained",
-   "description": "Hosts out of service: drained for a reset and not given back. A BMC update drains nothing",
    "datasource": {
     "type": "prometheus",
     "uid": "prometheus"
@@ -808,7 +798,7 @@
        "type": "value",
        "options": {
         "0": {
-         "color": "#559f77",
+         "color": "#00c9a7",
          "index": 0
         }
        }
@@ -854,10 +844,9 @@
    }
   },
   {
-   "transparent": false,
+   "transparent": true,
    "type": "stat",
    "title": "Plan: the policy it used",
-   "description": "The plan stage reads every BMC live, pre-flights it, and puts the hosts that pass into the canary and waves by the site's policy.yaml, shown here. Every later stage runs this plan",
    "datasource": {
     "type": "loki",
     "uid": "loki"
@@ -928,18 +917,17 @@
     "w": 24,
     "h": 3
    },
-   "timeFrom": "15d",
+   "timeFrom": "30d",
    "hideTimeOverride": true
   },
   {
-   "transparent": false,
+   "transparent": true,
    "type": "table",
    "title": "Plan: every host's pre-flight, its wave, and how it would be rolled back",
    "datasource": {
     "type": "loki",
     "uid": "loki"
    },
-   "description": "The plan's pre-flight verdict per host: go, into the canary or a wave; skip, nothing to do now; block, a person has to look, with the reasons. Then how its component's update activates, which reset and whether the host restarts (then it is drained first), and the rollback the rollout carries out if the post-check fails: a reinstall of the version it runs now, from the catalog's package. none: no way back, so pre-flight blocks it unless --accept-no-rollback",
    "targets": [
     {
      "datasource": {
@@ -1140,7 +1128,7 @@
           "type": "value",
           "options": {
            "go": {
-            "color": "#559f77",
+            "color": "#00c9a7",
             "index": 0
            },
            "skip": {
@@ -1176,18 +1164,17 @@
     "w": 24,
     "h": 12
    },
-   "timeFrom": "15d",
+   "timeFrom": "30d",
    "hideTimeOverride": true
   },
   {
-   "transparent": false,
+   "transparent": true,
    "type": "table",
    "title": "Gates: the canary, then each wave",
    "datasource": {
     "type": "loki",
     "uid": "loki"
    },
-   "description": "Each gate's decision after the canary and each wave. Halts on: any failure for the canary and the first strict waves, else when more than failure_rate of the hosts tried failed.",
    "targets": [
     {
      "datasource": {
@@ -1265,7 +1252,7 @@
           "type": "value",
           "options": {
            "passed": {
-            "color": "#559f77",
+            "color": "#00c9a7",
             "index": 0
            },
            "halted": {
@@ -1303,18 +1290,17 @@
     "w": 11,
     "h": 7
    },
-   "timeFrom": "15d",
+   "timeFrom": "30d",
    "hideTimeOverride": true
   },
   {
-   "transparent": false,
+   "transparent": true,
    "type": "barchart",
    "title": "Wave progress",
    "datasource": {
     "type": "prometheus",
     "uid": "prometheus"
    },
-   "description": "Every host of each wave by how it ended or where it is; the canary first",
    "targets": [
     {
      "datasource": {
@@ -1380,7 +1366,7 @@
         "id": "color",
         "value": {
          "mode": "fixed",
-         "fixedColor": "#559f77"
+         "fixedColor": "#00c9a7"
         }
        }
       ]
@@ -1455,7 +1441,7 @@
         "id": "color",
         "value": {
          "mode": "fixed",
-         "fixedColor": "#5989b7"
+         "fixedColor": "#3ee6c4"
         }
        }
       ]
@@ -1518,10 +1504,9 @@
    }
   },
   {
-   "transparent": false,
+   "transparent": true,
    "type": "table",
    "title": "Host evidence: each host, step by step",
-   "description": "One row per host of the plan, canary first: its versions before and after, then each step's outcome with its detail (the update's last Task message, how long the reset took, a check that failed), and how it ended. A host's link opens its every event, or its own dashboard",
    "datasource": {
     "type": "datasource",
     "uid": "-- Mixed --"
@@ -1668,7 +1653,7 @@
        "options": {
         "pattern": "^(passed|Completed|go|done|updated|Enabled).*",
         "result": {
-         "color": "#559f77",
+         "color": "#00c9a7",
          "index": 1
         }
        }
@@ -1698,7 +1683,7 @@
        "options": {
         "pattern": "^(running|start|task).*",
         "result": {
-         "color": "#5989b7",
+         "color": "#3ee6c4",
          "index": 4
         }
        }
@@ -1923,18 +1908,17 @@
     "w": 24,
     "h": 12
    },
-   "timeFrom": "15d",
+   "timeFrom": "30d",
    "hideTimeOverride": true
   },
   {
-   "transparent": false,
+   "transparent": true,
    "type": "table",
    "title": "Checks and recovery: hosts per step and outcome",
    "datasource": {
     "type": "loki",
     "uid": "loki"
    },
-   "description": "How many hosts each step passed or failed, in the order a host goes through them: 1 pre-flight again on a fresh read, 2 drain, 3 update, 4 reset, 5 post-check and, when it fails, the rollback, 6 undrain; then the soak after the wave, and how each host ended",
    "targets": [
     {
      "datasource": {
@@ -2014,7 +1998,7 @@
         "id": "color",
         "value": {
          "mode": "fixed",
-         "fixedColor": "#559f77"
+         "fixedColor": "#00c9a7"
         }
        },
        {
@@ -2080,18 +2064,17 @@
     "w": 11,
     "h": 9
    },
-   "timeFrom": "15d",
+   "timeFrom": "30d",
    "hideTimeOverride": true
   },
   {
-   "transparent": false,
+   "transparent": true,
    "type": "logs",
    "title": "Decision log",
    "datasource": {
     "type": "loki",
     "uid": "loki"
    },
-   "description": "The plan saved, each stage's start and end, each gate, and how each host ended, newest first",
    "targets": [
     {
      "datasource": {
@@ -2121,7 +2104,7 @@
     "w": 13,
     "h": 9
    },
-   "timeFrom": "15d",
+   "timeFrom": "30d",
    "hideTimeOverride": true
   },
   {
@@ -2138,14 +2121,13 @@
    }
   },
   {
-   "transparent": false,
+   "transparent": true,
    "type": "logs",
    "title": "$host: every event, oldest first",
    "datasource": {
     "type": "loki",
     "uid": "loki"
    },
-   "description": "The run record of one host: pre-flight's checks, the update's method, OperationApplyTime and every Task message, the reset, the post-check's checks, a rollback. Pick the host above, or follow a host's link in Host evidence",
    "targets": [
     {
      "datasource": {
@@ -2176,7 +2158,7 @@
     "w": 24,
     "h": 13
    },
-   "timeFrom": "15d",
+   "timeFrom": "30d",
    "hideTimeOverride": true
   },
   {
@@ -2193,14 +2175,13 @@
    }
   },
   {
-   "transparent": false,
+   "transparent": true,
    "type": "state-timeline",
    "title": "Every host, step by step",
    "datasource": {
     "type": "prometheus",
     "uid": "prometheus"
    },
-   "description": "The step each host is in while it runs, then how it ended",
    "targets": [
     {
      "datasource": {
@@ -2227,17 +2208,17 @@
         },
         "1": {
          "text": "pre-flight",
-         "color": "#8ab8ff",
+         "color": "#c2fff1",
          "index": 1
         },
         "2": {
          "text": "drain",
-         "color": "#7ea7d8",
+         "color": "#7dffe0",
          "index": 2
         },
         "3": {
          "text": "update",
-         "color": "#5989b7",
+         "color": "#3ee6c4",
          "index": 3
         },
         "4": {
@@ -2247,7 +2228,7 @@
         },
         "5": {
          "text": "post-check",
-         "color": "#8f7cc9",
+         "color": "#0e9e8a",
          "index": 5
         },
         "6": {
@@ -2257,12 +2238,12 @@
         },
         "7": {
          "text": "undrain",
-         "color": "#7ea7d8",
+         "color": "#7dffe0",
          "index": 7
         },
         "10": {
          "text": "updated",
-         "color": "#559f77",
+         "color": "#00c9a7",
          "index": 8
         },
         "11": {
@@ -2364,7 +2345,7 @@
        "options": {
         "1": {
          "text": "up",
-         "color": "green",
+         "color": "#00c9a7",
          "index": 0
         },
         "0": {
@@ -2386,7 +2367,7 @@
         "value": null
        },
        {
-        "color": "green",
+        "color": "#00c9a7",
         "value": 1
        }
       ]
@@ -2401,8 +2382,7 @@
     "legend": {
      "showLegend": false
     }
-   },
-   "description": "From the site's exporter: each reset after a flash is a gap"
+   }
   },
   {
    "transparent": true,
@@ -2461,7 +2441,7 @@
       "mode": "absolute",
       "steps": [
        {
-        "color": "#559f77",
+        "color": "#00c9a7",
         "value": null
        },
        {
@@ -2479,14 +2459,13 @@
    }
   },
   {
-   "transparent": false,
+   "transparent": true,
    "type": "bargauge",
    "title": "Reset: seconds until each BMC answered again",
    "datasource": {
     "type": "prometheus",
     "uid": "prometheus"
    },
-   "description": "A build that boots slower than the others shows here before any check fails",
    "targets": [
     {
      "datasource": {
@@ -2511,7 +2490,7 @@
       "mode": "absolute",
       "steps": [
        {
-        "color": "#559f77",
+        "color": "#00c9a7",
         "value": null
        },
        {
@@ -2567,7 +2546,7 @@
    }
   },
   {
-   "transparent": false,
+   "transparent": true,
    "type": "table",
    "title": "Errors: every step that failed, was refused or halted",
    "datasource": {
@@ -2665,11 +2644,11 @@
           "type": "value",
           "options": {
            "updated": {
-            "color": "#559f77",
+            "color": "#00c9a7",
             "index": 0
            },
            "passed": {
-            "color": "#559f77",
+            "color": "#00c9a7",
             "index": 1
            },
            "rolled_back": {
@@ -2697,7 +2676,7 @@
             "index": 7
            },
            "running": {
-            "color": "#5989b7",
+            "color": "#3ee6c4",
             "index": 8
            },
            "untouched": {
@@ -2793,7 +2772,7 @@
     "w": 24,
     "h": 7
    },
-   "timeFrom": "15d",
+   "timeFrom": "30d",
    "hideTimeOverride": true
   },
   {
@@ -2851,8 +2830,7 @@
     "showHeader": true,
     "cellHeight": "sm",
     "sortBy": []
-   },
-   "description": "Every check after the flash that failed: the host, the step (post-check, soak or the rollback's post-check), the check, and the resource it read. Why it failed is in the host's events, below."
+   }
   },
   {
    "type": "row",
@@ -2870,7 +2848,6 @@
   {
    "type": "table",
    "title": "Locks: which pipeline holds which host, and since when",
-   "description": "From the state database, as it is now, whatever the time range. A stage holds its hosts' locks while it runs; a host left for a person, or every host of a run that stopped halfway, keeps its lock until a person checks it and runs make unlock HOST=.... step and state: the host's latest event in that pipeline.",
    "datasource": {
     "type": "grafana-postgresql-datasource",
     "uid": "state"
@@ -2909,7 +2886,7 @@
           "type": "value",
           "options": {
            "updated": {
-            "color": "#559f77",
+            "color": "#00c9a7",
             "index": 0
            },
            "rolled_back": {
@@ -2960,7 +2937,8 @@
     "y": 109,
     "w": 24,
     "h": 6
-   }
+   },
+   "transparent": true
   }
  ],
  "templating": {

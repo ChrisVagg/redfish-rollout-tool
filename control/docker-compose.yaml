@@ -1,9 +1,10 @@
 # The control plane: what a fleet has one of, every port on 127.0.0.1. The sites connect to it; it never connects to a
-# site. make control-up starts it, then runs the ingest, ingest/ (download, signature check, upload into the store),
-# when the firmware catalog is missing; the catalog itself, catalog/<site>/, is YAML in git, not a service.
+# site. make control-up starts it, then runs the ingest, ingest/, when the firmware catalog is missing: the download,
+# the sandbox's checks, the upload into the store; the catalog itself, catalog/<site>/, is YAML in git, not a service.
 #   netbox, netbox-postgres, netbox-redis   the inventory, http://127.0.0.1:8000
 #   state-postgres                          the rollout state, 127.0.0.1:5432
 #   store                                   the approved images; each site's cache reads them over S3, :8333
+#   sandbox                                 the ingest's checks of each downloaded package, run once per ingest
 #   pushgateway, prometheus, loki, grafana  observability: the sites' agents push to Prometheus, rollout.py to the
 #                                           Pushgateway and Loki; Grafana on http://127.0.0.1:3000
 name: redfish-control
@@ -51,18 +52,40 @@ services:
     healthcheck: {test: pg_isready -q -h 127.0.0.1 -d rollout -U rollout, start_period: 20s, timeout: 30s, interval: 2s}
     volumes: ["state-postgres:/var/lib/postgresql", "./state/schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro"]
 
-  # The approved store, SeaweedFS: the ingest (make control-up) uploads a package into its bucket firmware only once its
-  # signatures verify. It keeps the only copy, and allows anonymous reads only: what each site's image cache fetches
+  # The ingest's sandbox, between the download and the upload: verify-fw-package.sh checks each downloaded package's
+  # files, signatures and machine, and prints only what passed. It reads untrusted packages, so it gets nothing else: no
+  # network, a read-only root, as nobody, no capabilities, its scratch space in memory, ingest/ read-only. It can't
+  # reach the store: promote-store-fw-package.sh uploads what it listed. Never started by up: make control-up runs it
+  sandbox:
+    build:
+      context: ingest
+      dockerfile_inline: |
+        FROM alpine:3.24
+        RUN apk add --no-cache bash openssl tar
+    profiles: [ingest]
+    network_mode: none
+    read_only: true
+    user: "65534:65534"
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs: ["/tmp:size=256m"]
+    mem_limit: 512m
+    pids_limit: 64
+    volumes: ["./ingest:/ingest:ro"]
+    command: [bash, -c, "/ingest/verify-fw-package.sh /ingest/staging/*.tar"]
+
+  # The approved store, SeaweedFS: the ingest (make control-up) uploads a package into its bucket firmware only once the
+  # sandbox verified it. It keeps the only copy, and allows anonymous reads only: what each site's image cache fetches
   store:
     image: chrislusf/seaweedfs:4.48
     restart: unless-stopped
     command: [server, -dir=/data, -s3, -s3.config=/etc/seaweedfs/access.json]
-    ports: ["127.0.0.1:8333:8333"]  # S3, read-only
+    ports: ["127.0.0.1:8333:8333"]  # S3, WORM
     volumes: ["store:/data", "./store/access.json:/etc/seaweedfs/access.json:ro"]
     healthcheck:
       test: [CMD, wget, -qO, /dev/null, "http://127.0.0.1:8888/"]
       interval: 5s
-      retries: 30
+      retries: 2
 
   # rollout.py run pushes each run's metrics to pushgateway service and prometheus pulls them.
   pushgateway:
@@ -82,8 +105,9 @@ services:
     restart: unless-stopped
     network_mode: host
     # the admin API deletes a pipeline's history (LAB.md, Prometheus); the remote-write receiver takes the agents'
-    # samples. Both on 127.0.0.1 only
+    # samples. Both on 127.0.0.1 only. Samples are kept 30 days, as Loki keeps its events
     command: [--config.file=/etc/prometheus/prometheus.yml, --storage.tsdb.path=/prometheus,
+              --storage.tsdb.retention.time=30d,
               --web.listen-address=127.0.0.1:9090, --web.enable-admin-api, --web.enable-remote-write-receiver]
     volumes: ["./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro", "prometheus:/prometheus"]
   
@@ -97,7 +121,15 @@ services:
     volumes: ["./observability/grafana/grafana.ini:/etc/grafana/grafana.ini:ro",
               "./observability/grafana/provisioning:/etc/grafana/provisioning:ro",
               "./observability/grafana/dashboards:/etc/grafana/dashboards:ro",
-              "grafana:/var/lib/grafana"]
+              "grafana:/var/lib/grafana",
+              # docs/'s diagrams for the Architecture dashboards: Grafana serves public/ without a login, so these
+              # six files only, not docs/
+              "../docs/lab-stack.svg:/usr/share/grafana/public/docs/lab-stack.svg:ro",
+              "../docs/lab-rollout.svg:/usr/share/grafana/public/docs/lab-rollout.svg:ro",
+              "../docs/lab-solution-architecture.svg:/usr/share/grafana/public/docs/lab-solution-architecture.svg:ro",
+              "../docs/prod-stack.svg:/usr/share/grafana/public/docs/prod-stack.svg:ro",
+              "../docs/prod-rollout.svg:/usr/share/grafana/public/docs/prod-rollout.svg:ro",
+              "../docs/prod-solution-architecture.svg:/usr/share/grafana/public/docs/prod-solution-architecture.svg:ro"]
 volumes:
   netbox-postgres:
   netbox-redis:

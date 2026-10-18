@@ -163,59 +163,87 @@ def test_image_cache():
     cache.shutdown()
 
 
-# The ingest gate, control/ingest/promote-fw-images.sh, run in a copy of the repo's layout that pins a key made here,
-# its store a fake docker that records each upload. A package signed with that key passes, is uploaded and written into
-# the catalog; one without its image's signature, with a changed image, without a required file, signed with another
-# key, or not signed at all, is refused before the upload
+# The ingest's checks, run in a copy of the repo's layout that pins a key made here: verify-fw-package.sh, the sandbox's
+# script, run here without the sandbox, then promote-store-fw-package.sh, its store a fake docker that records each
+# upload. A package signed with that key and built for the lab's machine is listed, uploaded and written into the
+# catalog. One without its image's signature, with a changed image, without a required file, signed with another key,
+# not signed at all, built for another machine, holding a link or a file that isn't a package's is refused, and with it
+# every package: nothing is listed. The promotion refuses a package changed since the sandbox listed it, and a line the
+# sandbox doesn't write, before the first upload
 def test_signature_gate():
     import shutil
     import subprocess
     run = lambda *cmd, **kw: subprocess.run([str(c) for c in cmd], capture_output=True, text=True, **kw)
     d = Path(tempfile.mkdtemp())
-    (d / "control" / "ingest").mkdir(parents=True)
+    ingest = d / "control" / "ingest"
+    ingest.mkdir(parents=True)
     (d / "lab").mkdir()
-    shutil.copy2(ROOT / "control" / "ingest" / "promote-fw-images.sh", d / "control" / "ingest")
+    for script in ("verify-fw-package.sh", "promote-store-fw-package.sh"):
+        shutil.copy2(ROOT / "control" / "ingest" / script, ingest)
     for k in ("pinned", "other"):
         run("openssl", "genpkey", "-algorithm", "RSA", "-pkeyopt", "rsa_keygen_bits:1024", "-out", d / f"{k}.key")
-    run("openssl", "pkey", "-in", d / "pinned.key", "-pubout", "-out", d / "control" / "ingest" / "openbmc-dev.pub")
+    run("openssl", "pkey", "-in", d / "pinned.key", "-pubout", "-out", ingest / "openbmc-dev.pub")
     (d / "docker").write_text('#!/bin/sh\ncat > /dev/null\necho "$@" >> "$0.uploads"\n')
     (d / "docker").chmod(0o755)
     env = {**os.environ, "PATH": f"{d}:{os.environ['PATH']}"}
     uploads = d / "docker.uploads"
 
-    # lambda build, key, signed, changed=b"", drop=(): an OpenBMC package of the build in d/: its files, the signed
-    # ones signed with key, the image changed after its signing, the files in drop left out
-    def package(build, key="pinned", signed=("MANIFEST", "publickey", "image-bmc"), changed=b"", drop=()) -> Path:
-        files = {"MANIFEST": f"version=2.{build}\n".encode(), "publickey": b"key", "image-bmc": b"firmware"}
+    # An OpenBMC package of the build in d/: its files, the signed ones signed with key, built for machine, the image
+    # changed after its signing, the files in drop left out, and the extra ones added: bytes, or a link's target
+    def package(build, key="pinned", signed=("MANIFEST", "publickey", "image-bmc"), machine="gb200nvl-obmc",
+                changed=b"", drop=(), extra=None) -> Path:
+        manifest = (f"purpose=xyz.openbmc_project.Software.Version.VersionPurpose.BMC\nversion=2.{build}\n"
+                    f"MachineName={machine}\n")
+        files = {"MANIFEST": manifest.encode(), "publickey": b"key", "image-bmc": b"firmware"}
         work = Path(tempfile.mkdtemp())
         for name, data in files.items():
             (work / name).write_bytes(data)
             if name in signed:
                 run("openssl", "dgst", "-sha256", "-sign", d / f"{key}.key", "-out", work / f"{name}.sig", work / name)
         (work / "image-bmc").write_bytes(b"firmware" + changed)
-        names = [n for n in (*files, *(f"{f}.sig" for f in signed)) if n not in drop]
+        for name, what in (extra or {}).items():
+            (work / name).write_bytes(what) if isinstance(what, bytes) else (work / name).symlink_to(what)
+        names = [n for n in (*files, *(f"{f}.sig" for f in signed), *(extra or {})) if n not in drop]
         tar = d / f"gb200nvl-{build}.static.mtd.all.tar"
         run("tar", "-cf", tar, "-C", work, *names)
         return tar
-    gate = lambda tar: run(d / "control" / "ingest" / "promote-fw-images.sh", tar, env=env)
-    refusals = [  # (package, what the gate says)
+    verify = lambda *tars: run(ingest / "verify-fw-package.sh", *tars)
+    listed = d / "verified"
+    promote = lambda: run(ingest / "promote-store-fw-package.sh", listed, env=env)
+    refusals = [  # (package, what the sandbox says)
         (package(1, signed=("MANIFEST", "publickey")), "image-bmc or its signature image-bmc.sig is missing"),
         (package(2, changed=b"!"), "image-bmc: its signature doesn't verify with openbmc-dev.pub"),
         (package(3, drop=("image-bmc",)), "image-bmc or its signature image-bmc.sig is missing"),
         (package(4, key="other"), "its signature doesn't verify with openbmc-dev.pub"),
         (package(5, signed=()), "MANIFEST or its signature MANIFEST.sig is missing"),
+        (package(6, machine="romulus"), "built for romulus, not gb200nvl-obmc"),
+        (package(7, extra={"image-full.sig": "/etc/passwd"}), "image-full.sig isn't a regular file"),
+        (package(8, extra={"run.sh": b"#!/bin/sh"}), "holds run.sh, which isn't an OpenBMC package's"),
     ]
     for tar, says in refusals:
-        refused = gate(tar)
-        assert refused.returncode == 1 and says in refused.stderr, (tar.name, refused.stderr)
-    assert not uploads.exists(), "a refused package reached the store"
-    passed = gate(package(6))
+        refused = verify(tar)
+        assert refused.returncode == 1 and says in refused.stderr and not refused.stdout, (tar.name, refused.stderr)
+    refused = verify(package(9), refusals[0][0])  # one bad package: none is listed
+    assert refused.returncode == 1 and not refused.stdout, refused.stdout
+
+    passed = verify(package(9))
     assert passed.returncode == 0, passed.stderr
-    assert "gb200nvl-6.static.mtd.all.tar" in uploads.read_text()
+    sha = hashlib.sha256((d / "gb200nvl-9.static.mtd.all.tar").read_bytes()).hexdigest()
+    assert passed.stdout == f"gb200nvl-9.static.mtd.all.tar {sha} 2.9\n", passed.stdout
+    for line, says in [(f"gb200nvl-9.static.mtd.all.tar {'0' * 64} 2.9", "changed since the sandbox verified it"),
+                       (f"gb200nvl-9.static.mtd.all.tar;reboot {sha} 2.9", "not a line the sandbox writes")]:
+        listed.write_text(line + "\n")
+        refused = promote()
+        assert refused.returncode == 1 and says in refused.stderr, refused.stderr
+    assert not uploads.exists(), "a refused package reached the store"
+    listed.write_text(passed.stdout)
+    promoted = promote()
+    assert promoted.returncode == 0, promoted.stderr
+    assert "gb200nvl-9.static.mtd.all.tar" in uploads.read_text()
     catalog = (d / "control" / "catalog" / "lab" / "images.yaml").read_text()
-    assert '"2.6": {file: "images/gb200nvl-6.static.mtd.all.tar"' in catalog
+    assert f'"2.9": {{file: "images/gb200nvl-9.static.mtd.all.tar", sha256: "{sha}"}}' in catalog
     assert (d / "lab" / "bmc.mtd").read_bytes() == b"firmware"
-    assert not (d / "gb200nvl-6.static.mtd.all.tar").exists()  # the store keeps the only copy
+    assert not (d / "gb200nvl-9.static.mtd.all.tar").exists() and not listed.exists()  # the store keeps the only copy
 
 
 # No way back, no image of the running version to reinstall, blocks unless --accept-no-rollback
@@ -272,6 +300,35 @@ def test_post_check():
     found[TASK] = task("Exception", "Critical")
     assert rollout.after_checks(found, BMC, TARGET, before)[0] is False
     assert rollout.after_checks(found, BMC, TARGET, rollout.before_state(found, RUNNING))[0] is True
+
+
+# How the running version is known, marked on the post-check: self-reported, as on the lab BMC, which offers no
+# ComponentIntegrity, unless an enabled SPDM one targets or protects the component: its firmware inventory entry, or the
+# manager it belongs to. One for another component, a TPM one, or a disabled one leaves it self-reported. The poller's
+# capabilities count each type a model offers
+def test_attestation():
+    def version_detail(found):
+        checks = rollout.after_checks(found, BMC, TARGET, rollout.before_state(lab(), RUNNING))[1]
+        return next(c["detail"] for c in checks if c["check"] == "running version")
+    def integrity(n, kind="SPDM", target=None, protects=(), enabled=True):
+        return {"@odata.type": "#ComponentIntegrity.v1_3_0.ComponentIntegrity", "Id": n, "ComponentIntegrityType": kind,
+                "ComponentIntegrityEnabled": enabled, "TargetComponentURI": target,
+                "Links": {"ComponentsProtected": [{"@odata.id": u} for u in protects]}}
+    ci = "/redfish/v1/ComponentIntegrity"
+    assert version_detail(running(lab(), TARGET)) == f"{TARGET}, target {TARGET} · self-reported"
+    for offered in ({f"{ci}/GPU_0": integrity("GPU_0", target="/redfish/v1/Chassis/HGX_GPU_0")},
+                    {f"{ci}/TPM": integrity("TPM", kind="TPM", target=FW)},
+                    {f"{ci}/off": integrity("off", target=FW, enabled=False)}):
+        assert version_detail({**running(lab(), TARGET), **offered}).endswith("· self-reported"), offered
+    for offered in ({f"{ci}/BMC_0": integrity("BMC_0", target=FW)},
+                    {f"{ci}/BMC_0": integrity("BMC_0", target="/redfish/v1/Chassis/x", protects=[MGR])}):
+        assert version_detail({**running(lab(), TARGET), **offered}).endswith(
+            f"· SPDM offered ({ci}/BMC_0), not verified"), offered
+    snap = {"host": "h", "resources": lab()}
+    assert poller.capabilities(("-", "-"), [snap])[-1] == "-"
+    snap["resources"].update({f"{ci}/GPU_{i}": integrity(f"GPU_{i}") for i in range(2)},
+                             **{f"{ci}/TPM": integrity("TPM", kind="TPM")}, **{f"{ci}/off": integrity("off", enabled=False)})
+    assert poller.capabilities(("-", "-"), [snap])[-1] == "SPDM 2 · TPM 1"
 
 
 # One host through the update, the network replaced: first and rollback are what the update and the rollback's
@@ -722,10 +779,14 @@ def test_exposition():
     poller.schema_file = lambda name: {}  # offline: the unit comes from ReadingUnits
     # lambda n: the n-th sensor, every one named PSU
     sensor = lambda n: {"@odata.type": "#Sensor.v1_2_0.Sensor", "Name": "PSU", "Reading": 30 + n, "ReadingUnits": "Cel",
-                        "Thresholds": {"UpperCritical": {"Reading": 90}}, "Status": {"Health": "Warning"}}
+                        "PhysicalContext": "PowerSupply", "Thresholds": {"UpperCritical": {"Reading": 90}},
+                        "Status": {"Health": "Warning"}}
     fan = {"Name": "Fan1", "Reading": 5000, "ReadingUnits": "RPM", "LowerThresholdNonCritical": 600,
            "UpperThresholdCritical": 0}  # an upper 0: no threshold set (iLO 4)
+    absent = {"@odata.type": "#Sensor.v1_2_0.Sensor", "Name": "PCI 1", "Reading": 0, "ReadingUnits": "Cel",
+              "Status": {"State": "Absent"}}  # a part not there (iLO 4 reports 0 °C): no reading
     found = {poller.ROOT: {}, **{f"/redfish/v1/Chassis/1/Sensors/{n}": sensor(n) for n in (1, 2)},
+             "/redfish/v1/Chassis/1/Sensors/absent": absent,
              "/redfish/v1/Chassis/1/Thermal": {"@odata.type": "#Thermal.v1_7_0.Thermal", "Fans": [fan]}}
     out = poller.exposition({"host": "h"}, found, 1.0)
     series = [line.rsplit(" ", 1)[0] for line in out]
@@ -733,6 +794,9 @@ def test_exposition():
     thresholds = sorted(line for line in out if line.startswith("redfish_reading_threshold"))
     assert len(thresholds) == 3 and all('threshold="UpperCritical"} 90' in t for t in thresholds[1:]), thresholds
     assert 'sensor="Fan1",property="Reading",unit="RPM",threshold="LowerCaution"} 600' in thresholds[0], thresholds
+    # each reading's PhysicalContext as its context, the dashboards' component panels; '-' when it reports none
+    assert all('kind="Temperature",context="PowerSupply"' in t for t in thresholds[1:]), thresholds
+    assert 'context="-"' in thresholds[0], thresholds
     assert sum(line.startswith("redfish_health{") and 'health="Warning"' in line for line in out) == 2
     crossed = sorted(line.rsplit(" ", 1)[1] for line in out if line.startswith("redfish_reading_crossed"))
     assert crossed == ["0", "0", "0"], crossed  # the sensors under their 90, the fan over its 600

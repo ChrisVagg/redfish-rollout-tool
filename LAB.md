@@ -35,23 +35,29 @@ Each lab BMC is four layers in one Docker container ([lab/](lab/)):
 The top lane of the drawing:
 
 1. **OpenBMC builds a package.** Each Jenkins build of the GB200 NVL machine leaves one update package, a `.tar` with
-   `image-bmc` (the whole 64 MiB flash), `MANIFEST` (its version), `publickey`, and an RSA-SHA256 signature for each.
-2. **[control/ingest/download-fw-images.sh](control/ingest/download-fw-images.sh) downloads the two newest** into
-   `control/ingest/staging/` (Jenkins keeps only the last three, so no build can be pinned). It does nothing else.
-3. **[control/ingest/promote-fw-images.sh](control/ingest/promote-fw-images.sh) promotes them**: it checks each
-   package's signatures, uploads it into the store and deletes the download, making the store the source for the
-   cache and rollout copies. From the verified packages it writes the catalog, `control/catalog/lab/images.yaml` (each
-   package's path in the store and its sha256) and `control/catalog/lab/baseline.yaml`, which approves the newer build,
-   so the first rollout is a real update; and `lab/bmc.mtd`, the older build's `image-bmc`, for the lab hardware.
-4. **The first boot.** The BMC image carries `bmc.mtd`; each container copies it once into its own flash volume, and
+   `image-bmc` (the whole 64 MiB flash), `MANIFEST` (its version and the machine it's built for), `publickey`, an
+   RSA-SHA256 signature for each, and `image-full.sig`, one over them together.
+2. **[control/ingest/download-fw-package.sh](control/ingest/download-fw-package.sh) downloads the two newest** over
+   HTTPS into `control/ingest/staging/` (Jenkins keeps only the last three, so no build can be pinned). It never opens
+   a package.
+3. **[control/ingest/verify-fw-package.sh](control/ingest/verify-fw-package.sh) checks them in the sandbox**, a
+   container with no network ([the ingest's sandbox](#the-ingests-sandbox)): each package's files, signatures and
+   machine. It writes nothing, and lists only the packages that passed, into `control/ingest/staging/verified`.
+4. **[control/ingest/promote-store-fw-package.sh](control/ingest/promote-store-fw-package.sh) promotes what it
+   listed**: it checks each package's sha256 again, uploads it into the store and deletes the download, making the
+   store the source for the cache and rollout copies. It writes the catalog, `control/catalog/lab/images.yaml` (each
+   package's path in the store and its sha256) and `control/catalog/lab/baseline.yaml`, which approves the newer
+   build, so the first rollout is a real update; and `lab/bmc.mtd`, the older build's `image-bmc`, for the lab
+   hardware.
+5. **The first boot.** The BMC image carries `bmc.mtd`; each container copies it once into its own flash volume, and
    QEMU boots the BMC from that flash. The lab starts on the older build, and an update survives a restart.
-5. **`make lab-up` runs it all in order**: the control plane with its store, both scripts when the catalog, baseline
-   or boot image is missing, a check that the store holds every package the catalog names, the lab site with its
-   cache, then the BMCs, in batches.
-6. **The rollout fetches and pushes.** Pre-flight downloads the package it needs from the cache into `lab/spool/`, the
+6. **`make lab-up` runs it all in order**: the control plane with its store, the three ingest steps when the catalog,
+   baseline or boot image is missing, a check that the store holds every package the catalog names, the lab site with
+   its cache, then the BMCs, in batches.
+7. **The rollout fetches and pushes.** Pre-flight downloads the package it needs from the cache into `lab/spool/`, the
    agent's own copy, and checks its sha256 against the catalog, before a byte of it reaches a BMC; the update pushes
    the whole package to the BMC's `MultipartHttpPushUri`.
-7. **The BMC applies it.** OpenBMC's software manager on the BMC takes the package and applies `image-bmc` to the flash
+8. **The BMC applies it.** OpenBMC's software manager on the BMC takes the package and applies `image-bmc` to the flash
    when the BMC resets, the rollout's reset step; QEMU then boots the new version. `make lab-reset` deletes only the
    BMCs' flash volumes after stopping the lab; `make lab-up` then boots the older build again. The store keeps its
    packages. `make lab-clean` deletes the BMCs' flash and the lab's catalog, so the next `make lab-up` ingests
@@ -82,23 +88,45 @@ separate: an independently powered BMC can remain available while the host is of
 [Dell documents for iDRAC](https://www.dell.com/support/kbdoc/en-us/000179517/dell-poweredge-how-to-configure-the-idrac-system-management-options-on-servers).
 This lab emulates the BMC only, so its System resource does not validate a real host's CPU, GPU or workload health.
 
+### The ingest's sandbox
+
+[control/ingest/verify-fw-package.sh](control/ingest/verify-fw-package.sh) is the only code that opens a package from
+outside, so it runs in the control plane's `sandbox` service, once per ingest (`docker compose run`, never `up`), with
+nothing it could misuse: no network (loopback only), a read-only root, the account `nobody`, no capabilities and no way
+to gain one, its scratch space in memory (256 MiB, `/tmp`), and `control/ingest/` mounted read-only
+([control/docker-compose.yaml](control/docker-compose.yaml)). A crafted package that breaks `tar` or `openssl` there
+can't reach the network, the store, Docker or the control plane's secrets. A package passes only if:
+
+- it holds an OpenBMC package's files and nothing else, each a regular file, checked before anything is unpacked: no
+  path, link or device is ever written;
+- its MANIFEST, its key (`publickey`) and its image (`image-bmc`) each have an RSA-SHA256 signature, and every
+  signature verifies against the key pinned in the repository,
+  [control/ingest/openbmc-dev.pub](control/ingest/openbmc-dev.pub), never against the key the package carries, which
+  anyone could replace together with the image;
+- its MANIFEST, once its signature verified, says it's a BMC image built for `gb200nvl-obmc`, the lab's machine.
+
+One package that fails stops them all: the sandbox lists nothing, and nothing reaches the store.
+[control/ingest/promote-store-fw-package.sh](control/ingest/promote-store-fw-package.sh) takes nothing in the list on
+trust: each line must be one the sandbox writes, for a package in `staging/`, and each sha256 must still be its file's,
+so a package changed after the sandbox checked it is refused; every line is checked before the first upload.
+
+What it doesn't fix: the pinned key is OpenBMC's development key, and its private half is public in OpenBMC's source
+tree, so anyone can sign a modified package with it. In the lab the checks show how the verification works (required
+files, a pinned key, a refusal before the store) and protect nothing; production needs the vendor's signing key
+pinned, whose private half only the vendor holds. The download runs on the control host itself, over HTTPS from
+OpenBMC's Jenkins; production fetches on a quarantine host whose only way out is the vendor
+([the supply chain](PROD.md#supply-chain-firmware-image-lifecycle)).
+
 ### The image store and cache
 
 The control plane runs the **image store**, and each site its **image cache** in front of it, matching the proposed
-production design. [control/ingest/promote-fw-images.sh](control/ingest/promote-fw-images.sh) is the ingest gate: a
-package must hold its MANIFEST, its key
-(`publickey`) and its image (`image-bmc`), each with an RSA-SHA256 signature, and every signature must verify against
-the key pinned in the repository, [control/ingest/openbmc-dev.pub](control/ingest/openbmc-dev.pub), never against the key the package
-carries, which anyone could replace together with the image. A package that fails never reaches the store. The pinned
-key is OpenBMC's development key, and its private half is public in OpenBMC's source tree: anyone can sign a modified
-package with it. In the lab the gate shows how the verification works (required files, a pinned key, a refusal before
-the store), and protects nothing. Production needs the vendor's signing key pinned, whose private half only the vendor
-holds.
+production design. A package reaches the store only through the ingest's three steps, and the sandbox's checks are its
+gate.
 
-The store is SeaweedFS. `promote-fw-images.sh` uploads into its `firmware` bucket through the internal Filer using
-`docker compose exec`; the S3 interface, on 127.0.0.1:8333 for the sites' caches, allows anonymous reads only
-([control/store/](control/store/access.json)). The signature gate belongs to the ingest script, not the storage service:
-an administrator with Filer or Docker access can bypass it. Packages use build-number filenames; storage does not
+The store is SeaweedFS. `promote-store-fw-package.sh` uploads into its `firmware` bucket through the internal Filer
+using `docker compose exec`; the S3 interface, on 127.0.0.1:8333 for the sites' caches, allows anonymous reads only
+([control/store/](control/store/access.json)). The checks belong to the ingest's scripts, not the storage service: an
+administrator with Filer or Docker access can bypass them. Packages use build-number filenames; storage does not
 enforce immutable, digest-addressed objects here.
 
 The cache is the lab site's nginx over HTTPS on `127.0.0.1:8443`, with a self-signed certificate `make site-up`
@@ -214,7 +242,13 @@ Every host, in the canary and in each wave, goes through six steps; the hosts of
 5. **post-check**: the target version runs, health is no worse than before (a system or manager that reported no
    health before and still doesn't passes; one that is gone fails), and no new job or task failed or hangs.
    When it fails, roll back: reinstall the version from before, reset, check again. A host that can't be rolled back
-   stays drained for a person (`needs_attention`).
+   stays drained for a person (`needs_attention`). The running-version check also says how the version is known:
+   `self-reported`, the firmware's own word in its `SoftwareInventory`, unless the BMC offers SPDM attestation for the
+   component, a `ComponentIntegrity` resource that targets or protects its firmware inventory entry or the resource
+   it belongs to: then `SPDM offered (<its URI>), not verified`. The rollout never asks for or checks the signed
+   measurements; that is [production's](PROD.md#future-work-spdm-attestation-in-the-post-check). The lab's GB200 BMC
+   offers no `ComponentIntegrity`, nor does any model of the production fleet, so every lab update reads
+   `self-reported`.
 6. **undrain**: the host goes back to the scheduler after an update, a rollback, or a failure before the reset; only a
    host left for a person stays drained. An undrain that fails leaves the host `needs_attention`: its firmware may be
    fine, but it isn't back in service.
@@ -434,7 +468,7 @@ another canary. `docker compose -f lab/docker-compose.yaml restart bmc1` clears 
 
 ## Test-driven development
 
-`make test` runs 27 tests in [tests/test_rollout.py](tests/test_rollout.py), with no BMC. It tests the decisions that keep a
+`make test` runs 29 tests in [tests/test_rollout.py](tests/test_rollout.py), with no BMC. It tests the decisions that keep a
 bad image from spreading, on real Redfish data: the lab BMC as a collect saved it
 ([tests/testdata/openbmc-gb200.json](tests/testdata/openbmc-gb200.json)), with one fact changed per case.
 
@@ -442,12 +476,13 @@ bad image from spreading, on real Redfish data: the lab BMC as a collect saved i
 |---|---|
 | Pre-flight (`check`) | go; a skip when already on the baseline or nothing is approved for the model; a downgrade, or an order nobody can tell, blocked unless `--allow-downgrade` (dotted integers compare as numbers: 2.9 to 2.10 is up); a missing image, a sha256 that doesn't match, an image over `MaxImageSizeBytes`; no image to reinstall blocked unless `--accept-no-rollback`, even with an A/B bank reported; a reset that restarts the host blocked without a drain; an unreachable BMC, `Updateable` false, a Critical manager or a failed task blocked, a running task skipped |
 | Post-check (`after_checks`) | the target runs; health no worse than before; a manager gone since fails; no new failed task. A task that says `Completed` while the old firmware still runs fails it |
+| Attestation (`evidence`, `capabilities`) | the running version marked `self-reported` on the lab BMC; `SPDM offered (...), not verified` only when an enabled SPDM `ComponentIntegrity` targets or protects the component's firmware entry or its manager; one for another part, a TPM one or a disabled one leaves it `self-reported`; the poller counts each type a model offers |
 | One host (`run_host`, `scheduler`) | a failure before the reset: the old firmware still runs, nothing to roll back; after it: the version that ran before is reinstalled, not the target; a failed rollback, or none possible: `needs_attention`; a drain that fails or runs past its timeout fails the host before any update; an undrain that fails: `needs_attention`; a BMC that isn't the one the plan approved is blocked |
 | The frozen plan (`changed_inputs`) | an input file changed or gone since the plan stops the run |
 | The writable gate (`run`) | `run --yes` refuses a planned host NetBox doesn't tag `writable`, before the state database, any lock or any update |
 | The inventory (`load_servers`) | NetBox's devices, page by page: a config context's connection keys merged in, `canary` and `writable` from tags only (a context's `writable` ignored); a device without an out-of-band IP, without an account named `X_USERNAME` and `X_PASSWORD` that is set (not another of the tool's secrets), or not reached over HTTPS skipped; no token, a site with no host, NetBox down or answering something else than JSON stops collect and plan with why |
 | The gate (`gate`) | any failure halts the canary and the strict waves; a later wave halts over `failure_rate`, exactly `failure_rate` passes; a host that failed its soak halts any wave; blocked and skipped hosts were never tried |
-| The ingest gate (`control/ingest/promote-fw-images.sh`) | a package signed with the pinned key is uploaded and written into the catalog; one without its image's signature, with its image changed after signing, without a required file, signed with another key, or not signed at all, is refused, and nothing reaches the store |
+| The ingest (`verify-fw-package.sh`, `promote-store-fw-package.sh` in `control/ingest/`) | a package signed with the pinned key and built for `gb200nvl-obmc` is listed by the sandbox's script, then uploaded and written into the catalog; one without its image's signature, with its image changed after signing, without a required file, signed with another key, not signed at all, built for another machine, or holding a link or a file that isn't an OpenBMC package's is refused, and with it every package: nothing is listed. The promotion refuses a package changed since it was listed, and a line the sandbox doesn't write, and nothing reaches the store |
 | The image cache (`image_problems`) | an image fetched from a real HTTP server into the agent's copy and checked; one the cache doesn't have, or bytes that don't match, block, and the bad copy is deleted |
 | Who (`actor`, `approval`) | `ROLLOUT_ACTOR` wins, else the account sudo came from, else the account, at the host; a catalog file's commit, its author and whether it changed since, nothing for a file git doesn't track |
 | Cancelling (`pipeline_report`, `soak`) | a cancelled pipeline reports CANCELLED and who asked, its waves that never started not run; a soak under way ends at once and re-checks nothing |
@@ -464,8 +499,8 @@ breaks one rule of the tools at a time the way a careless edit would: a downgrad
 versions compared as text, a sha256 mismatch ignored, the rollback installing the target, the gate halting at exactly
 `failure_rate`, an image never fetched from the cache, an A/B bank counted as a way back, a host reset with no drain, a
 changed plan run anyway, a held lock let through, `writable` taken from a config context, an untagged host run
-with `--yes`, any secret sent as a BMC login, and 22 more. For each break, the test that guards the rule must
-fail: 35 of 35 do. Its first run found a
+with `--yes`, any secret sent as a BMC login, SPDM claimed for another part, and 22 more. For each break, the test that guards the rule must
+fail: 36 of 36 do. Its first run found a
 gap: the strict-wave case had enough failures to halt anyway, so it passed with wave 1 not strict; the case now has 1
 failure in 11 hosts.
 
@@ -489,7 +524,7 @@ touching the BMCs:
 | `make firmware` | baseline compliance per host, then firmware per model against the baseline |
 | `make inventory` | one row per host: identity, CPUs, GPUs, memory, drives, NICs, PSUs |
 | `make telemetry` | every sensor of every host with its thresholds; the hottest and highest power per host |
-| `make capabilities` | what each hardware model can do: Redfish version, services, actions, update methods |
+| `make capabilities` | what each hardware model can do: Redfish version, services, actions, update methods, and Attestation: its `ComponentIntegrity` resources by type, `SPDM 4 · TPM 1`, or `-` when it offers none (every model today) |
 | `make diff` | what changed since the previous collect |
 
 `make detail HOST=…` shows everything about one host, and `make views` writes every view into `<site>/reports/` as
@@ -503,12 +538,12 @@ agent ([site/](site/docker-compose.yaml)). Every port is on 127.0.0.1:
 
 | Service | What it does |
 |---|---|
-| The exporter, a site's (lab `:9101`, prod `:9102`) | `poller.py exporter`: crawls every BMC of its site, each on its own loop, and serves the latest read on `/metrics`: what the equipment is (`redfish_host_info`: the inventory's vendor, project and rack, the BMC's Manufacturer and Model), whether it answered (`redfish_up`) and how many of its GETs failed (`redfish_failed_requests`: what they would have read is missing from that read), every reading with its unit (`redfish_reading`), its thresholds (`redfish_reading_threshold`) and how far past them it is (`redfish_reading_crossed`: 0 within, 1 caution, 2 critical, 3 fatal, upper or lower), the health of every object with a `Status`, each fan and power supply too (`redfish_health`), each firmware component with its running version, whether Redfish can update it and how an image gets in, push or pull, the same checks as `rollout.py plan` (`redfish_firmware_info`), the BMC's last reset (`LastResetTime`), its memory and free storage (`ManagerDiagnosticData`), and every network interface and port, each `EthernetInterface` and a `NetworkAdapter`'s and the Manager's network `Port`s, with its `LinkStatus` (`redfish_network_link`: 4 LinkUp, 3 Training, 2 Starting, 1 LinkDown, 0 NoLink, -1 not reported) and its speed (`redfish_network_speed_mbps`). Standard properties only, read as `collect` reads them. The lab every 10 s on `:9101`; prod every 30 s on `:9102` (a crawl can take longer; see [the production exporter](PROD.md#the-exporter-on-the-real-fleet)), read-only, with `prod/.env`'s accounts; with no device in its NetBox site (prod, on a fresh clone) it reads nothing and stays up. It reads its site's hosts from NetBox when it starts: a host added since is read once it restarts. |
+| The exporter, a site's (lab `:9101`, prod `:9102`) | `poller.py exporter`: crawls every BMC of its site, each on its own loop, and serves the latest read on `/metrics`: what the equipment is (`redfish_host_info`: the inventory's vendor, project and rack, the BMC's Manufacturer and Model), whether it answered (`redfish_up`) and how many of its GETs failed (`redfish_failed_requests`: what they would have read is missing from that read), every reading with its unit and its `PhysicalContext` (`redfish_reading`; `context` is `CPU`, `GPU`, `Memory` and so on, `-` when the BMC reports none; a part the BMC reports `Absent` has no reading), its thresholds (`redfish_reading_threshold`) and how far past them it is (`redfish_reading_crossed`: 0 within, 1 caution, 2 critical, 3 fatal, upper or lower), the health of every object with a `Status`, each fan and power supply too (`redfish_health`), each firmware component with its running version, whether Redfish can update it and how an image gets in, push or pull, the same checks as `rollout.py plan` (`redfish_firmware_info`), the BMC's last reset (`LastResetTime`), its memory and free storage (`ManagerDiagnosticData`), and every network interface and port, each `EthernetInterface` and a `NetworkAdapter`'s and the Manager's network `Port`s, with its `LinkStatus` (`redfish_network_link`: 4 LinkUp, 3 Training, 2 Starting, 1 LinkDown, 0 NoLink, -1 not reported) and its speed (`redfish_network_speed_mbps`). Standard properties only, read as `collect` reads them. The lab every 10 s on `:9101`; prod every 30 s on `:9102` (a crawl can take longer; see [the production exporter](PROD.md#the-exporter-on-the-real-fleet)), read-only, with `prod/.env`'s accounts; with no device in its NetBox site (prod, on a fresh clone) it reads nothing and stays up. It reads its site's hosts from NetBox when it starts: a host added since is read once it restarts. |
 | The Prometheus agent, a site's (lab `:9201`, prod `:9202`) | Prometheus in agent mode beside the exporter: it scrapes it every 10 s and pushes every sample to the control plane's Prometheus (remote write, [lab/prometheus-agent.yml](lab/prometheus-agent.yml)), so the control plane never connects into a site. It keeps no history, only what it hasn't sent yet. |
 | Pushgateway `:9091` | Where `rollout.py run` pushes its report as metrics after every recorded event (`PUSHGATEWAY`): hosts by wave and state, versions, every step's duration, every check after the flash, each gate. A plan that blocks every host pushes its blocked hosts and the halt, as stage `plan`. Best effort: if it is down, the rollout logs it once and goes on. It holds each run's latest push in memory, until deleted or restarted; the dashboards don't depend on it. They read Prometheus's history: the Pipeline dashboard lists the pipelines with data in the selected time range (24 hours by default) and shows each as its last push in that range left it, so a pipeline from days ago opens the same as a live one, for the 15 days Prometheus keeps it. That holds because no series vanishes between two pushes of a run: every state is pushed, 0 or not, and a host's info, whose labels change as it moves on, carries the time of its latest event, so the dashboard keeps its newest row. |
-| Loki `:3100` | Where `rollout.py run` sends every event of its run record as it writes it (`LOKI`): each step of each host with its detail, the Task's messages, the checks. Labelled only `job` and `site`; the pipeline, stage, wave, host and step are fields of the JSON line, which LogQL's `json` reads, so it stays one stream per site however many hosts and pipelines there are. Keeps 15 days, best effort like the Pushgateway. |
-| Prometheus `:9090` | Takes the sites' agents' samples, each labelled with its `site` (remote write), and scrapes the Pushgateway; keeps 15 days. Its admin API is on, on 127.0.0.1 only, so a pipeline's history can be deleted, and the Pipeline dashboard no longer lists it: `curl -X POST -g 'http://127.0.0.1:9090/api/v1/admin/tsdb/delete_series?match[]={pipeline="<pipeline>"}'`, then `curl -X POST http://127.0.0.1:9090/api/v1/admin/tsdb/clean_tombstones` frees the space. Its events stay in Loki. |
-| Grafana `:3000` | Three data sources: Prometheus, Loki, and the state database as **State**, read with an account that may only read. A **Lab** and a **Prod** folder, three shared dashboards in each, fixed to its site, plus Update details in Lab. **Fleet manager**, every BMC: BMCs answering, worst health, readings past critical, a row per host with its equipment (vendor, manufacturer, model, project, rack) and failed GETs that opens its own dashboard, Redfish up, down or updating over time (a firmware update's reset shows as updating, not down), firmware by hardware model and version (two versions of one component on one model is drift) and by host with Updateable, Push and Pull, the readings nearest their upper critical, everything not OK, the BMCs' own memory and storage. **Host**, one BMC: what it is, its firmware inventory and what Redfish can update and how, the health of every component, worst first, its network interfaces and ports (link, speed, InterfaceEnabled, MAC, IPv4) and each link over time, then a row each for Chassis · Thermal, Chassis · Power, Systems and Managers (the BMC itself): a chart per kind of reading, in its unit, with min, max, mean and last in the legend and each reading's caution and critical thresholds as dashed lines (orange, red), and every firmware update of the host, from the state database. **Pipeline**, per pipeline, from both Prometheus and Loki, laid out as an operations page (no auto-refresh, as a finished pipeline doesn't change: the pipeline list says which is running, passed or halted, and the Result panel's Follow live link refreshes every 30 s): the run (site, component, target, `OperationApplyTime`, the scenario `make fault` ran or none, elapsed, how fresh the last event is); the verdict, PASSED, RUNNING, HALTED or CANCELLED, with how the latest stage ended in words; five counts (updated and verified, rolled back and failed, needing a person and blocked, running and not started, still drained); the plan, first as in a pipeline (the policy it used, and every host's pre-flight verdict with its wave, running version, target, its update's activation, whether the host restarts, and the rollback the rollout would carry out), beside the gate after the canary and each wave, with what halts it (any failure, or over `failure_rate`), and each wave's progress; the host evidence, one row per host with its wave, its versions before and after, and each step's outcome, numbered as a host goes through them (1 pre-flight, 2 drain, 3 update with its Task message, 4 reset with its seconds, 5 post-check and a rollback, 6 undrain, then the soak and the outcome), each host linking to its every event and its own dashboard; checks and recovery counted per numbered step beside the decision log, the plan saved first. Below: one host's every event (opened from its link in the host evidence), every host's step on a timeline, the BMCs answering Redfish, the longest steps and each reset's time, every error and every failed check, and the locks as they are now, from the state database. The **Gate markers** switch at the top draws each gate's decision on the timelines. **Update details** (the lab only): how a BMC firmware update runs here, four facts checked against the DMTF schemas and on a lab BMC (`OnReset`, the Manager's reset alone, a Task and no Job, nothing staged to cancel), the rollback per resource the rollout updates, and per pipeline, stage by stage: the plan (every host's pre-flight verdict, and each of its checks against every host, ✓ or ✗ with why), step 1's pre-flight again on a fresh read with the BMC's identity and its checks, then the drain, the push, the Task, the reset and each host's rollback. |
+| Loki `:3100` | Where `rollout.py run` sends every event of its run record as it writes it (`LOKI`): each step of each host with its detail, the Task's messages, the checks. Labelled only `job` and `site`; the pipeline, stage, wave, host and step are fields of the JSON line, which LogQL's `json` reads, so it stays one stream per site however many hosts and pipelines there are. Keeps 30 days (`retention_period`, its compactor deletes older chunks), best effort like the Pushgateway. |
+| Prometheus `:9090` | Takes the sites' agents' samples, each labelled with its `site` (remote write), and scrapes the Pushgateway; keeps 30 days (`--storage.tsdb.retention.time`). Its admin API is on, on 127.0.0.1 only, so a pipeline's history can be deleted, and the Pipeline dashboard no longer lists it: `curl -X POST -g 'http://127.0.0.1:9090/api/v1/admin/tsdb/delete_series?match[]={pipeline="<pipeline>"}'`, then `curl -X POST http://127.0.0.1:9090/api/v1/admin/tsdb/clean_tombstones` frees the space. Its events stay in Loki. |
+| Grafana `:3000` | Three data sources: Prometheus, Loki, and the state database as **State**, read with an account that may only read. A **Lab** and a **Prod** folder, four shared dashboards in each, fixed to its site, plus Update details in Lab. Every panel is transparent, in a teal palette: teal shades for OK, up, passed, running and each reading's line, filled below it and fading down; thresholds stay dashed lines; orange and red still mean caution and critical. **Architecture**, the site's three diagrams from [docs/](docs/): its stack, its rollout step by step and its solution architecture, each opening full size on a click. **Fleet manager**, every BMC: BMCs answering, worst health, readings past critical, a row per host with its equipment (vendor, manufacturer, model, project, rack) and failed GETs that opens its own dashboard, Redfish up, down or updating over time (a firmware update's reset shows as updating, not down), firmware by hardware model and version (two versions of one component on one model is drift) and by host with Updateable, Push and Pull, the readings nearest their upper critical, everything not OK, the BMCs' own memory and storage. **Host**, one BMC: what it is, its firmware inventory and what Redfish can update and how, the health of every component, worst first, its network interfaces and ports (link, speed, InterfaceEnabled, MAC, IPv4) and each link over time, then Chassis · Thermal: a chart per `PhysicalContext` the BMC reports for its thermal readings, titled by it (DMTF's names: CPU, Memory, StorageDevice, SystemBoard, Intake, Fan...), so every thermal reading it exposes is in one, temperatures and fan speeds each on their own axis; then a row each for Chassis · Power, Systems and Managers (the BMC itself): a chart per kind of reading; every chart in its unit, with min, max, mean and last in the legend and each reading's caution and critical thresholds as dashed lines (orange, red), and every firmware update of the host, from the state database. **Pipeline**, per pipeline, from both Prometheus and Loki, laid out as an operations page (no auto-refresh, as a finished pipeline doesn't change: the pipeline list says which is running, passed or halted, and the Result panel's Follow live link refreshes every 30 s): the run (site, component, target, `OperationApplyTime`, the scenario `make fault` ran or none, elapsed, how fresh the last event is); the verdict, PASSED, RUNNING, HALTED or CANCELLED, with how the latest stage ended in words; five counts (updated and verified, rolled back and failed, needing a person and blocked, running and not started, still drained); the plan, first as in a pipeline (the policy it used, and every host's pre-flight verdict with its wave, running version, target, its update's activation, whether the host restarts, and the rollback the rollout would carry out), beside the gate after the canary and each wave, with what halts it (any failure, or over `failure_rate`), and each wave's progress; the host evidence, one row per host with its wave, its versions before and after, and each step's outcome, numbered as a host goes through them (1 pre-flight, 2 drain, 3 update with its Task message, 4 reset with its seconds, 5 post-check and a rollback, 6 undrain, then the soak and the outcome), each host linking to its every event and its own dashboard; checks and recovery counted per numbered step beside the decision log, the plan saved first. Below: one host's every event (opened from its link in the host evidence), every host's step on a timeline, the BMCs answering Redfish, the longest steps and each reset's time, every error and every failed check, and the locks as they are now, from the state database. The **Gate markers** switch at the top draws each gate's decision on the timelines. **Update details** (the lab only): how a BMC firmware update runs here, four facts checked against the DMTF schemas and on a lab BMC (`OnReset`, the Manager's reset alone, a Task and no Job, nothing staged to cancel), the rollback per resource the rollout updates, and per pipeline, stage by stage: the plan (every host's pre-flight verdict, and each of its checks against every host, ✓ or ✗ with why), step 1's pre-flight again on a fresh read with the BMC's identity and its checks, then the drain, the push, the Task, the reset and each host's rollback. |
 
 Every panel, as screenshots: [the lab](#the-lab-in-grafana) and [the production fleet](PROD.md#the-production-fleet-in-grafana).
 
@@ -540,7 +575,7 @@ event receiver and Redfish subscriptions are [future work](PROD.md#future-work-b
 Grafana is admin only: no anonymous access, the one account from `control/observability/grafana/.grafana.env`, which
 [grafana.ini](control/observability/grafana/grafana.ini) reads. Grafana creates it on its first start only; after that, change
 its password in the UI. The admin can change and save anything in the UI, and it stays in Grafana's volume across
-`make control-down` and up, except the seven provisioned dashboards (four Lab, three Prod): file provisioning reloads them from
+`make control-down` and up, except the nine provisioned dashboards (five Lab, four Prod): file provisioning reloads them from
 [control/observability/grafana/dashboards/](control/observability/grafana/dashboards/). To keep a change to one, export it over its
 lab file (Export → Export as JSON), or save it as a copy. Only the lab dashboards are kept in git: `make control-up`
 makes the prod ones from them ([prod_dashboards.py](control/observability/grafana/prod_dashboards.py): the same panels fixed
@@ -585,8 +620,8 @@ Every panel of the Lab folder's four dashboards, section by section, over the te
 The first image of each dashboard is its top; the rest follow it down the page. The pipelines are real rollouts on the lab:
 one where every gate passed, then the [bad updates](#bad-updates), each stopped at its gate.
 
-Five panels are empty in the lab and not shown here: the fleet's readings nearest their thresholds and what is not OK,
-and the host's thermal, power and system readings. QEMU emulates only the BMC, so there are no fans, temperatures or power
+Five panels are empty in the lab and not shown here: the fleet's readings nearest their thresholds and what is not
+OK, and the host's thermal, power and system readings. QEMU emulates only the BMC, so there are no fans, temperatures or power
 supplies behind it, and every component is OK; [the production screenshots](PROD.md#the-production-fleet-in-grafana) show these panels full.
 
 ### Fleet manager
@@ -628,7 +663,8 @@ every BMC; `silent-fail`'s two and `unhealthy`'s two on bmc1; `no-return`'s two 
 
 One BMC in full: what it is, whether it answers, its health and uptime; its firmware inventory with what Redfish can
 update and how; the health of every component; its network interfaces and ports, each link now and over time; then
-its readings by kind, and the BMC and its Redfish service.
+its thermal readings in a chart per `PhysicalContext` it reports, titled by it, with their thresholds; the rest of
+its readings by kind; and the BMC and its Redfish service.
 
 ![Lab · Host: one emulated BMC, its firmware and the health of every component](docs/grafana/lab/host.png)
 
@@ -760,9 +796,10 @@ Steps 2 to 4 and the rollback: the drain, the push, the Task, the reset, each ho
 ![The lab today, on the production system's layout](docs/lab-solution-architecture.svg)
 
 What the lab implements, drawn where [the production system](PROD.md#a-production-system---scaling-for-a-large-fleet) has
-each part; an empty place is a part it doesn't have yet. `control/ingest/download-fw-images.sh` downloads OpenBMC's
-builds; `control/ingest/promote-fw-images.sh` checks their signatures, uploads them into the SeaweedFS store, records their sha256
-and approves the newer. `make` is the CLI (`YES=1` approves; no API yet), `pipeline.sh`
+each part; an empty place is a part it doesn't have yet. `control/ingest/download-fw-package.sh` downloads OpenBMC's
+builds; `control/ingest/verify-fw-package.sh` checks them in the sandbox, with no network; and
+`control/ingest/promote-store-fw-package.sh` uploads them into the SeaweedFS store, records their sha256 and approves
+the newer. There is no quarantine host and no lab test. `make` is the CLI (`YES=1` approves; no API yet), `pipeline.sh`
 and `rollout.py` are the local pipeline controller, the YAML files the catalog, NetBox the inventory, and the run records
 and the state database (PostgreSQL: a lock per host, every event) the rollout state. There is no durable
 workflow service or resume yet.
