@@ -137,7 +137,7 @@ is a starting point for evaluating a receiver.
 Today the post-check says how it knows the running version: `self-reported`, the firmware's own word, or
 `SPDM offered (<uri>), not verified` when the BMC has a `ComponentIntegrity` resource for the component
 ([the rollout](LAB.md#how-the-rollout-works)). No model of the production fleet offers one: `make capabilities
-SITE=prod` shows Attestation `-` for all seven. Verifying it needs what software can't add: a device that answers
+SITE=prod` shows Attestation `-` for all seven, and Grafana's ComponentIntegrity panels, on Fleet manager and Host, are empty. Verifying it needs what software can't add: a device that answers
 [SPDM](https://www.dmtf.org/standards/spdm) (DSP0274) from a hardware root of trust, with a device certificate its
 vendor provisioned at manufacturing, and BMC firmware that asks it over MCTP and exposes the answer. The rollout's
 part, the verifier, is software; this design has not been implemented or tested:

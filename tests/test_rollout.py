@@ -324,6 +324,15 @@ def test_attestation():
                     {f"{ci}/BMC_0": integrity("BMC_0", target="/redfish/v1/Chassis/x", protects=[MGR])}):
         assert version_detail({**running(lab(), TARGET), **offered}).endswith(
             f"· SPDM offered ({ci}/BMC_0), not verified"), offered
+    # The exporter: one sample per ComponentIntegrity, with the BMC's own verdict on the part's identity; none without
+    assert not [s for s in poller.exposition({"host": "h"}, lab(), 1.0) if s.startswith("redfish_component_integrity")]
+    offered = integrity("GPU_0", target="/redfish/v1/Chassis/HGX_GPU_0", protects=[MGR])
+    offered.update(ComponentIntegrityTypeVersion="1.1.0", SPDM={"IdentityAuthentication": {"VerificationStatus": "Success"}})
+    out = [s for s in poller.exposition({"host": "h"}, {**lab(), f"{ci}/GPU_0": offered}, 1.0)
+           if s.startswith("redfish_component_integrity")]
+    assert out == [f'redfish_component_integrity{{host="h",resource="{ci}/GPU_0",id="GPU_0",type="SPDM",'
+                   f'type_version="1.1.0",target="/redfish/v1/Chassis/HGX_GPU_0",protects="{MGR}",enabled="true",'
+                   f'identity="Success"}} 1'], out
     snap = {"host": "h", "resources": lab()}
     assert poller.capabilities(("-", "-"), [snap])[-1] == "-"
     snap["resources"].update({f"{ci}/GPU_{i}": integrity(f"GPU_{i}") for i in range(2)},

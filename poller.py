@@ -558,6 +558,16 @@ def exposition(server, found, seconds) -> list[str]:
         out.append(sample("redfish_firmware_info", 1, host=host, component=component, version=text(version),
                           software_id=ids.get(component, "-"), updateable=updatable(found, component), push=push,
                           pull=pull))
+    # Each part whose integrity the BMC reports (ComponentIntegrity: SPDM or TPM), with the BMC's own verdict on its
+    # identity; nothing here checks its signed measurements (PROD.md, SPDM attestation)
+    for uri, d in of(found, "ComponentIntegrity"):
+        kind = text(d.get("ComponentIntegrityType"))
+        verdict = obj(obj(d.get(kind)).get("IdentityAuthentication")).get("VerificationStatus")
+        protects = filter(None, map(uri_of, obj(d.get("Links")).get("ComponentsProtected") or []))
+        out.append(sample("redfish_component_integrity", 1, host=host, resource=uri, id=text(d.get("Id")), type=kind,
+                          type_version=text(d.get("ComponentIntegrityTypeVersion")),
+                          target=text(d.get("TargetComponentURI")), protects=", ".join(protects) or "-",
+                          enabled=text(d.get("ComponentIntegrityEnabled")), identity=text(verdict)))
     for uri, d in of(found, "Manager"):
         if d.get("LastResetTime"):
             reset = datetime.fromisoformat(d["LastResetTime"]).timestamp()
