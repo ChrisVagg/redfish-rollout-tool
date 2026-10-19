@@ -645,17 +645,17 @@ The BMCs' own memory, free storage and crawl times
 
 ![Lab · Fleet manager: the BMCs' memory, storage and crawl times](docs/grafana/lab/fleet-1.png)
 
-**Damaged hosts.** The fleet during and after the [bad updates](#bad-updates). During `no-return`, its canary (bmc2,
-127.1.0.2) isn't back after its reset: one BMC not answering, its row `down` at the top of Hosts, its gap in Redfish
-answering. The earlier gaps on bmc1 are the resets of `silent-fail`'s and `unhealthy`'s updates and rollbacks; bmc8's, at
-the left, is the end of the update's wave 2.
+**Damaged hosts.** The fleet during and after the [bad updates](#bad-updates). During `no-return`, its canary (bmc1,
+127.1.0.1) isn't back after its reset: one BMC not answering, its row `down` at the top of Hosts, red at the end of its
+row in Redfish answering. Its earlier stretches are `unhealthy`'s and `silent-fail`'s updates and rollbacks, and the
+restart that cleared `rejected`'s Task; every other BMC answered throughout.
 
-![Lab · Fleet manager: bmc2 not answering during no-return](docs/grafana/lab/fleet-down.png)
+![Lab · Fleet manager: bmc1 not answering during no-return](docs/grafana/lab/fleet-down.png)
 
 After `hybrid`, every BMC answers and is OK, but the fleet is on two builds: two Manager (BMC) versions on one model,
-bmc1 and bmc2 on 1438 (build 1763) and the rest on 1448 (build 1764). The gaps are the hour's resets: the update's, on
-every BMC; `silent-fail`'s two and `unhealthy`'s two on bmc1; `no-return`'s two on bmc2; the restart of bmc1 that clears
-`rejected`'s Task; then `hybrid`'s: bmc1, bmc2, and bmc3's update and rollback.
+bmc1 and bmc2 on 1465 (build 1766) and the rest on 1458 (build 1765). On the timeline: bmc1 back after `no-return`,
+then `hybrid`'s resets, bmc1's, bmc2's, and bmc3's update and rollback, and last the restart of bmc4 that clears the
+aborted Task its refused image left.
 
 ![Lab · Fleet manager: after hybrid, two Manager (BMC) versions on one model](docs/grafana/lab/fleet-drift.png)
 
@@ -730,12 +730,12 @@ The errors: the Task's `Exception`, the host failed, the gate halted
 
 ![Lab · Pipeline: rejected, the errors](docs/grafana/lab/pipeline-rejected-errors.png)
 
-**`no-return`: the BMC didn't come back.** Pre-flight blocked bmc1 first: `rejected` had left its aborted Task there
-(see [Bad updates](#bad-updates)), so the plan took bmc2 as the canary. bmc2 wasn't back 45 s after its reset; the
-rollback reinstalled the version before, and its reset timed out too. Nothing is verified: `needs_attention`, for a
+**`no-return`: the BMC didn't come back.** bmc1 was the canary again: restarted after `rejected`, which had left
+its aborted Task there ([Bad updates](#bad-updates)), pre-flight no longer blocked it. bmc1 wasn't back 45 s after its
+reset; the rollback reinstalled the version before, and its reset timed out too. Nothing is verified: `needs_attention`, for a
 person.
 
-![Lab · Pipeline: no-return, bmc1 blocked by its failed Task, the canary needs a person](docs/grafana/lab/pipeline-no-return.png)
+![Lab · Pipeline: no-return, the canary needs a person](docs/grafana/lab/pipeline-no-return.png)
 
 The canary step by step: the update, the reset that timed out, the rollback whose reset timed out too
 

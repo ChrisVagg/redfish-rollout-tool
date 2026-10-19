@@ -181,13 +181,13 @@ for its hosts.
 
 ![Prod · Fleet manager](docs/grafana/prod/fleet.png)
 
-![Prod · Fleet manager: firmware and the readings nearest their thresholds](docs/grafana/prod/fleets-details-2.png)
+![Prod · Fleet manager: firmware, ComponentIntegrity by host, and the readings nearest their thresholds](docs/grafana/prod/fleets-details-2.png)
 
 ![Prod · Fleet manager: what is not OK, and crawl times](docs/grafana/prod/fleet-details-1.png)
 
 ### Host
 
-![Prod · Host: a Supermicro SYS-221H-TNR](docs/grafana/prod/supermicro.png)
+![Prod · Host: a Supermicro SYS-221H-TNR, its firmware, the health of every component and its ComponentIntegrity](docs/grafana/prod/supermicro.png)
 
 ![Prod · Host: thermal and power](docs/grafana/prod/supermicro-details.png)
 

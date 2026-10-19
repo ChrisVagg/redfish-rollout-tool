@@ -266,7 +266,11 @@
         }
        }
       }
-     ]
+     ],
+     "color": {
+      "mode": "fixed",
+      "fixedColor": "#39414f"
+     }
     },
     "overrides": []
    },
@@ -337,7 +341,11 @@
         }
        }
       }
-     ]
+     ],
+     "color": {
+      "mode": "fixed",
+      "fixedColor": "#39414f"
+     }
     },
     "overrides": []
    },
@@ -467,7 +475,11 @@
        }
       }
      ],
-     "noValue": "no thresholds"
+     "noValue": "no thresholds",
+     "color": {
+      "mode": "fixed",
+      "fixedColor": "#39414f"
+     }
     },
     "overrides": []
    },
@@ -1323,7 +1335,8 @@
       }
      ],
      "color": {
-      "mode": "thresholds"
+      "mode": "fixed",
+      "fixedColor": "text"
      },
      "thresholds": {
       "mode": "absolute",

@@ -279,7 +279,11 @@
         }
        }
       }
-     ]
+     ],
+     "color": {
+      "mode": "fixed",
+      "fixedColor": "#39414f"
+     }
     },
     "overrides": []
    },
@@ -645,7 +649,7 @@
            },
            "2": {
             "text": "updating",
-            "color": "#3ee6c4",
+            "color": "#c2fff1",
             "index": 2
            },
            "3": {
@@ -866,7 +870,7 @@
         },
         "2": {
          "text": "updating",
-         "color": "#3ee6c4",
+         "color": "#c2fff1",
          "index": 2
         },
         "3": {
@@ -878,7 +882,8 @@
       }
      ],
      "color": {
-      "mode": "thresholds"
+      "mode": "fixed",
+      "fixedColor": "text"
      },
      "thresholds": {
       "mode": "absolute",
