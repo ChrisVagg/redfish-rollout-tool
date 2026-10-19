@@ -832,7 +832,7 @@
     "x": 0,
     "y": 13,
     "w": 24,
-    "h": 7
+    "h": 12
    },
    "datasource": {
     "type": "prometheus",
@@ -897,6 +897,10 @@
         "value": 1
        }
       ]
+     },
+     "custom": {
+      "lineWidth": 2,
+      "fillOpacity": 20
      }
     },
     "overrides": []
@@ -905,7 +909,7 @@
     "showValue": "always",
     "alignValue": "center",
     "mergeValues": true,
-    "rowHeight": 0.8,
+    "rowHeight": 1,
     "legend": {
      "showLegend": false
     }
@@ -917,7 +921,7 @@
    "title": "Firmware: hosts per version",
    "gridPos": {
     "x": 0,
-    "y": 20,
+    "y": 25,
     "w": 9,
     "h": 10
    },
@@ -987,7 +991,7 @@
    "title": "Firmware per host",
    "gridPos": {
     "x": 9,
-    "y": 20,
+    "y": 25,
     "w": 15,
     "h": 10
    },
@@ -1235,7 +1239,7 @@
    "title": "ComponentIntegrity by host",
    "gridPos": {
     "x": 0,
-    "y": 30,
+    "y": 35,
     "w": 24,
     "h": 6
    },
@@ -1324,7 +1328,7 @@
    "title": "Closest to their upper critical threshold",
    "gridPos": {
     "x": 0,
-    "y": 36,
+    "y": 41,
     "w": 24,
     "h": 9
    },
@@ -1504,7 +1508,7 @@
    "title": "Not OK",
    "gridPos": {
     "x": 0,
-    "y": 45,
+    "y": 50,
     "w": 24,
     "h": 9
    },
@@ -1628,7 +1632,7 @@
    "title": "BMC memory available",
    "gridPos": {
     "x": 0,
-    "y": 54,
+    "y": 59,
     "w": 8,
     "h": 9
    },
@@ -1693,7 +1697,7 @@
    "title": "BMC free storage",
    "gridPos": {
     "x": 8,
-    "y": 54,
+    "y": 59,
     "w": 8,
     "h": 9
    },
@@ -1758,7 +1762,7 @@
    "title": "Crawl time",
    "gridPos": {
     "x": 16,
-    "y": 54,
+    "y": 59,
     "w": 8,
     "h": 9
    },

@@ -2284,8 +2284,8 @@
       "fixedColor": "transparent"
      },
      "custom": {
-      "fillOpacity": 85,
-      "lineWidth": 0
+      "fillOpacity": 20,
+      "lineWidth": 2
      }
     },
     "overrides": []
@@ -2293,7 +2293,7 @@
    "options": {
     "showValue": "always",
     "mergeValues": true,
-    "rowHeight": 0.85,
+    "rowHeight": 1,
     "alignValue": "center",
     "legend": {
      "showLegend": true,
@@ -2306,7 +2306,7 @@
     "x": 0,
     "y": 69,
     "w": 24,
-    "h": 9
+    "h": 12
    }
   },
   {
@@ -2315,9 +2315,9 @@
    "title": "The pipeline's BMCs answering Redfish",
    "gridPos": {
     "x": 0,
-    "y": 78,
+    "y": 81,
     "w": 24,
-    "h": 7
+    "h": 12
    },
    "targets": [
     {
@@ -2371,6 +2371,10 @@
         "value": 1
        }
       ]
+     },
+     "custom": {
+      "lineWidth": 2,
+      "fillOpacity": 20
      }
     },
     "overrides": []
@@ -2379,7 +2383,7 @@
     "showValue": "always",
     "alignValue": "center",
     "mergeValues": true,
-    "rowHeight": 0.8,
+    "rowHeight": 1,
     "legend": {
      "showLegend": false
     }
@@ -2391,7 +2395,7 @@
    "title": "Longest step, seconds",
    "gridPos": {
     "x": 0,
-    "y": 85,
+    "y": 93,
     "w": 12,
     "h": 8
    },
@@ -2528,7 +2532,7 @@
    "id": 24,
    "gridPos": {
     "x": 12,
-    "y": 85,
+    "y": 93,
     "w": 12,
     "h": 8
    }
@@ -2541,7 +2545,7 @@
    "panels": [],
    "gridPos": {
     "x": 0,
-    "y": 93,
+    "y": 101,
     "w": 24,
     "h": 1
    }
@@ -2769,7 +2773,7 @@
    "id": 26,
    "gridPos": {
     "x": 0,
-    "y": 94,
+    "y": 102,
     "w": 24,
     "h": 7
    },
@@ -2782,7 +2786,7 @@
    "title": "Checks after the flash that failed",
    "gridPos": {
     "x": 0,
-    "y": 101,
+    "y": 109,
     "w": 24,
     "h": 7
    },
@@ -2841,7 +2845,7 @@
    "id": 29,
    "gridPos": {
     "x": 0,
-    "y": 108,
+    "y": 116,
     "w": 24,
     "h": 1
    }
@@ -2935,7 +2939,7 @@
    "id": 30,
    "gridPos": {
     "x": 0,
-    "y": 109,
+    "y": 117,
     "w": 24,
     "h": 6
    },

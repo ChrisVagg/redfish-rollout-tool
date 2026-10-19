@@ -1280,7 +1280,7 @@
     "x": 0,
     "y": 39,
     "w": 24,
-    "h": 10
+    "h": 17
    },
    "targets": [
     {
@@ -1346,6 +1346,10 @@
         "value": null
        }
       ]
+     },
+     "custom": {
+      "lineWidth": 2,
+      "fillOpacity": 20
      }
     },
     "overrides": []
@@ -1354,7 +1358,7 @@
     "showValue": "always",
     "alignValue": "center",
     "mergeValues": true,
-    "rowHeight": 0.8,
+    "rowHeight": 1,
     "legend": {
      "showLegend": false
     }
@@ -1368,7 +1372,7 @@
    "id": 10,
    "gridPos": {
     "x": 0,
-    "y": 49,
+    "y": 56,
     "w": 24,
     "h": 1
    },
@@ -1379,7 +1383,7 @@
    "title": "$thermal_context",
    "gridPos": {
     "x": 0,
-    "y": 50,
+    "y": 57,
     "w": 12,
     "h": 10
    },
@@ -1725,7 +1729,7 @@
    "id": 13,
    "gridPos": {
     "x": 0,
-    "y": 60,
+    "y": 67,
     "w": 24,
     "h": 1
    },
@@ -1736,7 +1740,7 @@
    "title": "$power_kind",
    "gridPos": {
     "x": 0,
-    "y": 61,
+    "y": 68,
     "w": 12,
     "h": 12
    },
@@ -2082,7 +2086,7 @@
    "id": 16,
    "gridPos": {
     "x": 0,
-    "y": 73,
+    "y": 80,
     "w": 24,
     "h": 1
    },
@@ -2093,7 +2097,7 @@
    "title": "$system_kind",
    "gridPos": {
     "x": 0,
-    "y": 74,
+    "y": 81,
     "w": 12,
     "h": 12
    },
@@ -2439,7 +2443,7 @@
    "id": 19,
    "gridPos": {
     "x": 0,
-    "y": 86,
+    "y": 93,
     "w": 24,
     "h": 1
    },
@@ -2450,7 +2454,7 @@
    "title": "$manager_kind",
    "gridPos": {
     "x": 0,
-    "y": 87,
+    "y": 94,
     "w": 12,
     "h": 12
    },
@@ -2796,7 +2800,7 @@
    "id": 22,
    "gridPos": {
     "x": 0,
-    "y": 99,
+    "y": 106,
     "w": 24,
     "h": 1
    },
@@ -2807,7 +2811,7 @@
    "title": "BMC memory",
    "gridPos": {
     "x": 0,
-    "y": 100,
+    "y": 107,
     "w": 6,
     "h": 9
    },
@@ -2872,7 +2876,7 @@
    "title": "BMC free storage",
    "gridPos": {
     "x": 6,
-    "y": 100,
+    "y": 107,
     "w": 6,
     "h": 9
    },
@@ -2937,7 +2941,7 @@
    "title": "Crawl time",
    "gridPos": {
     "x": 12,
-    "y": 100,
+    "y": 107,
     "w": 6,
     "h": 9
    },
@@ -3002,7 +3006,7 @@
    "title": "Failed GETs per read",
    "gridPos": {
     "x": 18,
-    "y": 100,
+    "y": 107,
     "w": 6,
     "h": 9
    },
@@ -3067,7 +3071,7 @@
    "title": "Answering Redfish",
    "gridPos": {
     "x": 0,
-    "y": 109,
+    "y": 116,
     "w": 24,
     "h": 4
    },
@@ -3123,6 +3127,10 @@
         "value": 1
        }
       ]
+     },
+     "custom": {
+      "lineWidth": 2,
+      "fillOpacity": 20
      }
     },
     "overrides": []
@@ -3131,7 +3139,7 @@
     "showValue": "always",
     "alignValue": "center",
     "mergeValues": true,
-    "rowHeight": 0.8,
+    "rowHeight": 1,
     "legend": {
      "showLegend": false
     }
@@ -3146,7 +3154,7 @@
    "id": 28,
    "gridPos": {
     "x": 0,
-    "y": 113,
+    "y": 120,
     "w": 24,
     "h": 1
    }
@@ -3228,7 +3236,7 @@
    "id": 29,
    "gridPos": {
     "x": 0,
-    "y": 114,
+    "y": 121,
     "w": 24,
     "h": 8
    },
