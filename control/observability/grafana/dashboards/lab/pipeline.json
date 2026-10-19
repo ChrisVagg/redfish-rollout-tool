@@ -2291,7 +2291,7 @@
     "overrides": []
    },
    "options": {
-    "showValue": "auto",
+    "showValue": "always",
     "mergeValues": true,
     "rowHeight": 0.85,
     "alignValue": "center",
@@ -2376,7 +2376,8 @@
     "overrides": []
    },
    "options": {
-    "showValue": "never",
+    "showValue": "always",
+    "alignValue": "center",
     "mergeValues": true,
     "rowHeight": 0.8,
     "legend": {
