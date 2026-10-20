@@ -6,7 +6,9 @@ snapshots/
 # the agent's copies of the images it fetched from the image cache
 spool/
 lab/cache/tls.*
-reports/
+# the poller's views (make views)
+/lab/reports/
+/prod/reports/
 images/
 lab/qemu-system-arm
 lab/bmc.mtd
@@ -22,3 +24,9 @@ docs/lab-images/
 schemas/
 # made from the lab dashboards by make control-up
 control/observability/grafana/dashboards/prod/
+# incident reports on real hosts stay local: Grafana's Reports folder, and the images they show (Grafana serves
+# public/ without a login). The folders stay, empty, so a fresh clone's Grafana starts the same
+control/observability/grafana/dashboards/reports/*
+!control/observability/grafana/dashboards/reports/.gitkeep
+docs/incidents/*
+!docs/incidents/.gitkeep

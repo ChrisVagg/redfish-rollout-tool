@@ -122,14 +122,15 @@ services:
               "./observability/grafana/provisioning:/etc/grafana/provisioning:ro",
               "./observability/grafana/dashboards:/etc/grafana/dashboards:ro",
               "grafana:/var/lib/grafana",
-              # docs/'s diagrams for the Architecture dashboards: Grafana serves public/ without a login, so these
-              # six files only, not docs/
+              # docs/'s diagrams for the Architecture dashboards, and docs/incidents/ for the Reports' images (kept out
+              # of git, the folder empty in a clone): Grafana serves public/ without a login, so these only, not docs/
               "../docs/lab-stack.svg:/usr/share/grafana/public/docs/lab-stack.svg:ro",
               "../docs/lab-rollout.svg:/usr/share/grafana/public/docs/lab-rollout.svg:ro",
               "../docs/lab-solution-architecture.svg:/usr/share/grafana/public/docs/lab-solution-architecture.svg:ro",
               "../docs/prod-stack.svg:/usr/share/grafana/public/docs/prod-stack.svg:ro",
               "../docs/prod-rollout.svg:/usr/share/grafana/public/docs/prod-rollout.svg:ro",
-              "../docs/prod-solution-architecture.svg:/usr/share/grafana/public/docs/prod-solution-architecture.svg:ro"]
+              "../docs/prod-solution-architecture.svg:/usr/share/grafana/public/docs/prod-solution-architecture.svg:ro",
+              "../docs/incidents:/usr/share/grafana/public/docs/incidents:ro"]
 volumes:
   netbox-postgres:
   netbox-redis:

@@ -1,6 +1,7 @@
 # Provision grafana structure
-# Lab & Prod folders with each folder fleet, host, inventory dashboard.
+# Lab & Prod folders with each folder fleet, host, inventory dashboard; Reports, an incident's report each.
 apiVersion: 1
 providers:
   - {name: lab, folder: Lab, folderUid: lab, type: file, allowUiUpdates: true, options: {path: /etc/grafana/dashboards/lab}}
   - {name: prod, folder: Prod, folderUid: prod, type: file, allowUiUpdates: true, options: {path: /etc/grafana/dashboards/prod}}
+  - {name: reports, folder: Reports, folderUid: reports, type: file, allowUiUpdates: true, options: {path: /etc/grafana/dashboards/reports}}

@@ -8,3 +8,5 @@ datasources:
 # the rollout state database: each host's locks and firmware history, as the read-only account grafana
   - {name: State, uid: state, type: grafana-postgresql-datasource, url: "127.0.0.1:5432", user: grafana, editable: true,
      jsonData: {database: rollout, sslmode: disable}, secureJsonData: {password: $STATE_GRAFANA_PASSWORD}}
+# reports made from files, a CSV in a TestData query: the Reports folder's incident reports, kept out of git
+  - {name: TestData, uid: testdata, type: grafana-testdata-datasource, editable: true}

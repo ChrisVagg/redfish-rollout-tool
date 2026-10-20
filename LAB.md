@@ -606,7 +606,8 @@ How each vendor lists its entries, and its clock, read on the fleet on 2026-10-2
 
 On the Host dashboard, the **BMC logs** row under the health table: Critical and Warning entries in the time range,
 how full each log is, its entries over time by severity on the same time axis as the sensors, and every entry, newest
-first, filtered by Log, Severity and Search at the top.
+first, filtered by Log, Severity and Search at the top. The lab's BMCs log nothing there (their EventLog is empty, the
+Journal isn't read); a production host's row: [Prod · Host](PROD.md#host).
 
 Grafana is admin only: no anonymous access, the one account from `control/observability/grafana/.grafana.env`, which
 [grafana.ini](control/observability/grafana/grafana.ini) reads. Grafana creates it on its first start only; after that, change
