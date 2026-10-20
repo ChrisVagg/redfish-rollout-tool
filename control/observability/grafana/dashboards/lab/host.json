@@ -174,6 +174,88 @@
       "$__all"
      ]
     }
+   },
+   {
+    "name": "log",
+    "label": "Log",
+    "type": "query",
+    "datasource": {
+     "type": "loki",
+     "uid": "loki"
+    },
+    "refresh": 2,
+    "sort": 1,
+    "multi": true,
+    "includeAll": true,
+    "allValue": ".+",
+    "current": {
+     "text": [
+      "All"
+     ],
+     "value": [
+      "$__all"
+     ]
+    },
+    "query": {
+     "type": 1,
+     "label": "log",
+     "stream": "{job=\"bmc-log\",site=\"$site\",host=\"$host\"}",
+     "refId": "LokiVariableQueryEditor-VariableQuery"
+    }
+   },
+   {
+    "name": "severity",
+    "label": "Severity",
+    "type": "custom",
+    "query": "Critical,Warning,OK,-",
+    "multi": true,
+    "includeAll": true,
+    "allValue": ".+",
+    "current": {
+     "text": [
+      "All"
+     ],
+     "value": [
+      "$__all"
+     ]
+    },
+    "options": [
+     {
+      "text": "All",
+      "value": "$__all",
+      "selected": true
+     },
+     {
+      "text": "Critical",
+      "value": "Critical",
+      "selected": false
+     },
+     {
+      "text": "Warning",
+      "value": "Warning",
+      "selected": false
+     },
+     {
+      "text": "OK",
+      "value": "OK",
+      "selected": false
+     },
+     {
+      "text": "-",
+      "value": "-",
+      "selected": false
+     }
+    ]
+   },
+   {
+    "name": "search",
+    "label": "Search logs",
+    "type": "textbox",
+    "query": "",
+    "current": {
+     "text": "",
+     "value": ""
+    }
    }
   ]
  },
@@ -929,11 +1011,362 @@
   },
   {
    "type": "row",
+   "title": "BMC logs · LogService",
+   "collapsed": false,
+   "panels": [],
+   "id": 36,
+   "gridPos": {
+    "x": 0,
+    "y": 22,
+    "w": 24,
+    "h": 1
+   }
+  },
+  {
+   "type": "stat",
+   "title": "Critical",
+   "gridPos": {
+    "x": 0,
+    "y": 23,
+    "w": 4,
+    "h": 6
+   },
+   "datasource": {
+    "type": "loki",
+    "uid": "loki"
+   },
+   "id": 37,
+   "description": "Critical entries the BMC logged in the time range, in every log",
+   "targets": [
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "refId": "A",
+     "queryType": "instant",
+     "expr": "sum(count_over_time({job=\"bmc-log\",site=\"$site\",host=\"$host\",severity=\"Critical\"}[$__range]))"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "noValue": "0",
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "#00c9a7",
+        "value": null
+       },
+       {
+        "color": "#bb626d",
+        "value": 1
+       }
+      ]
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ]
+    },
+    "colorMode": "background",
+    "graphMode": "none",
+    "textMode": "value"
+   },
+   "transparent": true
+  },
+  {
+   "type": "stat",
+   "title": "Warning",
+   "gridPos": {
+    "x": 4,
+    "y": 23,
+    "w": 4,
+    "h": 6
+   },
+   "datasource": {
+    "type": "loki",
+    "uid": "loki"
+   },
+   "id": 38,
+   "description": "Warning entries the BMC logged in the time range, in every log",
+   "targets": [
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "refId": "A",
+     "queryType": "instant",
+     "expr": "sum(count_over_time({job=\"bmc-log\",site=\"$site\",host=\"$host\",severity=\"Warning\"}[$__range]))"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "noValue": "0",
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "#00c9a7",
+        "value": null
+       },
+       {
+        "color": "#e0b400",
+        "value": 1
+       }
+      ]
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ]
+    },
+    "colorMode": "background",
+    "graphMode": "none",
+    "textMode": "value"
+   },
+   "transparent": true
+  },
+  {
+   "type": "bargauge",
+   "title": "How full each log is",
+   "gridPos": {
+    "x": 8,
+    "y": 23,
+    "w": 6,
+    "h": 6
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "id": 39,
+   "description": "Entries the BMC holds against its MaxNumberOfRecords: a full log overwrites its oldest entries (WrapsWhenFull). Logs that report no maximum aren't shown",
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "refId": "A",
+     "instant": true,
+     "range": false,
+     "legendFormat": "{{name}}",
+     "expr": "100 * redfish_log_entries{site=\"$site\",host=\"$host\"} / redfish_log_max_entries{site=\"$site\",host=\"$host\"}"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "percent",
+     "min": 0,
+     "max": 100,
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "#00c9a7",
+        "value": null
+       },
+       {
+        "color": "#e0b400",
+        "value": 80
+       },
+       {
+        "color": "#bb626d",
+        "value": 95
+       }
+      ]
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "orientation": "horizontal",
+    "displayMode": "basic",
+    "showUnfilled": true,
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ]
+    },
+    "text": {
+     "titleSize": 13,
+     "valueSize": 16
+    }
+   },
+   "transparent": true
+  },
+  {
+   "type": "timeseries",
+   "title": "Entries over time, by severity",
+   "gridPos": {
+    "x": 14,
+    "y": 23,
+    "w": 10,
+    "h": 6
+   },
+   "datasource": {
+    "type": "loki",
+    "uid": "loki"
+   },
+   "id": 40,
+   "description": "The entries below, counted per interval: lines up with the sensors' graphs",
+   "targets": [
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "refId": "A",
+     "queryType": "range",
+     "legendFormat": "{{severity}}",
+     "expr": "sum by (severity) (count_over_time({job=\"bmc-log\",site=\"$site\",host=\"$host\",log=~\"$log\",severity=~\"$severity\"} |~ `(?i)${search:regex}` [$__interval]))"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "drawStyle": "bars",
+      "fillOpacity": 80,
+      "stacking": {
+       "mode": "normal"
+      },
+      "lineWidth": 0
+     },
+     "min": 0,
+     "decimals": 0
+    },
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "Critical"
+      },
+      "properties": [
+       {
+        "id": "color",
+        "value": {
+         "mode": "fixed",
+         "fixedColor": "#bb626d"
+        }
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "Warning"
+      },
+      "properties": [
+       {
+        "id": "color",
+        "value": {
+         "mode": "fixed",
+         "fixedColor": "#e0b400"
+        }
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "OK"
+      },
+      "properties": [
+       {
+        "id": "color",
+        "value": {
+         "mode": "fixed",
+         "fixedColor": "#00c9a7"
+        }
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "-"
+      },
+      "properties": [
+       {
+        "id": "color",
+        "value": {
+         "mode": "fixed",
+         "fixedColor": "#a4adbc"
+        }
+       }
+      ]
+     }
+    ]
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom",
+     "showLegend": true
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "transparent": true
+  },
+  {
+   "type": "logs",
+   "title": "Every log entry of $host",
+   "gridPos": {
+    "x": 0,
+    "y": 29,
+    "w": 24,
+    "h": 14
+   },
+   "datasource": {
+    "type": "loki",
+    "uid": "loki"
+   },
+   "id": 41,
+   "description": "Each LogService's entries, at the BMC's Created time, read every 5 min by the site's exporter (poller.py); the Journal (OpenBMC) isn't read. A Gap line: the log wrapped or was cleared between two reads. Filter with Log, Severity and Search above",
+   "targets": [
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "refId": "A",
+     "queryType": "range",
+     "maxLines": 5000,
+     "expr": "{job=\"bmc-log\",site=\"$site\",host=\"$host\",log=~\"$log\",severity=~\"$severity\"} |~ `(?i)${search:regex}` | json | line_format \"{{.severity}} · {{.Message}}{{if .MessageId}} · {{.MessageId}}{{end}} · {{.Log}}\""
+    }
+   ],
+   "options": {
+    "showTime": true,
+    "showLabels": false,
+    "showCommonLabels": false,
+    "wrapLogMessage": true,
+    "prettifyLogMessage": false,
+    "enableLogDetails": true,
+    "dedupStrategy": "none",
+    "sortOrder": "Descending"
+   },
+   "transparent": true
+  },
+  {
+   "type": "row",
    "title": "Component integrity · SPDM, TPM",
    "collapsed": false,
    "gridPos": {
     "x": 0,
-    "y": 22,
+    "y": 43,
     "w": 24,
     "h": 1
    },
@@ -945,7 +1378,7 @@
    "title": "ComponentIntegrity",
    "gridPos": {
     "x": 0,
-    "y": 23,
+    "y": 44,
     "w": 24,
     "h": 6
    },
@@ -1099,7 +1532,7 @@
    "id": 30,
    "gridPos": {
     "x": 0,
-    "y": 29,
+    "y": 50,
     "w": 24,
     "h": 1
    },
@@ -1115,7 +1548,7 @@
    },
    "gridPos": {
     "x": 0,
-    "y": 30,
+    "y": 51,
     "w": 24,
     "h": 9
    },
@@ -1278,7 +1711,7 @@
    },
    "gridPos": {
     "x": 0,
-    "y": 39,
+    "y": 60,
     "w": 24,
     "h": 17
    },
@@ -1372,7 +1805,7 @@
    "id": 10,
    "gridPos": {
     "x": 0,
-    "y": 56,
+    "y": 77,
     "w": 24,
     "h": 1
    },
@@ -1383,7 +1816,7 @@
    "title": "$thermal_context",
    "gridPos": {
     "x": 0,
-    "y": 57,
+    "y": 78,
     "w": 12,
     "h": 10
    },
@@ -1729,7 +2162,7 @@
    "id": 13,
    "gridPos": {
     "x": 0,
-    "y": 67,
+    "y": 88,
     "w": 24,
     "h": 1
    },
@@ -1740,7 +2173,7 @@
    "title": "$power_kind",
    "gridPos": {
     "x": 0,
-    "y": 68,
+    "y": 89,
     "w": 12,
     "h": 12
    },
@@ -2086,7 +2519,7 @@
    "id": 16,
    "gridPos": {
     "x": 0,
-    "y": 80,
+    "y": 101,
     "w": 24,
     "h": 1
    },
@@ -2097,7 +2530,7 @@
    "title": "$system_kind",
    "gridPos": {
     "x": 0,
-    "y": 81,
+    "y": 102,
     "w": 12,
     "h": 12
    },
@@ -2443,7 +2876,7 @@
    "id": 19,
    "gridPos": {
     "x": 0,
-    "y": 93,
+    "y": 114,
     "w": 24,
     "h": 1
    },
@@ -2454,7 +2887,7 @@
    "title": "$manager_kind",
    "gridPos": {
     "x": 0,
-    "y": 94,
+    "y": 115,
     "w": 12,
     "h": 12
    },
@@ -2800,7 +3233,7 @@
    "id": 22,
    "gridPos": {
     "x": 0,
-    "y": 106,
+    "y": 127,
     "w": 24,
     "h": 1
    },
@@ -2811,7 +3244,7 @@
    "title": "BMC memory",
    "gridPos": {
     "x": 0,
-    "y": 107,
+    "y": 128,
     "w": 6,
     "h": 9
    },
@@ -2876,7 +3309,7 @@
    "title": "BMC free storage",
    "gridPos": {
     "x": 6,
-    "y": 107,
+    "y": 128,
     "w": 6,
     "h": 9
    },
@@ -2941,7 +3374,7 @@
    "title": "Crawl time",
    "gridPos": {
     "x": 12,
-    "y": 107,
+    "y": 128,
     "w": 6,
     "h": 9
    },
@@ -3006,7 +3439,7 @@
    "title": "Failed GETs per read",
    "gridPos": {
     "x": 18,
-    "y": 107,
+    "y": 128,
     "w": 6,
     "h": 9
    },
@@ -3071,7 +3504,7 @@
    "title": "Answering Redfish",
    "gridPos": {
     "x": 0,
-    "y": 116,
+    "y": 137,
     "w": 24,
     "h": 4
    },
@@ -3155,7 +3588,7 @@
    "id": 28,
    "gridPos": {
     "x": 0,
-    "y": 120,
+    "y": 141,
     "w": 24,
     "h": 1
    }
@@ -3237,7 +3670,7 @@
    "id": 29,
    "gridPos": {
     "x": 0,
-    "y": 121,
+    "y": 142,
     "w": 24,
     "h": 8
    },

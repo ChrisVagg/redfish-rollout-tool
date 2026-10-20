@@ -114,8 +114,10 @@ What the exporter does differently from a one-off `collect`, because it never st
 ### Future work: BMC events into Loki
 
 Today the events in Loki come from `rollout.py`, as [the lab's event flow](LAB.md#how-the-lab-sends-events-to-loki)
-describes. Receiving hardware alerts independently of a rollout needs a separate event receiver; this integration
-has not been implemented or tested on the production fleet.
+describes, and each BMC's log entries from the site's exporter, read every 5 minutes
+([the BMCs' logs](LAB.md#the-bmcs-logs-in-loki)): the history, read-only, minutes late. Receiving hardware alerts as
+they happen needs a separate event receiver; this integration has not been implemented or tested on the production
+fleet.
 
 1. Discover each BMC's `EventService` and the delivery methods it supports. For HTTP event delivery, create an
    `EventDestination` subscription in its `Subscriptions` collection, with the receiver's HTTPS URL as `Destination`.
@@ -125,7 +127,8 @@ has not been implemented or tested on the production fleet.
 3. The receiver converts those events into Loki log entries and sends them to `POST /loki/api/v1/push`. Loki itself
    does not create Redfish subscriptions or receive Redfish payloads directly in this design.
 4. Validate delivery on each model, monitor the receiver and subscription state, and handle retries and duplicate
-   deliveries. Keep the exporter polling: event delivery complements the current health readings.
+   deliveries. Keep the exporter polling: event delivery complements the current health readings, and its log reads
+   fill what a missed delivery loses (a BMC drops an event after its `DeliveryRetryAttempts`; its log keeps it).
 
 The proposed flow is `BMC EventService → event receiver → Loki → Grafana`. DMTF's
 [event delivery specification](https://www.dmtf.org/sites/default/files/standards/documents/DSP0266_1.17.1.html#eventing)
@@ -258,7 +261,7 @@ only truth about what runs: a host is read again over Redfish before anything ac
 | Site agent | `rollout.py run` here | takes a wave's work, drains the hosts, drives the update over Redfish |
 | Image cache | nginx over HTTPS | serves the store's images inside the site: a BMC that offers `SimpleUpdate` pulls from it, the agent pushes to one that can't |
 | Scheduler | the site's own, as Slurm or Kubernetes | drains and undrains the hosts, through a validated integration |
-| Exporter | `poller.py exporter`, on a ReadOnly account | reads every BMC's health, firmware and telemetry for Prometheus; never the agent |
+| Exporter | `poller.py exporter`, on a ReadOnly account | reads every BMC's health, firmware and telemetry for Prometheus, and its logs' new entries for Loki; never the agent |
 | Prometheus agent | Prometheus in agent mode | scrapes the exporter and pushes each sample to the control plane's Prometheus (remote write): the site connects out, never in |
 | Event receiver | a small HTTPS service, as DMTF's Redfish Event Listener | subscribes to each BMC's `EventService`, receives the events the BMCs post to it and forwards them to Loki ([not built yet](#future-work-bmc-events-into-loki)); the BMCs reach it inside the site, and it connects out |
 | BMCs | each vendor's Redfish service | run the update, its task and the reset; their `EventService` posts their events to the event receiver |
@@ -268,7 +271,7 @@ only truth about what runs: a host is read again over Redfish before anything ac
 | Part | Tool | What it does |
 |---|---|---|
 | Metrics | Prometheus, fed by each site's Prometheus agent (remote write) | scrapes the workflow engine; takes each site's samples, the exporter's and the site agent's |
-| Logs | Loki | the rollout's events; the BMCs' events through an event receiver ([future work](#future-work-bmc-events-into-loki)) |
+| Logs | Loki | the rollout's events; each BMC's `LogService` entries, from the exporter; the BMCs' pushed events through an event receiver ([future work](#future-work-bmc-events-into-loki)) |
 | Dashboards | Grafana | reads Prometheus, Loki and the rollout state DB |
 | Alerts | Alertmanager | pages the on-call on a halt or a host left for a person |
 

@@ -11,9 +11,18 @@ LINKS = re.compile(r'"[^"]*@(?:odata\.id|odata\.nextLink|Redfish\.ActionInfo)": 
 TYPE = re.compile(r"#?([^.]*)(?:\.(v\d+_\d+_\d+))?")  # '#Chassis.v1_14_0.Chassis' -> Chassis, v1_14_0
 # Not discovered: log services and entries, sessions, accounts, certificates, schema files, registries,
 # event subscriptions, and per-core/per-thread sub-processors (the CPU has TotalCores and TotalThreads). They are
-# large, secret or not equipment. Any case: iDRAC 8 serves its 238 schema files under /JSONSchemas.
+# large, secret or not equipment. Any case: iDRAC 8 serves its 238 schema files under /JSONSchemas. The logs are read
+# apart, only what is new each --log-interval, by the exporter (LOG_OWNERS)
 SKIP = re.compile(r"/(LogServices|Entries|Sessions|Accounts|Roles|Certificates|CertificateLocations|JsonSchemas|"
                   r"Schemas|Registries|Subscriptions|SubProcessors)(/|$)", re.IGNORECASE)
+# The BMC's logs, to Loki: the LogServices of its systems, managers and chassis, but not OpenBMC's Journal, the BMC's
+# own systemd journal (hundreds of lines a minute), not its events
+LOG_OWNERS = ("Systems", "Managers", "Chassis")  # the service root's collections whose members have LogServices
+LOG_SKIP = {"Journal"}
+LOG_HISTORY = 29 * 86400  # a log's first read sends its last 29 days: Loki takes 30 (loki.yaml), then deletes them
+LOG_BUDGET = 120  # seconds a pass over one BMC's logs may take; the rest waits for the next pass
+LOG_LATE = 3300  # an entry this much older than its log's newest sent: Loki would refuse it (1h), so it gets the read time
+LOG_SKEW = 300  # a BMC clock (LogService DateTime) off ours by this much or more: its entries' times are corrected
 # Composition templates (AMI: /Systems/Capabilities) and pending-settings copies (AMI: /Systems/Self/SD) are typed
 # like the real resource but are not its current state; links inside these annotations are not followed.
 TEMPLATES = ("@Redfish.CollectionCapabilities", "@Redfish.Settings")

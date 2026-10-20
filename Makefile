@@ -34,8 +34,9 @@ ifeq ($(SITE),lab)
 else ifeq ($(SITE),prod)
   # the BMC accounts, from prod/.env
   ENV       := set -a; [ ! -f prod/.env ] || . prod/.env; set +a; SITE=prod
-  # the production site: its exporter on :9102, its Prometheus agent on :9202; no cache, as it is only read
-  SITE_ENV  := EXPORTER_PORT=9102 INTERVAL=30 AGENT_PORT=9202
+  # the production site: its exporter on :9102, its Prometheus agent on :9202, its BMCs' logs to Loki; no cache, as
+  # it is only read
+  SITE_ENV  := EXPORTER_PORT=9102 INTERVAL=30 AGENT_PORT=9202 LOKI=http://127.0.0.1:3100
 else
   $(error SITE is lab or prod, not "$(SITE)")
 endif
@@ -64,8 +65,9 @@ Control plane: one per fleet, every port on 127.0.0.1; the sites connect to it, 
   make unlock HOST=...     give back a host's lock once a person checked it; several: HOST="a b"
 
 Site: one per site, SITE=lab (the default) or prod; every connection goes out, to the control plane
-  make site-up             start its exporter and Prometheus agent, which pushes to the control plane's Prometheus;
-                           on the lab also its HTTPS image cache on :8443
+  make site-up             start its exporter and Prometheus agent, which pushes to the control plane's Prometheus,
+                           the exporter its BMCs' new log entries to Loki every 5 min; on the lab also its HTTPS image
+                           cache on :8443
   make site-logs           follow its exporter's and agent's logs
   make site-down           stop it
 

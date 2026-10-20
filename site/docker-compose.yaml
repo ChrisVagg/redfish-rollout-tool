@@ -5,11 +5,14 @@ services:
     image: redfish/exporter
     restart: unless-stopped
     network_mode: host  # the BMCs are on the host's addresses
-    command: [--listen, "127.0.0.1:${EXPORTER_PORT:?}", --interval, "${INTERVAL:?}"]
-    # from make, NETBOX_TOKEN the exporter's own; a site's BMC accounts from <site>/.env
-    environment: [SITE, LAB_USERNAME, LAB_PASSWORD, NETBOX_TOKEN]
+    # --log-state: where each BMC's log reads are, kept across restarts in the log-state volume
+    command: [--listen, "127.0.0.1:${EXPORTER_PORT:?}", --interval, "${INTERVAL:?}", --log-state, /state]
+    # from make, NETBOX_TOKEN the exporter's own and LOKI, where the BMCs' logs go; a site's BMC accounts from
+    # <site>/.env
+    environment: [SITE, LAB_USERNAME, LAB_PASSWORD, NETBOX_TOKEN, LOKI]
     env_file: [{path: "../${SITE:?}/.env", required: false}]
-    volumes: ["..:/app:ro", "../schemas:/app/schemas"]  # the repo read-only; the DMTF schemas cache shared with it
+    # the repo read-only; the DMTF schemas cache shared with it
+    volumes: ["..:/app:ro", "../schemas:/app/schemas", "log-state:/state"]
   
   # Prometheus site agent, which pulls data from the exporter and push them to the control plane prometheus instance.
   prometheus-site-agent:
@@ -31,3 +34,4 @@ services:
 volumes:
   agent:
   image-cache:
+  log-state:

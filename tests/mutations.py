@@ -70,6 +70,23 @@ BREAKS = [  # (what a careless edit does, the line as it is, the line broken, th
     ("a held lock let through", "if taken == set(hosts):", "if True:", "test_host_locks"),
     ("SPDM claimed for another part", "if spdm and mine & targets:", "if spdm:", "test_attestation"),
     ("a host left for a person unlocked", 'if o["state"] == "needs_attention")', "if False)", "test_host_locks"),
+    ("BMC log lines lost, Loki down", 'state["logs"].setdefault(uri, known)\n                continue',
+     'state["logs"].setdefault(uri, known)', "test_bmc_logs"),
+    ("a cleared log's entries missed", "if u not in seen or seen[u] != read[u]:", "if u not in seen:",
+     "test_bmc_logs"),
+    ("a log gap not told", 'if complete and known["seen"] and read and not any(', "if False and not any(",
+     "test_bmc_logs"),
+    ("a wrong BMC clock's time sent", "ok = t and not late and t <= now + timedelta(minutes=5)", "ok = t",
+     "test_bmc_logs"),
+    ("a BMC clock hours off kept", "if clock and abs(skews[-1]) >= LOG_SKEW else", "if False else", "test_bmc_logs"),
+    ("a restart sends again what Loki has", "seen, newest = in_loki(loki, host, uri, history)",
+     "seen, newest = {}, None", "test_bmc_logs"),
+    ("a cut-short first read's history sent", '"first": bool(known.get("first")) and not complete}', '"first": False}',
+     "test_bmc_logs"),
+    ("the log state file not read back", '    return {uri: {**k, "newest": k["newest"] and datetime.fromisoformat(',
+     '    return {} and {uri: {**k, "newest": k["newest"] and datetime.fromisoformat(', "test_bmc_logs"),
+    ("the BMC's journal sent", 'if service.get("Id") in LOG_SKIP or not entries:', "if not entries:",
+     "test_bmc_logs"),
 ]
 
 if __name__ == "__main__":

@@ -1,5 +1,6 @@
-# Loki for the rollout's events: one process, on 127.0.0.1 only, its data in the loki volume, kept 30 days like
-# Prometheus. rollout.py run sends every event of its run record here (LOKI); Grafana reads them with LogQL.
+# Loki for the rollout's events and the BMCs' logs: one process, on 127.0.0.1 only, its data in the loki volume, kept
+# 30 days like Prometheus. rollout.py run sends every event of its run record here (LOKI), each site's exporter the new
+# entries of every BMC's LogServices (job bmc-log); Grafana reads them with LogQL.
 auth_enabled: false
 server:
   http_listen_address: 127.0.0.1
@@ -23,6 +24,10 @@ schema_config:
 limits_config:
   # 30 days: the compactor deletes older chunks. A 30-day query fits max_query_length's default, 721h
   retention_period: 720h
+  # an entry up to 30 days old is taken, not 7: a BMC log's first read sends its last 29 days (constants.py
+  # LOG_HISTORY). Those days-old entries show in queries once their chunk is written, within 2h (POST /flush: now)
+  reject_old_samples: true
+  reject_old_samples_max_age: 720h
   # a query split by day, not by hour: Grafana already asks day by day, and the dashboards read 30 days
   split_queries_by_interval: 24h
 compactor:

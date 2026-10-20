@@ -20,7 +20,9 @@
   diff                      What changed on each host between the previous collect and the latest one.
   exporter                  Crawl every BMC each --interval and serve the readings, health, firmware and BMC
                             resources as Prometheus metrics on --listen. One session per BMC, kept across crawls;
-                            a host whose fresh login is refused is not asked again until a restart.
+                            a host whose fresh login is refused is not asked again until a restart. Each
+                            --log-interval, over the same session, the new entries of every LogService go to Loki
+                            (LOKI), and each log's size to Prometheus.
   detail HOST               Everything about one host: inventory, services, actions, health and telemetry. A
                             reading's unit comes from the BMC's MetricDefinitions, else the DMTF JSON Schema of the
                             resource (downloaded once into ./schemas), else the resource itself (ReadingUnits).
@@ -38,7 +40,7 @@ import threading
 import time
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from functools import lru_cache, partial
 from math import inf
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -55,8 +57,8 @@ from rich.text import Text
 
 from constants import (ACCOUNT, ACTION, ALLOWED, BASELINE, CAPABILITIES_ROW, CHASSIS, COMPLIANCE_ROW, CONNECTION,
                        CRITICAL, DMTF, FIELDS, FW_PARTS, INVENTORY_ROW, JOBS_ROW, JOB_TYPES, KIND, LIMIT, LINK, LINKS,
-                       MANAGER, NETBOX_URL, NETWORK_PORT, OEM_PATH, PREVIOUS, PROPS, READINGS, ROOT, SCHEMAS, SENSORS,
-                       SERVICE, SEVERITY, SITE, SKIP, STATUS_LEAF, SUMMARY, SYSTEM, TELEMETRY_ROW, TEMPLATES,
+                       LOG_BUDGET, LOG_HISTORY, LOG_LATE, LOG_OWNERS, LOG_SKEW, LOG_SKIP, MANAGER, NETBOX_URL,
+                       NETWORK_PORT, OEM_PATH, PREVIOUS, PROPS, READINGS, ROOT, SCHEMAS, SENSORS, SERVICE, SEVERITY, SITE, SKIP, STATUS_LEAF, SUMMARY, SYSTEM, TELEMETRY_ROW, TEMPLATES,
                        THRESHOLD, VOLATILE, WILDCARD)
 from helpers import (at, block, choose, connection, details, discrete, first_of, first_real, identity, items, label,
                      link, load, named, norm, obj, of, output_options, per_host, pick, pointer, previous, properties,
@@ -581,6 +583,187 @@ def exposition(server, found, seconds) -> list[str]:
     return out
 
 
+# ---- The BMC's logs: each LogService's new entries to Loki, a pass every --log-interval ----
+
+# A LogEntry's Created as a time; None when the BMC gives none or no valid one
+def created(entry) -> datetime | None:
+    try:
+        t = datetime.fromisoformat(entry.get("Created"))
+    except (TypeError, ValueError):
+        return None
+    return t if t.tzinfo else t.replace(tzinfo=timezone.utc)
+
+
+# A time as Loki's nanoseconds, exact: the same entry gets the same timestamp each time it is sent
+def nanoseconds(t) -> int:
+    return int(t.timestamp()) * 10**9 + t.microsecond * 1000
+
+
+# The entries of one log not read before, page by page: (them, {entry: Created} read, complete, entries in the log).
+# seen is the last pass's {entry: Created}: a known entry with another Created is new, its Id reused after a clear.
+# The pages go on to the last, unless the BMC lists newest first (iDRAC): then up to the first page with nothing new
+# from since on
+def unread(tunnel, uri, seen, since) -> tuple[list[tuple[str, dict]], dict[str, Any], bool, int | None]:
+    new, read, newest_first, complete, count = [], {}, None, True, None
+    try:
+        while uri:
+            body = call(tunnel, uri)
+            if "error" in body:
+                return new, read, False, count
+            members, times, fresh = body.get("Members") or [], [], 0
+            count = body.get("Members@odata.count", len(members)) if count is None else count
+            for m in members:
+                if not (u := uri_of(m)):
+                    continue
+                if set(m) == {"@odata.id"}:  # listed by link only (iLO 4): read unless known
+                    if "error" in (m := {"Created": seen[u]} if u in seen else call(tunnel, u)):
+                        complete = False
+                        continue
+                read[u] = m.get("Created")
+                times.append(created(m))
+                if u not in seen or seen[u] != read[u]:
+                    new.append((u, m))
+                    fresh += not since or bool(times[-1] and times[-1] >= since)
+            if newest_first is None and len(known := [t for t in times if t]) > 1:
+                newest_first = known[0] > known[-1]
+            uri = None if newest_first and not fresh else body.get("Members@odata.nextLink")
+    except ConnectionAbortedError:  # past the pass's budget, or the BMC stopped answering: the rest next pass
+        complete = False
+    return new, read, complete, count
+
+
+# Send log lines to Loki: (how many it refused for good and why, its 400; why it took none, else None: they go again)
+def to_loki(url, streams) -> tuple[int, str, str | None]:
+    try:
+        r = requests.post(f"{url.rstrip('/')}/loki/api/v1/push", json={"streams": streams}, timeout=10)
+    except requests.RequestException as e:
+        return 0, "", reason(str(e))
+    if r.status_code == 400:  # Loki kept the rest; each stream it refused entries of says how many
+        refused = sum(map(int, re.findall(r"total ignored: (\d+) out of", r.text)))
+        return refused or sum(len(s["values"]) for s in streams), r.text.strip()[:300], None
+    return 0, "", None if r.ok else f"{r.status_code} {r.text.strip()[:200]}"
+
+
+# What Loki holds of one host's log since a time: its lines' {entry: Created}, and the newest line's time. A recent
+# line always shows; a days-old one sent under 2h ago may not yet (its chunk isn't written), so it is sent again and
+# stored twice: the state file (--log-state) is what a restart goes on from, this only when there is none
+def in_loki(url, host, log_uri, since) -> tuple[dict[str, Any], datetime | None]:
+    query = "{" + ",".join(f"{k}={json.dumps(v)}" for k, v in (("job", "bmc-log"), ("site", SITE.name),
+                                                               ("host", host), ("log", log_uri))) + "}"
+    # ponytail: Loki's 5000 lines a query; a log with more in 29 days sends the rest again, page the query if one does
+    r = requests.get(f"{url.rstrip('/')}/loki/api/v1/query_range", timeout=30, params={
+        "query": query, "start": nanoseconds(since), "limit": 5000, "direction": "backward"})
+    r.raise_for_status()
+    values = [v for s in r.json()["data"]["result"] for v in s["values"]]
+    seen = {e["Entry"]: e.get("Created") for e in (json.loads(line) for _, line in values) if "Entry" in e}
+    newest = max((int(ts) for ts, _ in values), default=0)
+    return seen, datetime.fromtimestamp(newest / 10**9, timezone.utc) if newest else None
+
+
+# One pass over a host's logs: what is new goes to Loki, a stream per log and severity, each entry at its Created on
+# our clock. The samples of its logs come back. state is the host's, kept across passes: per log what was read and the
+# newest sent, which the exporter keeps in its state file for a restart. A log's first read without it begins from
+# what Loki has of it; its refusals are what Loki has already. Only a later pass's refusals are lost entries
+def read_logs(server, tunnel, found, state, loki) -> list[str]:
+    host, start, now = server["host"], time.monotonic(), datetime.now(timezone.utc)
+    history = now - timedelta(seconds=LOG_HISTORY)
+    tunnel[2].update(until=start + LOG_BUDGET, failures=0)
+    samples, pending, skews = [], 0, []
+    # a resource as the crawl read it, else read now: a crawl stopped at its deadline (iDRAC) may not have got to it
+    get = lambda u: found[u] if "error" not in found.get(u, {"error": None}) else call(tunnel, u)
+    members = lambda u: [m for m in map(uri_of, get(u).get("Members") or []) if m] if u else []
+    try:
+        owners = {link(get(m), "LogServices") for c in LOG_OWNERS for m in members(link(get(ROOT), c))} - {None}
+        for uri in sorted({m for o in owners for m in members(o)}):
+            service, read_at = call(tunnel, uri), datetime.now(timezone.utc)
+            entries = link(service, "Entries")
+            if service.get("Id") in LOG_SKIP or not entries:
+                continue
+            name, known = text(named(service)), state["logs"].get(uri)
+            if known is None:  # the first read since the exporter started: from what Loki has of the history
+                try:
+                    seen, newest = in_loki(loki, host, uri, history)
+                except (requests.RequestException, ValueError, KeyError) as e:
+                    log.warning("%s: Loki: %s; %s is read when it answers", host, reason(str(e)), uri)
+                    continue
+                known = {"seen": seen, "newest": newest, "first": True}
+            # the BMC's clock against ours: off by minutes or more (a wrong time zone, no NTP), its entries are moved
+            # onto ours, by whole minutes so that an entry sent again keeps its time
+            clock = created({"Created": service.get("DateTime")})
+            skews += [round((clock - read_at).total_seconds())] if clock else []
+            shift = timedelta(minutes=round(skews[-1] / 60)) if clock and abs(skews[-1]) >= LOG_SKEW else timedelta(0)
+            new, read, complete, count = unread(tunnel, entries, known["seen"], known.get("first") and history + shift)
+            if count is not None:
+                samples.append(sample("redfish_log_entries", count, host=host, log=uri, name=name))
+            if isinstance(service.get("MaxNumberOfRecords"), int):
+                samples.append(sample("redfish_log_max_entries", service["MaxNumberOfRecords"], host=host, log=uri,
+                                      name=name))
+            lines = []
+            for u, e in sorted(new, key=lambda ue: created(ue[1]) or now):
+                t = created(e) and created(e) - shift
+                if known.get("first") and (not t or t < history):
+                    continue  # older than Loki keeps, or of no known time
+                fields = {"Created": e.get("Created"), "Severity": e.get("Severity"), "Message": e.get("Message"),
+                          "MessageId": e.get("MessageId"), "EntryType": e.get("EntryType"),
+                          "SensorType": e.get("SensorType"), "EntryCode": e.get("EntryCode"), "Log": name, "Entry": u}
+                # still not a time on our clock (1970, the future with no BMC clock to correct it by), or so late
+                # Loki would refuse it: the read time. Its Created stays in the line
+                late = known["newest"] and t and t < known["newest"] - timedelta(seconds=LOG_LATE)
+                ok = t and not late and t <= now + timedelta(minutes=5)
+                lines.append((text(e.get("Severity")), ok and t or now,
+                              json.dumps({k: v for k, v in fields.items() if v is not None})))
+            if complete and known["seen"] and read and not any(known["seen"].get(u, ...) == c for u, c in read.items()):
+                lines.append(("Warning", now, json.dumps({
+                    "Created": now.isoformat(timespec="seconds"), "Severity": "Warning", "Log": name, "Message":
+                    f"Gap: none of the {len(known['seen'])} entries read before is in this log any more: it wrapped "
+                    "or was cleared between two reads, so entries in between may be missing"})))
+            streams = {}
+            for severity, t, line in lines:
+                streams.setdefault(severity, []).append([str(nanoseconds(t)), line])
+            refused, why, error = to_loki(loki, [
+                {"stream": {"job": "bmc-log", "site": SITE.name, "host": host, "log": uri, "severity": s}, "values": v}
+                for s, v in streams.items()]) if streams else (0, "", None)
+            if error:
+                log.warning("%s: Loki: %s; %d entries of %s go next pass", host, error, len(lines), uri)
+                pending += len(lines)
+                state["logs"].setdefault(uri, known)
+                continue
+            if refused and not known.get("first"):  # a first read's refusals: entries Loki has from before a start
+                state["refused"] += refused
+                log.warning("%s: Loki refused %d entries of %s: %s", host, refused, uri, why)
+            # pruned to what this pass read, the log as it is now; a read that came back empty keeps the last
+            seen = read if complete and read else {**known["seen"], **read}
+            newest = max([t for _, t, _ in lines] + [known["newest"]] * bool(known["newest"]), default=None)
+            # a first read cut short (iLO 4, past the budget) goes on as one: its older entries are still history
+            state["logs"][uri] = {"seen": seen, "newest": newest, "first": bool(known.get("first")) and not complete}
+    except ConnectionAbortedError as e:
+        log.warning("%s: logs: %s; the rest next pass", host, e)
+    except Exception:  # a log pass never takes the host's metrics down with it
+        log.exception("%s: logs: left out of this pass", host)
+    samples += [sample("redfish_bmc_clock_skew_seconds", skews[0], host=host)] if skews else []
+    return samples + [sample("redfish_log_pending", pending, host=host),
+                      sample("redfish_log_refused", state["refused"], host=host),
+                      sample("redfish_log_read_seconds", round(time.monotonic() - start, 1), host=host)]
+
+
+# A host's log reads as its last pass left them, from its file in folder (--log-state), as Promtail keeps its positions;
+# {} without one. Loki can't be asked instead: a days-old entry sent under 2h ago doesn't show in its queries yet
+def load_log_state(folder, host) -> dict:
+    try:
+        saved = json.loads((Path(folder) / f"{host}.json").read_text())
+    except (OSError, ValueError):
+        return {}
+    return {uri: {**k, "newest": k["newest"] and datetime.fromisoformat(k["newest"])} for uri, k in saved.items()}
+
+
+# Write a host's log reads to its file, whole or not at all
+def save_log_state(folder, host, logs) -> None:
+    path = Path(folder) / f"{host}.json"
+    path.with_suffix(".tmp").write_text(json.dumps(
+        {uri: {**k, "newest": k["newest"] and k["newest"].isoformat()} for uri, k in logs.items()}))
+    path.with_suffix(".tmp").replace(path)
+
+
 # Crawl every BMC each interval, one session kept per BMC, and serve the latest metrics on /metrics
 def exporter(args) -> list:
     servers = load_servers()
@@ -592,6 +775,12 @@ def exporter(args) -> list:
     sessions = {}
     refused = set()
     stopping = threading.Event()
+    # each host's logs: read on its thread, over its session, after a crawl, every log_interval; LOKI: where they go
+    loki = os.environ.get("LOKI")
+    logs = {s["host"]: {"due": 0.0, "logs": load_log_state(args.log_state, s["host"]) if args.log_state else {},
+                        "refused": 0, "samples": []} for s in servers}
+    if not loki:
+        log.warning("exporter: LOKI isn't set, so the BMCs' logs aren't read")
 
     # One host's samples; a 401 on a kept session logs in again, on a fresh login the host isn't asked again
     def read(server) -> list[str]:
@@ -612,12 +801,24 @@ def exporter(args) -> list:
                     log.error("%s: login refused, not asked again until a restart: check its credentials", host)
                     break
                 log.info("%s: the BMC ended its session, logging in again", host)
+            # after any crawl over a session, one stopped at its deadline too: a BMC that doesn't answer ends the pass
+            # its logs too, when due, unless it didn't answer at all (its service root): a crawl stopped at its
+            # deadline still leaves its logs to read
+            answered = "error" not in found.get(ROOT, {"error": None})
+            if loki and answered and host in sessions and time.monotonic() >= logs[host]["due"]:
+                logs[host]["due"] = time.monotonic() + args.log_interval
+                logs[host]["samples"] = read_logs(server, sessions[host][0], found, logs[host], loki)
+                if args.log_state:
+                    try:
+                        save_log_state(args.log_state, host, logs[host]["logs"])
+                    except OSError as e:  # the next start reads it again from what Loki has
+                        log.warning("%s: logs: can't keep where the reads are: %s", host, e)
             timeout = first_of(found, "SessionService").get("SessionTimeout")
             if host in sessions and (not sessions[host][1] or isinstance(timeout, int) and timeout < args.interval):
                 bmc, location = sessions.pop(host)
                 if location:
                     logout(bmc, location)
-            return exposition(server, found, seconds)
+            return exposition(server, found, seconds) + logs[host]["samples"]
         except Exception:
             log.exception("%s: left out of this read", host)
             return [sample("redfish_up", 0, host=host)]
@@ -987,6 +1188,10 @@ def main() -> None:
     e = commands.add_parser("exporter", help="read every BMC each interval, serve the metrics to Prometheus")
     e.add_argument("--listen", default="127.0.0.1:9101", help="address:port to serve /metrics on [127.0.0.1:9101]")
     e.add_argument("--interval", type=float, default=10, help="seconds between two reads of every BMC [10]")
+    e.add_argument("--log-interval", type=float, default=300,
+                   help="seconds between two reads of a BMC's logs, sent to LOKI [300]")
+    e.add_argument("--log-state", help="folder keeping where each BMC's log reads are, so a restart goes on from "
+                                       "there; without it, from what Loki has")
     e.set_defaults(run=exporter)
     d = commands.add_parser("detail", parents=[output], help="everything about one host")
     d.add_argument("host")

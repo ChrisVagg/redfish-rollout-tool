@@ -835,6 +835,131 @@ def test_network():
     assert sorted(line.rsplit(" ", 1)[1] for line in out if "speed" in line) == ["1000", "25000"], out
 
 
+# The exporter's log passes on a fake BMC and Loki: an SEL listed oldest first, one page; a log listed newest first,
+# two entries a page (iDRAC); one listed by link only (iLO 4); one whose BMC clock runs 5 hours ahead; the Journal. A
+# first read sends the last days only, a later one only what is new; a clock 5 hours off is corrected, one at 1970 gets
+# the read time; a log cleared between two reads gives a gap line; a Loki down sends it all again next pass, its 400
+# counts as refused; a restart goes on from the state file, or without one from what Loki has: nothing goes again, not
+# even what got the read time
+def test_bmc_logs():
+    from datetime import datetime, timedelta, timezone
+    now, base = datetime.now(timezone.utc), "/redfish/v1/Managers/1/LogServices"
+    ago = lambda **d: (now - timedelta(**d)).isoformat(timespec="seconds")
+    entry = lambda log, n, created, severity="OK": {"@odata.id": f"{base}/{log}/Entries/{n}", "Created": created,
+                                                    "Severity": severity, "Message": f"{log} {n}"}
+    names = ("SEL", "Journal", "Lc", "IEL", "Ahead")
+    bmc = {base: {"Members": [{"@odata.id": f"{base}/{x}"} for x in names]},
+           **{f"{base}/{x}": {"Id": x, "Name": f"{x} log", "Entries": {"@odata.id": f"{base}/{x}/Entries"}}
+              for x in names},
+           f"{base}/IEL/Entries": {"Members": [{"@odata.id": f"{base}/IEL/Entries/{n}"} for n in (1, 2)]},
+           f"{base}/IEL/Entries/1": entry("IEL", 1, ago(hours=3), "Warning"),
+           # its clock: a time zone wrong by 5 hours, an entry made an hour ago by it
+           f"{base}/Ahead/Entries": {"Members": [entry("Ahead", 1, ago(hours=1 - 5))]}}
+    bmc[f"{base}/SEL"]["MaxNumberOfRecords"] = 4096
+    bmc[f"{base}/Ahead"]["DateTime"] = ago(hours=-5)
+
+    def logs(sel, lc):  # the SEL as one page; Lc newest first, two a page, each page linking the next
+        bmc[f"{base}/SEL/Entries"] = {"Members": sel, "Members@odata.count": len(sel)}
+        for i in range(0, len(lc), 2):
+            more = {"Members@odata.nextLink": f"{base}/Lc/Entries?$skip={i + 2}"} if i + 2 < len(lc) else {}
+            bmc[f"{base}/Lc/Entries" + (f"?$skip={i}" if i else "")] = {"Members": lc[i:i + 2], **more}
+    lc = [entry("Lc", n, ago(hours=9 - n) if n > 4 else ago(days=45 - n)) for n in range(8, 0, -1)]
+    fetched, pushed, held, loki = [], [], [], {"answer": (204, "")}
+
+    class Answer:
+        def __init__(self, status=204, text="", body=None):
+            self.status_code, self.text, self.ok, self.body = status, text, status < 300, body
+
+        def raise_for_status(self) -> None:
+            pass
+
+        def json(self) -> dict:
+            return self.body
+
+    def post(url, json, timeout):  # Loki takes the lines it is sent, held for its queries
+        if loki["answer"] is None:
+            raise rollout.requests.ConnectionError("Connection refused")
+        pushed.append(json)
+        held.extend((s["stream"], v) for s in json["streams"] for v in s["values"])
+        return Answer(*loki["answer"])
+
+    def get(url, timeout, params):  # one host's log, as in_loki asks
+        log = params["query"].split('log="')[1].split('"')[0]
+        return Answer(body={"data": {"result": [{"stream": s, "values": [v]} for s, v in held
+                                                if s["log"] == log and int(v[0]) >= params["start"]]}})
+    state = {"logs": {}, "refused": 0}
+    # a crawl that stopped before the manager (iDRAC, at its deadline): the pass reads it itself
+    found = {poller.ROOT: {"Managers": {"@odata.id": "/redfish/v1/Managers"}},
+             "/redfish/v1/Managers": {"Members": [{"@odata.id": "/redfish/v1/Managers/1"}]}}
+    bmc["/redfish/v1/Managers/1"] = {"@odata.type": "#Manager.v1_19_0.Manager", "LogServices": {"@odata.id": base}}
+
+    def run():  # one pass: its samples, and what went to Loki as {message: (log, severity, timestamp)}
+        fetched.clear(), pushed.clear()
+        with (patch.object(poller, "call", lambda t, uri: fetched.append(uri) or copy.deepcopy(bmc.get(
+                uri, {"error": "404 Not Found"}))),
+              patch.object(poller.requests, "post", post), patch.object(poller.requests, "get", get)):
+            samples = poller.read_logs({"host": "h"}, (None, "https://h", {}), found, state, "http://loki")
+        return samples, {json.loads(line)["Message"]: (s["stream"]["log"].rsplit("/", 1)[1], s["stream"]["severity"],
+                                                       int(t)) for b in pushed for s in b["streams"]
+                         for t, line in s["values"]}
+    stamp = lambda e, hours=0: poller.nanoseconds(datetime.fromisoformat(e["Created"]) - timedelta(hours=hours))
+    sel = [entry("SEL", 1, ago(days=40)), entry("SEL", 2, ago(days=1), "Critical"), entry("SEL", 3, None)]
+    logs(sel, lc)
+    samples, sent = run()
+    # the last 29 days, each at its Created on our clock; not 40 days back, nor an entry of no time. The Journal isn't
+    # read, and Lc only up to its first page with nothing that recent
+    assert sent == {"SEL 2": ("SEL", "Critical", stamp(sel[1])), "IEL 1": ("IEL", "Warning", stamp(
+        bmc[f"{base}/IEL/Entries/1"])), "Ahead 1": ("Ahead", "OK", stamp(bmc[f"{base}/Ahead/Entries"]["Members"][0], 5)),
+        **{e["Message"]: ("Lc", "OK", stamp(e)) for e in lc[:4]}}, sent
+    assert f"{base}/Journal/Entries" not in fetched and f"{base}/Lc/Entries?$skip=6" not in fetched, fetched
+    assert f'redfish_log_entries{{host="h",log="{base}/SEL",name="SEL log"}} 3' in samples, samples
+    assert f'redfish_log_max_entries{{host="h",log="{base}/SEL",name="SEL log"}} 4096' in samples, samples
+    skew = [float(s.rsplit(" ", 1)[1]) for s in samples if s.startswith('redfish_bmc_clock_skew_seconds{host="h"}')]
+    assert len(skew) == 1 and abs(skew[0] - 18000) <= 1, samples  # 5 hours, to the second its clock is read at
+    # what is new only: an IEL entry read once isn't read again, nor Lc past the page of the entries it knows; a clock
+    # at 1970 gets the read time. The IEL entry that didn't answer is read now, still a first read: 40 days old, it's
+    # history, not news
+    sel += [entry("SEL", 4, ago(minutes=1), "Warning"), entry("SEL", 5, "1970-01-01T00:00:00Z")]
+    bmc[f"{base}/IEL/Entries/2"] = entry("IEL", 2, ago(days=40))
+    lc.insert(0, entry("Lc", 9, ago(seconds=30)))
+    logs(sel, lc)
+    samples, sent = run()
+    assert set(sent) == {"SEL 4", "SEL 5", "Lc 9"} and sent["SEL 4"][2] == stamp(sel[3]), sent
+    assert sent["SEL 5"][2] >= poller.nanoseconds(now), sent
+    assert f"{base}/IEL/Entries/1" not in fetched and f"{base}/Lc/Entries?$skip=4" not in fetched, fetched
+    assert f"{base}/IEL/Entries/2" in fetched and not state["logs"][f"{base}/IEL"]["first"], state["logs"]
+    # the SEL cleared between two reads, its Ids taken again: a new entry, and a gap line
+    logs([entry("SEL", 1, ago(seconds=20))], lc)
+    samples, sent = run()
+    assert sent.pop("SEL 1")[:2] == ("SEL", "OK") and len(sent) == 1, sent
+    assert next(iter(sent)).startswith("Gap: none of the 5 entries") and [*sent.values()][0][:2] == ("SEL", "Warning")
+    # Loki down: nothing counts as sent, the entry is pending, then sent next pass; its 400 counts as refused
+    sel = [entry("SEL", 1, ago(seconds=20)), entry("SEL", 2, ago(seconds=10)), entry("SEL", 3, ago(seconds=5))]
+    logs(sel, lc)
+    loki["answer"] = None
+    samples, sent = run()
+    assert not sent and 'redfish_log_pending{host="h"} 2' in samples, samples
+    loki["answer"] = (400, "entry with timestamp ... ignored, reason: 'entry too far behind',\nuser 'fake', total "
+                           "ignored: 1 out of 2 for stream: {host=\"h\"}\n")
+    samples, sent = run()
+    assert set(sent) == {"SEL 2", "SEL 3"} and 'redfish_log_refused{host="h"} 1' in samples, (sent, samples)
+    loki["answer"] = (204, "")
+    logs(sel + [entry("SEL", 4, "1970-01-01T00:00:00Z")], lc)
+    assert set(run()[1]) == {"SEL 4"}
+    # a restart from the state file: where the reads were, Loki not asked
+    with tempfile.TemporaryDirectory() as folder:
+        poller.save_log_state(folder, "h", state["logs"])
+        assert poller.load_log_state(folder, "h") == state["logs"], state["logs"]
+        state = {"logs": poller.load_log_state(folder, "h"), "refused": 0}
+    with patch.object(poller, "in_loki", lambda *a: 1 / 0):
+        samples, sent = run()
+    assert sent == {} and f"{base}/IEL/Entries/1" not in fetched, (sent, fetched)
+    # without one: each log's first read starts from what Loki has, so nothing goes again, not even the entry that got
+    # the read time, which Loki couldn't have dropped as the same line at the same time
+    state = {"logs": {}, "refused": 0}
+    samples, sent = run()
+    assert sent == {} and f"{base}/IEL/Entries/1" not in fetched, (sent, fetched)
+
 if __name__ == "__main__":
     failed = 0
     for name, test in list(globals().items()):
