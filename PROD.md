@@ -190,7 +190,12 @@ for its hosts.
 
 ### Host
 
-![Prod · Host: a Supermicro SYS-221H-TNR, its firmware, the health of every component and its ComponentIntegrity](docs/grafana/prod/supermicro.png)
+![Prod · Host: a Supermicro SYS-221H-TNR, its firmware and the health of every component](docs/grafana/prod/supermicro.png)
+
+The BMC's logs over 7 days: Critical and Warning entries, its Maintenance Event Log 99.6% full (it overwrites its
+oldest entries next), its entries over time by severity, and every entry, newest first; then its ComponentIntegrity
+
+![Prod · Host: the BMC's logs from Loki, and its ComponentIntegrity](docs/grafana/prod/supermicro-logs.png)
 
 ![Prod · Host: thermal and power](docs/grafana/prod/supermicro-details.png)
 
