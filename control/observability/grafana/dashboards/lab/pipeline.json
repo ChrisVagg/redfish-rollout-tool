@@ -2293,7 +2293,7 @@
    "options": {
     "showValue": "always",
     "mergeValues": true,
-    "rowHeight": 1,
+    "rowHeight": 0.5,
     "alignValue": "center",
     "legend": {
      "showLegend": true,
@@ -2357,7 +2357,8 @@
       }
      ],
      "color": {
-      "mode": "thresholds"
+      "mode": "fixed",
+      "fixedColor": "text"
      },
      "thresholds": {
       "mode": "absolute",
@@ -2383,7 +2384,7 @@
     "showValue": "always",
     "alignValue": "center",
     "mergeValues": true,
-    "rowHeight": 1,
+    "rowHeight": 0.5,
     "legend": {
      "showLegend": false
     }

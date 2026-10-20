@@ -909,7 +909,7 @@
     "showValue": "always",
     "alignValue": "center",
     "mergeValues": true,
-    "rowHeight": 1,
+    "rowHeight": 0.5,
     "legend": {
      "showLegend": false
     }
