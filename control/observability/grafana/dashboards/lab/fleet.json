@@ -1043,7 +1043,8 @@
        "updateable": "Updateable",
        "push": "Push",
        "pull": "Pull",
-       "software_id": "SoftwareId"
+       "software_id": "SoftwareId",
+       "ab_bank": "A/B bank"
       },
       "indexByName": {
        "host": 0,
@@ -1052,7 +1053,8 @@
        "version": 3,
        "updateable": 4,
        "push": 5,
-       "pull": 6
+       "pull": 6,
+       "ab_bank": 7
       }
      }
     }
@@ -1212,6 +1214,35 @@
            "result": {
             "color": "orange",
             "index": 2
+           }
+          }
+         }
+        ]
+       },
+       {
+        "id": "custom.cellOptions",
+        "value": {
+         "type": "color-text"
+        }
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "A/B bank"
+      },
+      "properties": [
+       {
+        "id": "mappings",
+        "value": [
+         {
+          "type": "regex",
+          "options": {
+           "pattern": "^yes.*",
+           "result": {
+            "color": "#00c9a7",
+            "index": 0
            }
           }
          }

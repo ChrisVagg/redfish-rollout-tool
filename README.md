@@ -33,7 +33,7 @@ tagged `writable` in NetBox. No production host is tagged.
 | Concurrency | one PostgreSQL lock per host, taken all-or-nothing per stage; locks never expire, a person releases them |
 | Audit | a run record per stage, written before and after every step; an append-only events table; `report.json` with who planned, approved and ran it |
 | Observability | an exporter per site → Prometheus; rollout events and BMC `LogService` entries → Loki; Grafana per site |
-| Tests | 30 unit tests on recorded Redfish data, 45 mutation cases, 6 fault-injection scenarios on the lab |
+| Tests | 31 unit tests on recorded Redfish data, 45 mutation cases, 6 fault-injection scenarios on the lab |
 
 ## Quick start
 
@@ -80,6 +80,8 @@ there is no Grace CPU or Blackwell GPU, so the lab updates the BMC's own firmwar
 serves Redfish on `127.1.0.N:443` (`bmc1` to `bmc10`, in 3 racks), login `root` / `0penBmc`, OpenBMC's public
 default. Each BMC has its own flash volume, so an update survives a restart. Compose boots them in batches of four
 to avoid CPU starvation with healthchecks per BMC.
+
+![The lab stack: the firmware's way in, the scripts and the ten QEMU BMCs they update](docs/lab-stack.svg)
 
 **Where the data lives:**
 
@@ -230,7 +232,7 @@ the fleet is on two builds, and the report says which host runs which.
 
 | Layer | Command | What it proves |
 |---|---|---|
-| Unit | `make test`: 30 tests, about a second, no BMC | the decisions that stop a bad image, on a real lab BMC's Redfish data ([testdata](tests/testdata/openbmc-gb200.json)) with one fact changed per case. `make update` runs it first |
+| Unit | `make test`: 31 tests, about a second, no BMC | the decisions that stop a bad image, on a real lab BMC's Redfish data ([testdata](tests/testdata/openbmc-gb200.json)) with one fact changed per case. `make update` runs it first |
 | Mutation | `make mutations`: 45 cases | each safety rule broken the way a careless edit would; the test that guards it must fail. 45 of 45 do |
 | Fault injection | `make fault SCENARIO=…` | the real pipeline on the lab's BMCs, past the network boundary the unit tests stop at |
 
@@ -367,7 +369,7 @@ scrapes it and remote-writes to the control plane, so nothing connects into a si
 | `redfish_host_info` | NetBox's vendor, project and rack; the BMC's Manufacturer and Model |
 | `redfish_health` | every object with a `Status`, fans and PSUs included |
 | `redfish_reading`, `_threshold`, `_crossed` | every sensor with its unit and `PhysicalContext`, its thresholds, how far past them (0 to 3) |
-| `redfish_firmware_info` | each component's version, `Updateable`, push and pull support |
+| `redfish_firmware_info` | each component's version, `Updateable`, push and pull support, and whether it reports an A/B bank (`ab_bank`) |
 | `redfish_network_link`, `redfish_network_speed_mbps` | every interface and port |
 | `redfish_component_integrity` | each `ComponentIntegrity` (SPDM, TPM) and the BMC's verdict |
 | `redfish_log_entries`, `redfish_log_max_entries`, `redfish_bmc_clock_skew_seconds` | how full each log is; the BMC clock's offset |
@@ -399,7 +401,7 @@ reports on real hosts, git-ignored. Prometheus's admin API (127.0.0.1 only) dele
 | Dashboard | Shows |
 |---|---|
 | Fleet manager | BMCs answering, worst health, a row per host; Redfish up, down or updating over time (an update's reset isn't an outage); firmware by model and version, where two versions on one model is drift |
-| Host | one BMC: firmware and how it can be updated, every component's health, its logs, network links, every reading per `PhysicalContext` against its thresholds, its update history from the state database |
+| Host | one BMC: firmware, how it can be updated and its A/B bank, every component's health, its logs, network links, every reading per `PhysicalContext` against its thresholds, its update history from the state database |
 | Pipeline | one rollout: verdict, counts, each host's pre-flight and wave, the gate after each wave, each host's numbered steps, the decision log, timelines, errors, the locks now |
 | Update details (lab) | the Redfish facts above, and per pipeline each host's evidence: pre-flight checks, push, Task, reset, rollback |
 | Architecture | the diagrams |
@@ -442,7 +444,8 @@ After `hybrid`: every BMC answers and is OK, but two BMC versions run on one mod
 
 ### Host
 
-One BMC in full: its firmware and how Redfish can update it, every component's health worst first, its logs from Loki,
+One BMC in full: its firmware, how Redfish can update it and whether it reports an A/B bank (a second image, inactive,
+staged or armed, beside the running one), every component's health worst first, its logs from Loki,
 its network links, every reading per `PhysicalContext` against its caution and critical thresholds, and every firmware
 update of the host from the state database.
 
@@ -606,7 +609,9 @@ The BMC stays the only truth about what runs: a host is read again over Redfish 
 
 - **A/B bank rollback.** Dual-bank BMCs keep the previous image in the inactive bank, so a rollback could be a bank
   switch: faster, and needing no image. Not built: the rollback reinstalls the version before, which is why
-  pre-flight requires its image. `Activate`, staged images and Jobs aren't driven either.
+  pre-flight requires its image. `Activate`, staged images and Jobs aren't driven either. The firmware tables in
+  Grafana and the plan already show which hosts report a bank (the **A/B bank** column), so the hosts this would serve
+  are known.
 - **Resume.** A stopped run keeps its locks; a person checks and unlocks the hosts, and it is planned again. Durable
   orchestration (resume, resolving a request whose answer was lost) belongs to the workflow engine.
 - **Limits beyond racks**: per PDU, fabric pod or spare capacity. **Rings**: rolling out region by region.

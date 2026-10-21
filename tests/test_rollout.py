@@ -814,6 +814,19 @@ def test_exposition():
                for line in poller.exposition({"host": "h"}, found, 1.0))
 
 
+# The firmware inventory's A/B bank, as the rollout's plan reads it: the lab BMC reports one image; a second, inactive
+# one in the Manager's SoftwareImages is a bank
+def test_firmware_info_ab_bank():
+    import poller
+    bmc = lambda found: next(line for line in poller.exposition({"host": "h"}, found, 1.0)
+                             if line.startswith("redfish_firmware_info") and f'component="{BMC}"' in line)
+    found = lab()
+    assert 'ab_bank="not reported: one image"' in bmc(found), bmc(found)
+    found[f"{FW}b"] = {**found[FW], "@odata.id": f"{FW}b", "Version": RUNNING[:5], "Active": False}
+    found[MGR]["Links"]["SoftwareImages"].append({"@odata.id": f"{FW}b"})
+    assert f'ab_bank="yes: Inactive {RUNNING[:5]}"' in bmc(found), bmc(found)
+
+
 # The network: every EthernetInterface and a NetworkAdapter's Ports, their LinkStatus and speed in Mbit/s; not the
 # Manager's USB ports
 def test_network():

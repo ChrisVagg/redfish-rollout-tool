@@ -70,8 +70,8 @@ from constants import (ACTION_ROW, ACTIONS_ROW, APPLY_TIME, BASELINE, CACHE_CA, 
                        SCENARIO, SCHEDULER_TIMEOUT, SITE, SPOOL, STEP_ROW, STYLE, TASK_TIMEOUT, VERSIONS_ROW, WAVE_ROW)
 from helpers import (block, first_of, first_real, identity, label, link, norm, obj, of, output_options, reason, sample,
                      show, text, uri_of)
-from poller import (allowable, entries, firmware, host_baseline, image_state, load_baseline, load_servers, open_jobs,
-                    software_ids, update_targets, update_targets_of, updatable, ways_in)
+from poller import (ab_bank, allowable, entries, firmware, host_baseline, image_state, load_baseline, load_servers,
+                    open_jobs, software_ids, update_targets, update_targets_of, updatable, ways_in)
 from redfish import call, login, logout, send, tunnel
 
 log = logging.getLogger("redfish")
@@ -163,32 +163,6 @@ def update_methods(found, update) -> list[str]:
     return [*(["multipart"] if update.get("MultipartHttpPushUri") else []),
             *([f"SimpleUpdate ({', '.join(protocols or ['protocols not listed'])})"] if action else []),
             *(["HttpPushUri"] if update.get("HttpPushUri") else [])]
-
-
-# Whether a component has a second firmware image, an A/B bank, as far as standard Redfish reports it
-def ab_bank(found, component) -> str:
-    """Yes: besides the running image (Active true, ImageState Active, or a manager's ActiveSoftwareImage), another
-    image of the component is reported, inactive, staged or armed; a manager's SoftwareImages count as its images.
-    Not reported: one image, several without saying which runs, or none linked. One reported image doesn't prove one
-    bank: a BMC may keep a second bank it doesn't expose (AMI shows it only in its Oem, see make detail SITE=prod)."""
-    if component not in update_targets(found):
-        return "-"
-    touched = entries(found, component)
-    running = marked_running(found, touched)
-    others = [d for d in touched if not any(d is r for r in running)]
-    if running and others:
-        return "yes: " + ", ".join(f"{image_state(d) or 'Inactive'} {text(d.get('Version'))}" for d in others)
-    if not touched:
-        return "not reported: no image linked"
-    if len(touched) == 1:
-        return "not reported: one image"
-    return f"not reported: {len(touched)} images, none marked Active"
-
-
-# The images among touched that run now: Active true, ImageState Active, or a manager's ActiveSoftwareImage
-def marked_running(found, touched) -> list[dict]:
-    active = {uri_of(obj(m.get("Links")).get("ActiveSoftwareImage")) for _, m in of(found, "Manager")} - {None}
-    return [d for d in touched if d.get("Active") is True or d.get("ImageState") == "Active" or uri_of(d) in active]
 
 
 # The row name a component key means on this host: SoftwareId:<id> becomes the row whose entries carry that id
