@@ -15,8 +15,8 @@ TYPE = re.compile(r"#?([^.]*)(?:\.(v\d+_\d+_\d+))?")  # '#Chassis.v1_14_0.Chassi
 # apart, only what is new each --log-interval, by the exporter (LOG_OWNERS)
 SKIP = re.compile(r"/(LogServices|Entries|Sessions|Accounts|Roles|Certificates|CertificateLocations|JsonSchemas|"
                   r"Schemas|Registries|Subscriptions|SubProcessors)(/|$)", re.IGNORECASE)
-# The BMC's logs, to Loki: the LogServices of its systems, managers and chassis, but not OpenBMC's Journal, the BMC's
-# own systemd journal (hundreds of lines a minute), not its events
+# The BMC's logs, to Loki: the LogServices of its systems, managers and chassis, and its JobService's Log, but not
+# OpenBMC's Journal, the BMC's own systemd journal (hundreds of lines a minute), not its events
 LOG_OWNERS = ("Systems", "Managers", "Chassis")  # the service root's collections whose members have LogServices
 LOG_SKIP = {"Journal"}
 LOG_HISTORY = 29 * 86400  # a log's first read sends its last 29 days: Loki takes 30 (loki.yaml), then deletes them
@@ -175,7 +175,7 @@ STYLE = {"OK": "green", "Enabled": "green", "Connected": "green", "Warning": "ye
          "halted": "bold red", "cancelled": "yellow", "incomplete": "yellow", "skipped": "yellow", "untouched": "dim", "Exception": "bold red"}
 # What BIOS/BMC firmware reports instead of a real value (compared case-insensitively); skipped in the summary.
 PLACEHOLDERS = {"", "-", "n/a", "na", "none", "unknown", "not available", "not specified", "default string",
-                "to be filled by o.e.m.", "system manufacturer", "system product name", "no dimm", "nil"}
+                "to be filled by o.e.m.", "system manufacturer", "system product name", "no dimm", "nil", "not present"}
 SEVERITY = {"Critical": 0, "Warning": 1}
 SUMMARY = ("Host", "Vendor", "Project", "Connection", "Resources", "Errors", "Seconds", "RedfishVersion",
            "Manufacturer", "Model", "Health", "Error")

@@ -87,6 +87,8 @@ BREAKS = [  # (what a careless edit does, the line as it is, the line broken, th
      '    return {} and {uri: {**k, "newest": k["newest"] and datetime.fromisoformat(', "test_bmc_logs"),
     ("the BMC's journal sent", 'if service.get("Id") in LOG_SKIP or not entries:', "if not entries:",
      "test_bmc_logs"),
+    ("the JobService's log not read", '| ({link(get(jobs), "Log")} - {None} if jobs else set())', "",
+     "test_bmc_logs"),
 ]
 
 if __name__ == "__main__":

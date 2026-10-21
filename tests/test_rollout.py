@@ -815,15 +815,17 @@ def test_exposition():
 
 
 # The firmware inventory's A/B bank, as the rollout's plan reads it: the lab BMC reports one image; a second, inactive
-# one in the Manager's SoftwareImages is a bank
+# one in the Manager's SoftwareImages is a bank, but not an empty slot (a Supermicro's Backup_BMC: "Not Present")
 def test_firmware_info_ab_bank():
     import poller
     bmc = lambda found: next(line for line in poller.exposition({"host": "h"}, found, 1.0)
                              if line.startswith("redfish_firmware_info") and f'component="{BMC}"' in line)
     found = lab()
     assert 'ab_bank="not reported: one image"' in bmc(found), bmc(found)
-    found[f"{FW}b"] = {**found[FW], "@odata.id": f"{FW}b", "Version": RUNNING[:5], "Active": False}
+    found[f"{FW}b"] = {**found[FW], "@odata.id": f"{FW}b", "Version": "Not Present", "Active": False}
     found[MGR]["Links"]["SoftwareImages"].append({"@odata.id": f"{FW}b"})
+    assert 'ab_bank="not reported: only empty slots"' in bmc(found), bmc(found)
+    found[f"{FW}b"]["Version"] = RUNNING[:5]
     assert f'ab_bank="yes: Inactive {RUNNING[:5]}"' in bmc(found), bmc(found)
 
 
@@ -972,6 +974,14 @@ def test_bmc_logs():
     state = {"logs": {}, "refused": 0}
     samples, sent = run()
     assert sent == {} and f"{base}/IEL/Entries/1" not in fetched, (sent, fetched)
+    # a JobService's Log (JobService v1_1_0): read as the managers' logs are
+    jobs = "/redfish/v1/JobService/Log"
+    found[poller.ROOT]["JobService"] = {"@odata.id": "/redfish/v1/JobService"}
+    bmc["/redfish/v1/JobService"] = {"@odata.type": "#JobService.v1_1_0.JobService", "Log": {"@odata.id": jobs}}
+    bmc[jobs] = {"Id": "Log", "Name": "Job log", "Entries": {"@odata.id": f"{jobs}/Entries"}}
+    job = {**entry("Job", 1, ago(minutes=2), "Warning"), "@odata.id": f"{jobs}/Entries/1"}
+    bmc[f"{jobs}/Entries"] = {"Members": [job]}
+    assert run()[1] == {"Job 1": ("Log", "Warning", stamp(job))}
 
 if __name__ == "__main__":
     failed = 0

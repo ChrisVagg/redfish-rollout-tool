@@ -33,7 +33,7 @@ tagged `writable` in NetBox. No production host is tagged.
 | Concurrency | one PostgreSQL lock per host, taken all-or-nothing per stage; locks never expire, a person releases them |
 | Audit | a run record per stage, written before and after every step; an append-only events table; `report.json` with who planned, approved and ran it |
 | Observability | an exporter per site → Prometheus; rollout events and BMC `LogService` entries → Loki; Grafana per site |
-| Tests | 31 unit tests on recorded Redfish data, 45 mutation cases, 6 fault-injection scenarios on the lab |
+| Tests | 31 unit tests on recorded Redfish data, 46 mutation cases, 6 fault-injection scenarios on the lab |
 
 ## Quick start
 
@@ -233,7 +233,7 @@ the fleet is on two builds, and the report says which host runs which.
 | Layer | Command | What it proves |
 |---|---|---|
 | Unit | `make test`: 31 tests, about a second, no BMC | the decisions that stop a bad image, on a real lab BMC's Redfish data ([testdata](tests/testdata/openbmc-gb200.json)) with one fact changed per case. `make update` runs it first |
-| Mutation | `make mutations`: 45 cases | each safety rule broken the way a careless edit would; the test that guards it must fail. 45 of 45 do |
+| Mutation | `make mutations`: 46 cases | each safety rule broken the way a careless edit would; the test that guards it must fail. 46 of 46 do |
 | Fault injection | `make fault SCENARIO=…` | the real pipeline on the lab's BMCs, past the network boundary the unit tests stop at |
 
 | What [tests/test_rollout.py](tests/test_rollout.py) covers | Cases |
@@ -248,7 +248,7 @@ the fleet is on two builds, and the report says which host runs which.
 | Ingest | packages unsigned, re-signed, tampered with, for another machine or holding a link are refused, and with them the batch |
 | Image cache, attestation, logs | a bad cached copy is deleted; SPDM only when it covers the part; log reads survive Loki down, clock skew, a cleared log, a restart |
 
-The mutations are 45 careless edits: a downgrade let through, versions compared as text, a sha256 mismatch ignored,
+The mutations are 46 careless edits: a downgrade let through, versions compared as text, a sha256 mismatch ignored,
 the rollback installing the target, the gate halting at exactly `failure_rate`, a held lock let through, `writable`
 taken from a config context, a secret sent as a BMC login, a log line lost while Loki is down… The first run found a
 real gap: the strict-wave case had enough failures to halt anyway, so it passed with wave 1 not strict. The gate and
@@ -374,9 +374,11 @@ scrapes it and remote-writes to the control plane, so nothing connects into a si
 | `redfish_component_integrity` | each `ComponentIntegrity` (SPDM, TPM) and the BMC's verdict |
 | `redfish_log_entries`, `redfish_log_max_entries`, `redfish_bmc_clock_skew_seconds` | how full each log is; the BMC clock's offset |
 
-**The BMCs' logs in Loki.** Every 5 minutes, over the same session, the exporter pages each `LogService`'s entries
-(not OpenBMC's `Journal`) and pushes the new ones to Loki as `{job="bmc-log", site, host, log, severity}`, with the
-standard properties only.
+**The BMCs' logs in Loki.** Every 5 minutes, over the same session, the exporter pages the entries of every
+`LogService` under the Systems, Managers and Chassis, and the JobService's `Log` (not OpenBMC's `Journal`), and
+pushes the new ones to Loki as `{job="bmc-log", site, host, log, severity}`, with the standard properties only. No
+BMC here reports a JobService log yet; the Gigabyte's JobService has none, the lab's has no JobService. TaskService
+has no log in the standard: tasks are read by pre-flight and the post-check, and recorded per pipeline.
 
 | When | The exporter |
 |---|---|

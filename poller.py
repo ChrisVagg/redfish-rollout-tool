@@ -498,15 +498,18 @@ def updatable(found, component) -> str:
 def ab_bank(found, component) -> str:
     """Yes: besides the running image (Active true, ImageState Active, or a manager's ActiveSoftwareImage), another
     image of the component is reported, inactive, staged or armed; a manager's SoftwareImages count as its images.
-    Not reported: one image, several without saying which runs, or none linked. One reported image doesn't prove one
-    bank: a BMC may keep a second bank it doesn't expose (AMI shows it only in its Oem, see make detail SITE=prod)."""
+    Not reported: one image, several without saying which runs, or none linked; an image without a real version is an
+    empty slot (a Supermicro's Backup_BMC reports "Not Present"). One reported image doesn't prove one bank: a BMC may
+    keep a second bank it doesn't expose (AMI shows it only in its Oem, see make detail SITE=prod)."""
     if component not in update_targets(found):
         return "-"
     touched = entries(found, component)
     running = marked_running(found, touched)
     others = [d for d in touched if not any(d is r for r in running)]
     if running and others:
-        return "yes: " + ", ".join(f"{image_state(d) or 'Inactive'} {text(d.get('Version'))}" for d in others)
+        banks = [d for d in others if real(d.get("Version"))]
+        return ("yes: " + ", ".join(f"{image_state(d) or 'Inactive'} {text(d.get('Version'))}" for d in banks)
+                if banks else "not reported: only empty slots")
     if not touched:
         return "not reported: no image linked"
     if len(touched) == 1:
@@ -700,7 +703,10 @@ def read_logs(server, tunnel, found, state, loki) -> list[str]:
     members = lambda u: [m for m in map(uri_of, get(u).get("Members") or []) if m] if u else []
     try:
         owners = {link(get(m), "LogServices") for c in LOG_OWNERS for m in members(link(get(ROOT), c))} - {None}
-        for uri in sorted({m for o in owners for m in members(o)}):
+        # and the JobService's Log, a LogService of its own or a pointer to a manager's: a set reads that one once
+        jobs = link(get(ROOT), "JobService")
+        logs = {m for o in owners for m in members(o)} | ({link(get(jobs), "Log")} - {None} if jobs else set())
+        for uri in sorted(logs):
             service, read_at = call(tunnel, uri), datetime.now(timezone.utc)
             entries = link(service, "Entries")
             if service.get("Id") in LOG_SKIP or not entries:
