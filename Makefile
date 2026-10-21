@@ -85,6 +85,7 @@ Poller: reads every BMC's Redfish resources, never writes
   make telemetry           every sensor with its thresholds; hottest and highest power per host
   make capabilities        what each model can do: Redfish version, services, actions, update methods
   make diff                what changed since the previous collect
+  make oem [MODEL=...]     each model's vendor (Oem) extensions per BMC firmware, update-related first; discovery only
   make detail HOST=...     everything about one host
   make views               every view into <site>/reports/ as HTML and JSON
 
@@ -112,7 +113,7 @@ export HELP
 .DEFAULT_GOAL := help
 .DELETE_ON_ERROR:
 .PHONY: help setup test mutations control-up control-down state unlock site-up site-logs site-down lab-up lab-down \
-        lab-reset lab-clean collect $(VIEWS) detail views plan dry-run update report watch cancel fault
+        lab-reset lab-clean collect $(VIEWS) oem detail views plan dry-run update report watch cancel fault
 
 help:
 	@printf '%s\n' "$$HELP"
@@ -214,13 +215,16 @@ collect:
 $(VIEWS):
 	$(ENV) $(PY) poller.py $@ $(ARGS)
 
+oem:
+	$(ENV) $(PY) poller.py oem $(if $(MODEL),--model "$(MODEL)") $(ARGS)
+
 detail:
 	$(if $(HOST),,$(error set HOST, e.g. make detail HOST=127.1.0.1))
 	$(ENV) $(PY) poller.py detail $(HOST) $(ARGS)
 
 views:
 	@mkdir -p $(SITE)/reports
-	@for v in $(VIEWS); do \
+	@for v in $(VIEWS) oem; do \
 	  $(ENV) COLUMNS=$(WIDTH) $(PY) poller.py $$v --html $(SITE)/reports/$$v.html --json $(SITE)/reports/$$v.json \
 	    > /dev/null || exit 1; \
 	  echo "$(SITE)/reports/$$v.html  $(SITE)/reports/$$v.json"; \

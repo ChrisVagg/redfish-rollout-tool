@@ -31,6 +31,12 @@ ACTIONS = re.compile(r"(^|/)Actions/")  # operations (standard or Oem), not prop
 ACTION = re.compile(r"^(?:.*/)?Actions/(?:[^#]*/)?(#[^/]+)/(.+)$")  # an action's name, and one of its properties
 ALLOWED = re.compile(r"^(\w+)@Redfish\.AllowableValues/\d+$")  # one allowed value of an action parameter
 OEM_PATH = re.compile(r"(?:(.*)/)?Oem/([^/]+)/?(.*)")  # before Oem, vendor, vendor property
+# The oem view: each model's vendor extensions, those that matter to a firmware update first. Why one matters is read
+# from its name and path only (ponytail: a name heuristic, it can miss or over-flag; the vendor's schema would say)
+OEM_ROW = ("Update", "Extension", "On", "Property", "Value e.g.", "Hosts")
+UPDATE_HINTS = tuple((why, re.compile(p, re.IGNORECASE)) for why, p in (
+    ("job", r"job|task"), ("bank", r"bank|backup|golden|dual"), ("staging", r"stag|activat|pending|schedul"),
+    ("update", r"updat|install|firmware|flash|upgrad")))
 WILDCARD = re.compile(r"\\\{(\w+)\\\}")  # {Name} in a re.escape'd MetricProperties URI
 # The reason inside a requests error message, without host, URL or object reprs.
 REASON = re.compile(r"\[Errno -?\d+\] [^'\"()]+|(?:Read )?timed out|certificate verify failed[^'\"(]*"

@@ -1253,6 +1253,10 @@
         "value": {
          "type": "color-text"
         }
+       },
+       {
+        "id": "description",
+        "value": "Whether the BMC reports a second image of this component in standard Redfish: inactive, staged or armed, beside the running one. 'not reported' means the standard shows none; the vendor may still keep one in its Oem extensions (AMI: DualImageConfigurations). The vendor's view, per model and BMC firmware: make oem SITE=<site> MODEL=<model>"
        }
       ]
      }

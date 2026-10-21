@@ -829,6 +829,31 @@ def test_firmware_info_ab_bank():
     assert f'ab_bank="yes: Inactive {RUNNING[:5]}"' in bmc(found), bmc(found)
 
 
+# The oem view's discovery: an Oem property and an Oem action of a standard resource, every property of a job only an
+# Oem link leads to, a resource refused with 403; the update-related ones named so
+def test_oem():
+    import poller
+    jobs = "/redfish/v1/Managers/1/Oem/Acme/Jobs"
+    found = {poller.ROOT: {"Managers": {"@odata.id": "/redfish/v1/Managers"},
+                           "UpdateService": {"@odata.id": "/redfish/v1/UpdateService"}},
+             "/redfish/v1/Managers": {"Members": [{"@odata.id": "/redfish/v1/Managers/1"}]},
+             "/redfish/v1/Managers/1": {"@odata.type": "#Manager.v1_19_0.Manager",
+                                        "Oem": {"Acme": {"FanMode": "Full", "Jobs": {"@odata.id": jobs}}}},
+             jobs: {"@odata.type": "#AcmeJobCollection.AcmeJobCollection", "Members": [{"@odata.id": f"{jobs}/7"}]},
+             f"{jobs}/7": {"@odata.type": "#AcmeJob.v1_0_0.AcmeJob", "JobState": "Scheduled"},
+             "/redfish/v1/UpdateService": {"@odata.type": "#UpdateService.v1_11_1.UpdateService", "Actions": {
+                 "Oem": {"#AcmeUpdateService.Install": {"target": "/redfish/v1/UpdateService/Actions/Install"}}}},
+             "/redfish/v1/Chassis/1/Drives/3": {"error": "HTTPError: 403 Client Error: Forbidden"}}
+    assert poller.oem_only(found) == {jobs, f"{jobs}/7", "/redfish/v1/Chassis/1/Drives/3"}, poller.oem_only(found)
+    got = {k: (v, poller.update_hint(k)) for k, v in poller.extensions(found).items()}
+    assert got == {("Acme", "Manager", "FanMode"): ("Full", ""),
+                   ("AcmeJob", "(Oem resource)", "JobState"): ("Scheduled", "job"),
+                   ("#AcmeUpdateService.Install", "UpdateService", "Actions/target"):
+                       ("/redfish/v1/UpdateService/Actions/Install", "update"),
+                   ("(refused)", "/redfish/v1/Chassis/[]/Drives/[]", "-"):
+                       ("HTTPError: 403 Client Error: Forbidden", "")}, got
+
+
 # The network: every EthernetInterface and a NetworkAdapter's Ports, their LinkStatus and speed in Mbit/s; not the
 # Manager's USB ports
 def test_network():

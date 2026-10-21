@@ -18,6 +18,9 @@
   capabilities              What each hardware model can do: Redfish version, services, actions, firmware update
                             methods, telemetry support.
   diff                      What changed on each host between the previous collect and the latest one.
+  oem [--model M]           Each model's vendor extensions per BMC firmware version: Oem properties and actions,
+                            resources only an Oem link leads to, resources refused with 403; those whose name is
+                            about jobs, updates, banks or staging first. Discovery only: no update depends on them.
   exporter                  Crawl every BMC each --interval and serve the readings, health, firmware and BMC
                             resources as Prometheus metrics on --listen. One session per BMC, kept across crawls;
                             a host whose fresh login is refused is not asked again until a restart. Each
@@ -58,8 +61,8 @@ from rich.text import Text
 from constants import (ACCOUNT, ACTION, ALLOWED, BASELINE, CAPABILITIES_ROW, CHASSIS, COMPLIANCE_ROW, CONNECTION,
                        CRITICAL, DMTF, FIELDS, FW_PARTS, INVENTORY_ROW, JOBS_ROW, JOB_TYPES, KIND, LIMIT, LINK, LINKS,
                        LOG_BUDGET, LOG_HISTORY, LOG_LATE, LOG_OWNERS, LOG_SKEW, LOG_SKIP, MANAGER, NETBOX_URL,
-                       NETWORK_PORT, OEM_PATH, PREVIOUS, PROPS, READINGS, ROOT, SCHEMAS, SENSORS, SERVICE, SEVERITY, SITE, SKIP, STATUS_LEAF, SUMMARY, SYSTEM, TELEMETRY_ROW, TEMPLATES,
-                       THRESHOLD, VOLATILE, WILDCARD)
+                       NETWORK_PORT, OEM_PATH, OEM_ROW, PREVIOUS, PROPS, READINGS, ROOT, SCHEMAS, SENSORS, SERVICE, SEVERITY, SITE, SKIP, STATUS_LEAF, SUMMARY, SYSTEM, TELEMETRY_ROW, TEMPLATES,
+                       THRESHOLD, UPDATE_HINTS, VOLATILE, WILDCARD)
 from helpers import (at, block, choose, connection, details, discrete, first_of, first_real, identity, items, label,
                      link, load, named, norm, obj, of, output_options, per_host, pick, pointer, previous, properties,
                      reachable, real, reason, rollup, rtype, sample, show, snapshot_path, tally, text, uri_of)
@@ -1195,6 +1198,67 @@ def view_diff(args) -> list:
                   caption_justify="left") or Text(f"No changes · {since}")]
 
 
+# The resources only an Oem link leads to: what a crawl blind to every Oem object would never have read
+def oem_only(found) -> set[str]:
+    # lambda x: a document without its Oem objects, at any depth (its Actions' Oem too)
+    strip = lambda x: ({k: strip(v) for k, v in x.items() if k != "Oem"} if isinstance(x, dict)
+                       else [strip(v) for v in x] if isinstance(x, list) else x)
+    seen, todo = set(), [ROOT]
+    while todo:
+        if (u := todo.pop()) in found and u not in seen:
+            seen.add(u)
+            todo += links(strip(found[u]))
+    return set(found) - seen
+
+
+# One host's vendor extensions, {(extension, on, property): an example value}: every Oem property and Oem action of a
+# standard resource, every property of a resource only Oem leads to, and every resource refused with 403 (a license
+# or the account's role: what it holds is unknown). Array indexes become [], so hosts and members line up
+def extensions(found) -> dict[tuple[str, str, str], str]:
+    out, only = {}, oem_only(found)
+    shape = lambda p: re.sub(r"/\d+(?=/|$)", "/[]", p)
+    for u, d in found.items():
+        if "error" in d:
+            if "403" in str(d["error"]):
+                out.setdefault(("(refused)", shape(u), "-"), text(d["error"]))
+            continue
+        for p, v in properties(d).items():
+            if "@" in p:
+                continue
+            if u in only:
+                out.setdefault((rtype(d)[0] or "-", "(Oem resource)", shape(p)), text(v))
+            elif m := OEM_PATH.fullmatch(p):
+                before, name, rest = m.groups()
+                out.setdefault((name, rtype(d)[0] or "-", shape("/".join(filter(None, (before, rest))))), text(v))
+    return out
+
+
+# Why an extension matters to a firmware update, from its name and path: job, update, bank, staging, or ""
+def update_hint(key) -> str:
+    return next((why for why, pattern in UPDATE_HINTS if pattern.search("/".join(key))), "")
+
+
+# View oem: each model's vendor extensions per BMC firmware version, those that matter to an update first; read from
+# the snapshots, as discovery: nothing here decides an update, which stays on standard Redfish
+def view_oem(args) -> list:
+    groups = {}
+    for snap, found in per_host(lambda s: (s, extensions(s["resources"])), load()):
+        r = snap["resources"]
+        model = (*identity(r), text(first_of(r, "Manager").get("FirmwareVersion")))
+        if not args.model or args.model.casefold() in " ".join(model[:2]).casefold():
+            groups.setdefault(model, []).append(found)
+    out = []
+    for (maker, model, bmc), hosts in sorted(groups.items()):
+        seen = Counter(k for h in hosts for k in h)
+        rows = sorted(((update_hint(k), *k, next(h[k] for h in hosts if k in h)[:60], f"{n}/{len(hosts)}")
+                       for k, n in seen.items()), key=lambda row: (row[0] == "", row))
+        flagged = sum(1 for row in rows if row[0])
+        out.append(block(f"{maker} {model} · BMC {bmc} · {len(hosts)} host{'s' * (len(hosts) > 1)}", OEM_ROW, rows,
+                         caption=f"{len(rows)} extensions, {flagged} named for jobs, updates, banks or staging",
+                         caption_justify="left"))
+    return out or [Text(f"No snapshot matches {args.model}")]
+
+
 # View detail: the full report of one host
 def view_detail(args) -> list:
     try:
@@ -1217,6 +1281,9 @@ def main() -> None:
     command("telemetry", view_telemetry, "every sensor of every host, with its limits")
     command("capabilities", view_capabilities, "what each hardware model can do")
     command("diff", view_diff, "what changed since the previous collect")
+    o = commands.add_parser("oem", parents=[output], help="each model's vendor extensions, update-related first")
+    o.add_argument("--model", help="only the models whose manufacturer and model contain this, any case")
+    o.set_defaults(run=view_oem)
     e = commands.add_parser("exporter", help="read every BMC each interval, serve the metrics to Prometheus")
     e.add_argument("--listen", default="127.0.0.1:9101", help="address:port to serve /metrics on [127.0.0.1:9101]")
     e.add_argument("--interval", type=float, default=10, help="seconds between two reads of every BMC [10]")

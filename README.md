@@ -283,7 +283,12 @@ Checked on real Redfish services with the latest DMTF schemas.
   budget of three intervals.
 - `$filter` can't ask for new log entries only: a Supermicro answers `Created gt …` with 400, bmcweb returns the
   whole log.
-- iDRAC 8 keeps update jobs as Oem `DellJob` resources, which a standard-only tool doesn't read.
+- What a model keeps outside the standard around updates is in its Oem extensions, which `make oem [MODEL=...]`
+  lists per model and BMC firmware, update-related first: iDRAC 8's update jobs (Oem `DellJob`, its job queue), AMI's
+  second BMC image (`DualImageConfigurations`: a Gigabyte's image 2 runs 13.06.10, invisible to the standard A/B
+  check), HPE's backup BIOS ROM, Supermicro's `SmcUpdateService.Install`, and the resources a license or role refuses
+  (403). It is discovery, to qualify a model: pre-flight and the post-check judge standard Jobs and Tasks only, as an
+  Oem path can change with the firmware the rollout installs.
 
 | BMC | Log entry order | Paging | Clock |
 |---|---|---|---|
@@ -570,8 +575,8 @@ account's env vars, which `prod/.env` (git-ignored) sets:
   privileges, verified per BMC. The `writable` tag is an application gate, not proof of a Redfish role.
 - **Scope**: tag hosts `writable` only for the change window, each with its rack, and a few spare hosts per model
   `canary`.
-- **Activation**: validate the supported apply time, reset and recovery per model. Only OpenBMC's path has been
-  exercised end to end.
+- **Activation**: validate the supported apply time, reset and recovery per model, and read `make oem MODEL=...` for
+  what the model keeps in Oem (a job queue, a second image). Only OpenBMC's path has been exercised end to end.
 - **Scheduler**: write and test `drain` and `undrain` (`{node}`); the drain returns once the node is empty.
 - **Images**: the vendor packages in `prod/images.yaml` with their sha256, and the packages of the versions running
   now, so every host has a way back; served from the site's HTTPS cache (`IMAGE_CACHE`).
@@ -634,7 +639,7 @@ The BMC stays the only truth about what runs: a host is read again over Redfish 
 Makefile        every command: make help
 pipeline.sh     plan → canary → waves → report
 rollout.py      plan, run, report
-poller.py       collect, the views (health, firmware, inventory, telemetry, capabilities, diff) and the exporter
+poller.py       collect, the views (health, firmware, inventory, telemetry, capabilities, diff, oem) and the exporter
 redfish.py      the Redfish connection both tools share: session, token, GET, POST, DELETE
 constants.py    what to crawl, table columns, rollout constants
 helpers.py      shared helpers
