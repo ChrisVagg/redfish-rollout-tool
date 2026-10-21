@@ -993,7 +993,7 @@ def after_checks(found, key, want, before) -> tuple[bool, list[dict], str]:
 # How the post-check knows the running version: the firmware reports it itself, "self-reported", unless the BMC
 # reports SPDM integrity for the component, a ComponentIntegrity that targets or protects one of its firmware inventory
 # entries or what they belong to (RelatedItem). That is only offered here: checking its signed measurements against the
-# release's reference values is production's (PROD.md)
+# release's reference values is production's (README.md, Not built yet)
 def evidence(found, component) -> str:
     docs = entries(found, component)
     mine = {uri_of(d) for d in docs} | {uri_of(i) for d in docs for i in d.get("RelatedItem") or []}

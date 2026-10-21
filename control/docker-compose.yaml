@@ -104,7 +104,7 @@ services:
     image: prom/prometheus:v3.15.0
     restart: unless-stopped
     network_mode: host
-    # the admin API deletes a pipeline's history (LAB.md, Prometheus); the remote-write receiver takes the agents'
+    # the admin API deletes a pipeline's history (README.md, Observability); the remote-write receiver takes the agents'
     # samples. Both on 127.0.0.1 only. Samples are kept 30 days, as Loki keeps its events
     command: [--config.file=/etc/prometheus/prometheus.yml, --storage.tsdb.path=/prometheus,
               --storage.tsdb.retention.time=30d,

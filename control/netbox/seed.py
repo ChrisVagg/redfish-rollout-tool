@@ -7,7 +7,7 @@ NetBox's own edits stay:
   the lab's ten BMCs, when site lab has no device: bmc1 to bmc10 on 127.1.0.N, as lab/docker-compose.yaml runs them,
     NVIDIA GB200 NVL in racks r1 to r3 in turn, each tagged writable, bmc1 also canary
 A device is the server and its BMC how it's reached: its management-only interface bmc holds the BMC's address, the
-device's out-of-band IP. Prod's servers are added in NetBox (PROD.md), each with the platform whose config context
+device's out-of-band IP. Prod's servers are added in NetBox (README.md, Production), each with the platform whose config context
 names its BMC account."""
 import os
 

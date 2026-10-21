@@ -420,7 +420,7 @@ def load_servers(url=NETBOX_URL, site=SITE.name) -> list[dict]:
 # Crawl every BMC in parallel, snapshot each host and return the summary table
 def collect(args) -> list:
     if not (servers := load_servers()):
-        raise SystemExit(f"no BMC in NetBox site {SITE.name}: its hosts are added in NetBox (PROD.md)")
+        raise SystemExit(f"no BMC in NetBox site {SITE.name}: its hosts are added in NetBox (README.md, Production)")
     tunnels = [tunnel(server) for server in servers]
     with ThreadPoolExecutor(len(servers)) as pool:
         snaps = list(pool.map(snapshot, servers, tunnels))
@@ -561,7 +561,7 @@ def exposition(server, found, seconds) -> list[str]:
                           software_id=ids.get(component, "-"), updateable=updatable(found, component), push=push,
                           pull=pull))
     # Each part whose integrity the BMC reports (ComponentIntegrity: SPDM or TPM), with the BMC's own verdict on its
-    # identity; nothing here checks its signed measurements (PROD.md, SPDM attestation)
+    # identity; nothing here checks its signed measurements (README.md, Not built yet: SPDM attestation)
     for uri, d in of(found, "ComponentIntegrity"):
         kind = text(d.get("ComponentIntegrityType"))
         verdict = obj(obj(d.get(kind)).get("IdentityAuthentication")).get("VerificationStatus")
