@@ -829,6 +829,42 @@ def test_firmware_info_ab_bank():
     assert f'ab_bank="yes: Inactive {RUNNING[:5]}"' in bmc(found), bmc(found)
 
 
+# BMC events: a writable host gets one subscription to /events/<host>, the receiver's credentials in its HttpHeaders;
+# run again it is kept, --remove deletes it; a host NetBox doesn't tag writable is never touched
+def test_subscribe():
+    subs = "/redfish/v1/EventService/Subscriptions"
+    bmc = {rollout.ROOT: {"EventService": {"@odata.id": "/redfish/v1/EventService"}},
+           "/redfish/v1/EventService": {"Subscriptions": {"@odata.id": subs}}, subs: {"Members": []}}
+    sent = []
+
+    def send(t, method, uri, **kw):  # the BMC: a POST adds a subscription, a DELETE removes it
+        sent.append((method, uri, kw.get("json")))
+        if method == "POST":
+            new = f"{subs}/{len(sent)}"
+            bmc[subs]["Members"].append({"@odata.id": new})
+            bmc[new] = dict(kw["json"])
+            return 201, {"Location": new}, {}
+        bmc[subs]["Members"] = [m for m in bmc[subs]["Members"] if m["@odata.id"] != uri]
+        return 204, {}, {}
+    dest, auth = "http://172.19.0.1:8088/events/127.1.0.1", {"Authorization": "Basic eA=="}
+    with patch.object(rollout, "call", lambda t, u: copy.deepcopy(bmc.get(u, {"error": "404"}))), \
+         patch.object(rollout, "send", send):
+        assert rollout.subscription(None, dest, auth) == ("created", f"{subs}/1"), sent
+        assert sent[0][2] == {"Destination": dest, "Protocol": "Redfish", "EventFormatType": "Event",
+                              "Context": "127.1.0.1", "HttpHeaders": [auth]}, sent
+        assert rollout.subscription(None, dest, auth) == ("kept", f"{subs}/1") and len(sent) == 1, sent
+        assert rollout.subscription(None, dest, auth, remove=True) == ("removed 1 of 1", f"{subs}/1")
+        assert bmc[subs]["Members"] == [], bmc[subs]
+    touched = []
+    servers = [{"host": "127.1.0.1", "writable": True}, {"host": "10.0.0.9", "writable": False}]
+    env = {"EVENT_RECEIVER": "http://172.19.0.1:8088/", "EVENT_PASSWORD": "p"}
+    with patch.dict(os.environ, env), patch.object(rollout, "load_servers", lambda: servers), \
+         patch.object(rollout, "tunnel", lambda s: s), patch.object(rollout, "login", lambda t: None), \
+         patch.object(rollout, "subscription", lambda t, d, h, r: touched.append((t["host"], d)) or ("created", "-")):
+        rollout.subscribe(SimpleNamespace(remove=False))
+    assert touched == [("127.1.0.1", dest)], touched
+
+
 # The oem view's discovery: an Oem property and an Oem action of a standard resource, every property of a job only an
 # Oem link leads to, a resource refused with 403; the update-related ones named so
 def test_oem():

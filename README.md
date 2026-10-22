@@ -18,7 +18,7 @@ tagged `writable` in NetBox. No production host is tagged.
 [The rollout](#the-rollout) · [Failure modes](#failure-modes-tested-on-the-lab) · [Testing](#testing) ·
 [Redfish in practice](#redfish-in-practice) · [Supply chain](#firmware-supply-chain) ·
 [Inventory](#inventory-netbox) · [Observability](#observability) · [Grafana](#grafana-dashboards) ·
-[Production](#production) · [Not built yet](#not-built-yet) · [Layout](#repository-layout)
+[Production](#production) · [To do](#what-needs-to-be-done) · [Layout](#repository-layout)
 
 ## At a glance
 
@@ -32,8 +32,8 @@ tagged `writable` in NetBox. No production host is tagged.
 | Change control | `plan.json` freezes the inputs (file sha256s, NetBox entries, each BMC's identity); later stages refuse anything that changed. Baseline and catalog are YAML reviewed in git |
 | Concurrency | one PostgreSQL lock per host, taken all-or-nothing per stage; locks never expire, a person releases them |
 | Audit | a run record per stage, written before and after every step; an append-only events table; `report.json` with who planned, approved and ran it |
-| Observability | an exporter per site → Prometheus; rollout events and BMC `LogService` entries → Loki; Grafana per site |
-| Tests | 31 unit tests on recorded Redfish data, 46 mutation cases, 6 fault-injection scenarios on the lab |
+| Observability | an exporter per site → Prometheus; rollout events, BMC `LogService` entries and, on the lab, the BMCs' pushed events (`EventService` → Vector) → Loki; Grafana per site |
+| Tests | 33 unit tests on recorded Redfish data, 48 mutation cases, 6 fault-injection scenarios on the lab |
 
 ## Quick start
 
@@ -48,7 +48,7 @@ GRAFANA_ADMIN_PASSWORD=...
 ```sh
 make setup        # venv
 make test         # unit tests, no BMC needed
-make lab-up       # control plane, lab site, OpenBMC's two newest builds, 10 BMCs (~10 min)
+make lab-up       # control plane, lab site, OpenBMC's two newest builds, 10 BMCs and their event subscriptions (~10 min)
 make collect      # read every BMC; then make health, make firmware, ...
 make dry-run      # planning of the rollout - read only
 make update       # update
@@ -66,12 +66,12 @@ the real fleet; `make update` and `make fault` refuse it. To roll the lab back, 
 ![The lab, drawn on the production system's layout](docs/lab-solution-architecture.svg)
 
 Three parts, one Compose file each, laid out as distributed systems. In the lab they share one host, every port on
-127.0.0.1.
+127.0.0.1 but the event receiver's (:8088), which the BMCs reach over their own network, behind its credentials.
 
 | Part | Runs | Connects to |
 |---|---|---|
 | **Control plane**, one per fleet: [control/](control/docker-compose.yaml) | image ingest and approved store (SeaweedFS), NetBox, the firmware catalog (YAML file in git), the state database (PostgreSQL), Prometheus, Pushgateway, Loki, Grafana | - |
-| **Site**, one per site: [site/](site/docker-compose.yaml) | the exporter, a Prometheus agent (writes to Prometheus control instance), the HTTPS image cache (nginx); `rollout.py run` as the site agent | control plane |
+| **Site**, one per site: [site/](site/docker-compose.yaml) | the exporter, a Prometheus agent (writes to Prometheus control instance), the HTTPS image cache (nginx), the event receiver (Vector, the lab); `rollout.py run` as the site agent | control plane; the BMCs post their events to it |
 | **Lab hardware**: [lab/](lab/docker-compose.yaml) | ten emulated BMCs | |
 
 **A lab BMC** is a container running OpenBMC's `qemu-system-arm` with the `gb200nvl-bmc` machine: a full emulation of
@@ -89,12 +89,34 @@ to avoid CPU starvation with healthchecks per BMC.
 |---|---|---|---|
 | Prometheus | the exporter, through the site's agent | every reading and threshold, health, firmware versions, links, BMCs answering | 30 days |
 | Pushgateway → Prometheus | `rollout.py run`, after every event | hosts per wave and state, versions, step durations, post-check results, gates | until restart; 30 days in Prometheus |
-| Loki | `rollout.py`; the exporter | every rollout event, with its detail; each BMC's `LogService` entries | 30 days |
+| Loki | `rollout.py`; the exporter; Vector | every rollout event, with its detail; each BMC's `LogService` entries; the lab BMCs' pushed events | 30 days |
 | PostgreSQL | `rollout.py run --yes` | `host_locks`; `events`, append-only; `host_state`, each host's latest state | until deleted |
 | `<site>/runs/` | `rollout.py` | `plan.json`, the run records (`.jsonl`), `report.json` and `report.html` | local files |
 
 The Pushgateway is a lab shortcut: `rollout.py run` is a short-lived command. In production the rollout runs as
 long-lived services that serve their own `/metrics`.
+
+**What each path takes from the BMC.** Only two processes talk to a BMC: the exporter, read-only and always, and
+`rollout.py`, which reads and writes during a rollout. The BMC itself pushes to Vector. Prometheus, its agent, the
+Pushgateway and Loki never touch a BMC.
+
+```
+BMC ──GET whole tree · 10 s lab, 30 s prod──▶ exporter ──/metrics──▶ agent ──remote write──▶ Prometheus
+BMC ──GET LogService entries · 5 min────────▶ exporter ──────────────push──────────────────▶ Loki {job="bmc-log"}
+BMC ◀─GET + POST · during a rollout────────── rollout.py ──PUT──▶ Pushgateway ◀─scrape 5 s── Prometheus
+                                              rollout.py ───────────────push───────────────▶ Loki {job="rollout"}
+BMC ──POST each event · as it happens───────▶ Vector ────────────────push──────────────────▶ Loki {job="bmc-event"}
+```
+
+| Path | Over Redfish | Stored |
+|---|---|---|
+| exporter → agent → Prometheus | GET the whole tree but logs, sessions, accounts, certificates, registries: `Status` (health), `Sensor`, `Thermal`, `Power` (readings, thresholds), `SoftwareInventory` and `UpdateService` (version, `Updateable`, push/pull, A/B bank), `EthernetInterface` and `Port`, `ComponentIntegrity`, `ManagerDiagnosticData` | numbers over time: `redfish_*` |
+| exporter → Loki | GET each `LogService` of the systems, managers and chassis, and `JobService.Log`: its new `Entries`, its `DateTime` (the BMC's clock) and `MaxNumberOfRecords` | a line per entry; each log's size and the clock's skew go to Prometheus |
+| `rollout.py` → Pushgateway → Prometheus, and → Loki | a live read of 10-30 GETs per host (systems, managers and their health and identity, `UpdateService`, the firmware inventory, Tasks, Jobs, `ComponentIntegrity`, the reset ActionInfo); then the writes: the image push, `Manager.Reset` or `ComputerSystem.Reset`, and the update's Task polled to its end | the rollout's decisions, not BMC data: `rollout_*` metrics (hosts per state, step durations, gates), and in Loki each step with its checks, the Task's messages and a rollback's reason |
+| BMC → Vector → Loki (the lab) | nothing read: the BMC posts its `Event` payloads (`MessageId`, `Message`, `Severity`, `EventTimestamp`, `OriginOfCondition`) to the subscription `rollout.py subscribe` made | a line per event, labelled with the BMC and its severity |
+
+The BMCs know nothing of canaries, waves or gates, so the rollout's stream stays even where every BMC pushes; the log
+reads stay too, for what a lost delivery misses. Detail: [BMC events, pushed](#observability).
 
 ## The rollout
 
@@ -233,7 +255,7 @@ the fleet is on two builds, and the report says which host runs which.
 | Layer | Command | What it proves |
 |---|---|---|
 | Unit | `make test`: 31 tests, about a second, no BMC | the decisions that stop a bad image, on a real lab BMC's Redfish data ([testdata](tests/testdata/openbmc-gb200.json)) with one fact changed per case. `make update` runs it first |
-| Mutation | `make mutations`: 46 cases | each safety rule broken the way a careless edit would; the test that guards it must fail. 46 of 46 do |
+| Mutation | `make mutations`: 48 cases | each safety rule broken the way a careless edit would; the test that guards it must fail. 48 of 48 do |
 | Fault injection | `make fault SCENARIO=…` | the real pipeline on the lab's BMCs, past the network boundary the unit tests stop at |
 
 | What [tests/test_rollout.py](tests/test_rollout.py) covers | Cases |
@@ -246,9 +268,10 @@ the fleet is on two builds, and the report says which host runs which.
 | Locks, events | all or none; a `needs_attention` host keeps its lock; the rollout's account can't change or delete an event |
 | Inventory | NetBox paging; `writable` only from a tag; a device without an HTTPS address or a properly named account is skipped |
 | Ingest | packages unsigned, re-signed, tampered with, for another machine or holding a link are refused, and with them the batch |
+| BMC events | a writable host subscribed once, to `/events/<host>` with the receiver's credentials; kept on the next run, deleted with `--remove`; an untagged host never touched |
 | Image cache, attestation, logs | a bad cached copy is deleted; SPDM only when it covers the part; log reads survive Loki down, clock skew, a cleared log, a restart |
 
-The mutations are 46 careless edits: a downgrade let through, versions compared as text, a sha256 mismatch ignored,
+The mutations are 48 careless edits: a downgrade let through, versions compared as text, a sha256 mismatch ignored,
 the rollback installing the target, the gate halting at exactly `failure_rate`, a held lock let through, `writable`
 taken from a config context, a secret sent as a BMC login, a log line lost while Loki is down… The first run found a
 real gap: the strict-wave case had enough failures to halt anyway, so it passed with wave 1 not strict. The gate and
@@ -271,6 +294,11 @@ Checked on real Redfish services with the latest DMTF schemas.
   image is invisible, and the reset is the only way to apply it.
 - A Task, not a Job: `GET /redfish/v1/JobService` answers 404. No `SimpleUpdate`, so the lab runs push only.
 - An aborted Task stays in `TaskService` until the BMC restarts, so pre-flight blocks that BMC until then.
+- Events: `EventService` v1_5_0 takes a subscription with a plain-HTTP `Destination`, posts its JSON indented over many
+  lines (a receiver must take the whole body as one payload), and leaves the subscription's `Context` out of a test
+  event, so the destination URL names the BMC instead. Its server-sent event stream answers 404. For an image it
+  refused, it pushed `TaskEvent.1.0.TaskCompletedWarning` while the Task itself ended in `Exception`: an event is a
+  hint, and the rollout still polls the Task it started to decide.
 
 **The production fleet:**
 
@@ -399,6 +427,18 @@ has no log in the standard: tasks are read by pre-flight and the post-check, and
 pipeline, host and step are JSON fields, so the stream count stays flat. Delivery is best effort: after a failed push,
 the sender stops forwarding for that run and the local record stays complete.
 
+**BMC events, pushed (the lab).** `make subscribe`, which `make lab-up` runs, gives each BMC tagged `writable` one
+`EventService` subscription: its `Destination` the lab site's receiver at `/events/<the BMC>`, the receiver's
+credentials in its `HttpHeaders`. Run again, it keeps what is there; `ARGS=--remove` deletes ours. The receiver is
+Vector ([site/vector.yaml](site/vector.yaml)): its `http_server` source checks the credentials (anything else gets
+401), a `remap` makes each Event of a payload one line, and its `loki` sink writes it as
+`{job="bmc-event", site, host, severity}`, shown on the Host dashboard under the BMC's logs. A BMC whose post fails
+tries again (`DeliveryRetryAttempts`: 3), and the 5-minute log reads stay, for what a lost delivery misses. Tried on
+the lab: ten subscriptions, a test event (`SubmitTestEvent`) from bmc3 in Loki within seconds, a delivery Vector
+refused retried by the BMC, and in a real update every BMC's own `TaskEvent.1.0.TaskStarted` and `TaskCompletedOK`,
+which the Host dashboard's timeline shows between the rollout's `update: start` and `update: Completed`. Production
+waits: a subscription is a write. `vector test` checks the transform without a BMC.
+
 **Grafana** is admin only, no anonymous access. A Lab and a Prod folder hold the same four dashboards, each fixed to
 its site, plus Update details in Lab: only the lab's are in git, and `make control-up` generates the prod ones
 ([prod_dashboards.py](control/observability/grafana/prod_dashboards.py)). A local **Reports** folder holds incident
@@ -408,7 +448,7 @@ reports on real hosts, git-ignored. Prometheus's admin API (127.0.0.1 only) dele
 | Dashboard | Shows |
 |---|---|
 | Fleet manager | BMCs answering, worst health, a row per host; Redfish up, down or updating over time (an update's reset isn't an outage); firmware by model and version, where two versions on one model is drift |
-| Host | one BMC: firmware, how it can be updated and its A/B bank, every component's health, its logs, network links, every reading per `PhysicalContext` against its thresholds, its update history from the state database |
+| Host | one BMC: firmware, how it can be updated and its A/B bank, every component's health, its logs and pushed events, a timeline of them beside the rollout's steps on it, network links, every reading per `PhysicalContext` against its thresholds, its update history from the state database |
 | Pipeline | one rollout: verdict, counts, each host's pre-flight and wave, the gate after each wave, each host's numbered steps, the decision log, timelines, errors, the locks now |
 | Update details (lab) | the Redfish facts above, and per pipeline each host's evidence: pre-flight checks, push, Task, reset, rollback |
 | Architecture | the diagrams |
@@ -452,8 +492,9 @@ After `hybrid`: every BMC answers and is OK, but two BMC versions run on one mod
 ### Host
 
 One BMC in full: its firmware, how Redfish can update it and whether it reports an A/B bank (a second image, inactive,
-staged or armed, beside the running one), every component's health worst first, its logs from Loki,
-its network links, every reading per `PhysicalContext` against its caution and critical thresholds, and every firmware
+staged or armed, beside the running one), every component's health worst first, its logs from Loki, the events it
+pushed, and a timeline that puts both beside each step a rollout took on it (counts stay on the logs alone: a pushed
+event usually shows again as a log entry), its network links, every reading per `PhysicalContext` against its caution and critical thresholds, and every firmware
 update of the host from the state database.
 
 A production Supermicro SYS-221H-TNR
@@ -469,9 +510,12 @@ oldest entries next), entries over time by severity; then its ComponentIntegrity
 
 ![Prod · Host: the BMC and its Redfish service](docs/grafana/prod/supermicro-details-2.png)
 
-A lab BMC: its firmware and health, the BMC's CPU, and the BMC and its Redfish service
+A lab BMC: its firmware and health; what it pushed through its EventService, and the timeline that puts it beside
+each step the rollout took on it; the BMC's CPU; and the BMC and its Redfish service
 
 ![Lab · Host: one emulated BMC, its firmware and the health of every component](docs/grafana/lab/host.png)
+
+![Lab · Host: the events the BMC pushed, and the rollout's steps beside them by time](docs/grafana/lab/host-events.png)
 
 ![Lab · Host: the BMC's CPU](docs/grafana/lab/host-sensors-2.png)
 
@@ -537,6 +581,16 @@ never started
 
 ![Lab · Pipeline: hybrid, every host's step over time, and the timing of each step](docs/grafana/lab/pipeline-hybrid-timing.png)
 
+The same run on the Host dashboard, each BMC's pushed events beside the rollout's steps. bmc3, rolled back: two
+update tasks, the target and then the reinstall of the version before, around the failed post-check
+
+![Lab · Host: bmc3's events and the rollout's steps, its update, the failed post-check and the rollback](docs/grafana/lab/host-events-rollback.png)
+
+bmc4, whose BMC refused the image: it pushed `TaskCompletedWarning`, "completed with warnings", while its Task ended
+in `Exception`. The rollout judges the Task, not the event: `update: Exception`, `done: failed`
+
+![Lab · Host: bmc4's events and the rollout's steps, the refused image](docs/grafana/lab/host-events-rejected.png)
+
 **`bad-checksum`**: pre-flight blocked every host on the image's sha256, so the plan halted and no stage ran;
 Update details shows the one check that failed
 
@@ -544,16 +598,25 @@ Update details shows the one check that failed
 
 ![Lab · Update details: bad-checksum, image sha256 failed on every host](docs/grafana/lab/pipeline-bad-checksum-checks.png)
 
-<details>
-<summary>Update details (lab): the Redfish facts, and each host's evidence per step</summary>
+### Update details
+
+The lab only: how a BMC firmware update runs here, with the [Redfish facts](#redfish-in-practice) checked against the
+DMTF schemas and on a lab BMC (`OnReset`, the Manager's reset alone, a Task and no Job, nothing staged to cancel) and
+the rollback per resource; then one pipeline's evidence, stage by stage.
+
+The facts, and the rollback per resource the rollout updates
 
 ![Lab · Update details: four facts checked against Redfish, and the rollback per resource](docs/grafana/lab/details.png)
 
+The plan's pre-flight of every host, each check against every host ✓ or ✗ with why, then step 1's pre-flight again on a
+fresh read, with the BMC's identity
+
 ![Lab · Update details: the plan's pre-flight of every host, and step 1's pre-flight again](docs/grafana/lab/details-plan.png)
 
-![Lab · Update details: the evidence of every host](docs/grafana/lab/details-evidence.png)
+Steps 2 to 4 and the rollback: the drain, the push with its `OnReset`, the Task, the Manager's reset, each host's
+rollback
 
-</details>
+![Lab · Update details: the evidence of every host](docs/grafana/lab/details-evidence.png)
 
 ## Production
 
@@ -610,28 +673,38 @@ The BMC stays the only truth about what runs: a host is read again over Redfish 
 | Scheduler | Slurm or Kubernetes, through a validated integration | hooks, none configured |
 | Secrets | Vault | git-ignored env files |
 | Alerts | Alertmanager pages on a halt or `needs_attention` | none |
-| BMC events | a receiver subscribed to `EventService`, forwarding to Loki | the logs, polled every 5 minutes |
+| BMC events | `EventService` subscriptions to a receiver per site (Vector), forwarding to Loki | the logs, polled every 5 minutes; the lab's BMCs push theirs to Vector |
 
-## Not built yet
+### What needs to be done
 
-- **A/B bank rollback.** Dual-bank BMCs keep the previous image in the inactive bank, so a rollback could be a bank
-  switch: faster, and needing no image. Not built: the rollback reinstalls the version before, which is why
-  pre-flight requires its image. `Activate`, staged images and Jobs aren't driven either. The firmware tables in
-  Grafana and the plan already show which hosts report a bank (the **A/B bank** column), so the hosts this would serve
-  are known.
-- **Resume.** A stopped run keeps its locks; a person checks and unlocks the hosts, and it is planned again. Durable
+**Four standard Redfish features.** This version runs the first on the lab only, and can't build or test the other
+three: the lab's emulated OpenBMC either doesn't offer them or has no hardware behind them, and production is
+read-only while each one writes to the BMC. They need a lab host of each real model, with writes allowed.
+
+| Feature | How, in standard Redfish | Why not today |
+|---|---|---|
+| **BMC events, pushed** (`EventService` → Vector → Loki) | POST an `EventDestination` to each BMC's `EventService/Subscriptions`: `Destination` the site receiver's HTTPS URL, `EventFormatType: Event`, filtered by `RegistryPrefixes`. The receiver, Vector's `http_server` source (or DMTF's [Redfish Event Listener](https://github.com/DMTF/Redfish-Event-Listener)), keeps `MessageId`, `Severity`, `EventTimestamp`, `OriginOfCondition` and the BMC, and its `loki` sink writes them. Alerts in seconds instead of the 5-minute log poll, which stays: a BMC drops an event after `DeliveryRetryAttempts`, its log keeps it. Subscriptions are checked and re-created on each pass, as a BMC reset to defaults loses them | Built and tried on the lab ([BMC events, pushed](#observability), `make subscribe`). Production: a subscription is a write, and the receiver needs HTTPS on the management network with a certificate the BMCs trust |
+| **A/B bank rollback** | On a dual-bank BMC the version before stays in the inactive bank: switch to it (PATCH the Manager's `Links.ActiveSoftwareImage`, or an `Activate` action), reset, post-check. Faster than a reinstall, and no image to fetch. Pre-flight would count a bank as a way back only when it holds the version before and the switch is offered | The lab's BMC reports one image (`SoftwareInventory` v1_1_0: no `Staged`, no `Activate`). Production's AMI BMCs keep their second image only in Oem (`DualImageConfigurations`, [`make oem`](#redfish-in-practice)), and a switch is a write |
+| **SPDM attestation** (`ComponentIntegrity`, `SPDMGetSignedMeasurements`) | In the post-check, for an enabled SPDM `ComponentIntegrity` covering the updated part, POST `SPDMGetSignedMeasurements` with a fresh nonce; verify the certificate chain to the vendor's root and the signature with libspdm, and each measurement against reference values recorded at qualification. A mismatch fails the post-check like a wrong version, and the version reads `SPDM verified` | No `ComponentIntegrity` anywhere: QEMU emulates only the BMC, with no device behind it, and all seven production models report none (`make capabilities SITE=prod`). The POST is outside read-only production |
+| **Jobs: a Task handing over to a Job** (`JobService`) | A BMC that schedules an update as a Job links it from the Task (`Links.CreatedResources`) and runs it at a maintenance window or on reset (`AtMaintenanceWindowStart`, `InMaintenanceWindowOnReset`, `OnStartUpdateRequest` with `UpdateService.StartUpdate`). Follow the Task to its Job, read `JobState`, `PercentComplete` and `Messages`, and choose the apply time from the BMC's `@Redfish.OperationApplyTimeSupport` | The lab answers `JobService` 404 and refuses every apply time but `OnReset` (400). In production only the Gigabyte has a `JobService` (v1_0_0), read-only here, and iDRAC 8 keeps its jobs in Oem (`DellJob`) |
+
+**Then, for a fleet:**
+
+- **Firmware beyond the BMC**: BIOS, NICs and InfiniBand HCAs, GPUs, PSUs, CPLDs. The plan already reads every
+  firmware inventory row and its update targets, and the order is the BMC first, then BIOS; only the BMC has been
+  updated end to end. A BIOS update restarts the host, so it needs the scheduler's drain. Firmware Redfish doesn't
+  reach (ConnectX through `mstflint` or `mlxup` in the OS) needs another runner on the same pipeline.
+- **The scheduler**: a validated drain and undrain through Slurm or Kubernetes, for every update that restarts the
+  host.
+- **Resume**: a stopped run keeps its locks; a person checks and unlocks the hosts, and it is planned again. Durable
   orchestration (resume, resolving a request whose answer was lost) belongs to the workflow engine.
-- **Limits beyond racks**: per PDU, fabric pod or spare capacity. **Rings**: rolling out region by region.
-- **Pull integrity**: what a BMC pulls is never seen by the agent, so its sha256 isn't checked against the catalog.
-- **A rollout API**: the CLI only.
-- **BMC events**: a receiver that subscribes to each BMC's `EventService` (an `EventDestination` with its HTTPS URL),
-  keeps `MessageId`, `Severity`, `EventTimestamp` and `OriginOfCondition`, and forwards to Loki; the log polling stays,
-  to fill what a missed delivery loses. DMTF's [Redfish Event Listener](https://github.com/DMTF/Redfish-Event-Listener)
-  is a starting point. A subscription writes BMC configuration, so it waits for production writes.
-- **SPDM attestation in the post-check**: for an enabled SPDM `ComponentIntegrity` covering the updated part, POST
-  `SPDMGetSignedMeasurements` with a fresh nonce, verify the certificate chain to the vendor's root and the signature
-  with libspdm, and compare each measurement with reference values recorded at qualification. A mismatch fails the
-  post-check like a wrong version. Needs hardware with a root of trust; no model here offers it.
+- **Alerts**: Alertmanager paging on a halt, a host left `needs_attention`, a BMC down outside an update, a log about
+  to wrap.
+- **A rollout API**, with an approval between the canary and wave 1, which a person, Salt or Ansible can call; the CLI
+  only today.
+- **Limits beyond racks** (per PDU, fabric pod or spare capacity), and **rings**: rolling out region by region.
+- **Pull integrity**: what a BMC pulls is never seen by the agent, so its sha256 isn't checked against the catalog; it
+  needs a digest-addressed, immutable store.
 
 ## Repository layout
 
@@ -646,7 +719,7 @@ helpers.py      shared helpers
 tests/          test_rollout.py (make test), mutations.py (make mutations), testdata/: a lab BMC's Redfish data
 control/        the control plane: ingest/ (download, sandbox verify, promote, the pinned key), store/, netbox/seed.py,
                 state/schema.sql, observability/ (Prometheus, Loki, Grafana), catalog/<site>/ (baseline, images)
-site/           a site: the exporter's Dockerfile, the Prometheus agent, cache/ (nginx)
+site/           a site: the exporter's Dockerfile, the Prometheus agent, cache/ (nginx), vector.yaml (the event receiver)
 lab/            the lab: the BMCs' Dockerfile and Compose, scenario.sh, policy.yaml, prometheus-agent.yml
 prod/           the real fleet's site: policy.yaml, prometheus-agent.yml; .env stays local
 docs/           diagrams; runs/: reports of real lab runs; grafana/, netbox/: screenshots

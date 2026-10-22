@@ -31,7 +31,20 @@ services:
     network_mode: host
     volumes: ["image-cache:/var/cache/nginx", "./cache/nginx.conf:/etc/nginx/conf.d/default.conf:ro",
               "../${SITE}/cache/tls.crt:/etc/nginx/tls.crt:ro", "../${SITE}/cache/tls.key:/etc/nginx/tls.key:ro"]
+  # Vector, the site's event receiver: each BMC's EventService posts its events to it (make subscribe), and it writes
+  # them to Loki, a line per event (site/vector.yaml). On every address, as the BMCs reach it over their own network,
+  # behind the credentials each subscription carries; the lab only, as a subscription is a write to the BMC
+  event-receiver:
+    image: timberio/vector:0.46.1-alpine
+    profiles: [events]
+    restart: unless-stopped
+    network_mode: host
+    command: [--config, /etc/vector/vector.yaml]
+    environment: [SITE, LOKI, EVENT_PORT]
+    env_file: [{path: .events.env, required: false}]  # EVENT_USERNAME, EVENT_PASSWORD: make makes it
+    volumes: ["./vector.yaml:/etc/vector/vector.yaml:ro", "vector:/var/lib/vector"]
 volumes:
   agent:
   image-cache:
   log-state:
+  vector:

@@ -30,7 +30,7 @@ ifeq ($(SITE),lab)
   # pre-flight can't put OpenBMC versions in order, so the lab allows either direction
   PLAN_ARGS := --allow-downgrade
   # the lab site: its exporter on :9101, its Prometheus agent on :9201, and the image cache, as it updates firmware
-  SITE_ENV  := EXPORTER_PORT=9101 INTERVAL=10 AGENT_PORT=9201 COMPOSE_PROFILES=cache
+  SITE_ENV  := EXPORTER_PORT=9101 INTERVAL=10 AGENT_PORT=9201 COMPOSE_PROFILES=cache,events EVENT_PORT=8088
 else ifeq ($(SITE),prod)
   # the BMC accounts, from prod/.env
   ENV       := set -a; [ ! -f prod/.env ] || . prod/.env; set +a; SITE=prod
@@ -40,7 +40,7 @@ else ifeq ($(SITE),prod)
 else
   $(error SITE is lab or prod, not "$(SITE)")
 endif
-LAB_ONLY = $(if $(filter lab,$(SITE)),,$(error make $@ writes firmware, so it runs on the lab only: prod is read-only))
+LAB_ONLY = $(if $(filter lab,$(SITE)),,$(error make $@ writes to the BMCs, so it runs on the lab only: prod is read-only))
 
 define HELP
 Usage: make <target> [SITE=prod] [HOST=...] [COMPONENT="..."] [ARGS="..."]
@@ -67,7 +67,7 @@ Control plane: one per fleet, every port on 127.0.0.1; the sites connect to it, 
 Site: one per site, SITE=lab (the default) or prod; every connection goes out, to the control plane
   make site-up             start its exporter and Prometheus agent, which pushes to the control plane's Prometheus,
                            the exporter its BMCs' new log entries to Loki every 5 min; on the lab also its HTTPS image
-                           cache on :8443
+                           cache on :8443 and its event receiver (Vector) on :8088, which writes the BMCs' events to Loki
   make site-logs           follow its exporter's and agent's logs
   make site-down           stop it
 
@@ -76,6 +76,8 @@ Lab: 10 emulated OpenBMC BMCs, QEMU in Docker, on 127.1.0.1-10
   make lab-down            stop them; each keeps its flash
   make lab-reset           stop them and wipe their flash: they boot the older build again; the store keeps its images
   make lab-clean           delete the BMCs' flash and the lab's catalog: lab-up then ingests the newest builds again
+  make subscribe           each BMC's EventService posts its events to the lab site's receiver, then Loki; lab-up runs
+                           it, again it keeps what is there, ARGS=--remove deletes them
 
 Poller: reads every BMC's Redfish resources, never writes
   make collect             crawl every BMC into <site>/snapshots/, which the views read
@@ -113,7 +115,7 @@ export HELP
 .DEFAULT_GOAL := help
 .DELETE_ON_ERROR:
 .PHONY: help setup test mutations control-up control-down state unlock site-up site-logs site-down lab-up lab-down \
-        lab-reset lab-clean collect $(VIEWS) oem detail views plan dry-run update report watch cancel fault
+        lab-reset lab-clean subscribe collect $(VIEWS) oem detail views plan dry-run update report watch cancel fault
 
 help:
 	@printf '%s\n' "$$HELP"
@@ -172,7 +174,7 @@ unlock:
 
 # ---- Site ----
 # The site's exporter and agent, and on the lab the image cache; SITE_ENV sets each site's ports
-site-up: $(if $(filter lab,$(SITE)),lab/cache/tls.crt)
+site-up: $(if $(filter lab,$(SITE)),lab/cache/tls.crt site/.events.env)
 	$(ENV) $(SITE_ENV) $(call token,EXPORTER) $(SITE_STACK) up --detach --build --wait --remove-orphans
 
 site-logs:
@@ -185,6 +187,7 @@ site-down:
 # The BMCs boot from the older build's bmc.mtd, which the control plane's ingest writes
 lab-up: lab/qemu-system-arm control-up site-up
 	$(LAB) up --detach --build --wait
+	$(MAKE) subscribe
 
 lab-down:
 	$(LAB) down
@@ -256,6 +259,14 @@ cancel:
 	  echo "$${ROLLOUT_ACTOR:-$${SUDO_USER:-$$(whoami)}@$$(hostname)} at $$(date -u +%FT%TZ)" > "$$p/cancel"; \
 	  echo "Cancel requested: $$p stops before its next wave"
 
+# Each lab BMC's EventService to the lab site's event receiver, at the address the BMCs reach the host on: their
+# network's gateway
+subscribe: site/.events.env
+	$(LAB_ONLY)
+	set -a; . site/.events.env; set +a; $(ENV) $(call token,ROLLOUT) \
+	  EVENT_RECEIVER=http://$$(docker network inspect redfish-lab_default -f '{{(index .IPAM.Config 0).Gateway}}'):8088 \
+	  $(PY) rollout.py subscribe $(ARGS)
+
 fault:
 	$(LAB_ONLY)
 	$(if $(SCENARIO),,$(error set SCENARIO: silent-fail, unhealthy, rejected, bad-checksum, no-return or hybrid))
@@ -285,6 +296,11 @@ control/netbox/.tokens.env:
 
 # Its passwords, random and made once: never shown, read from the file. The owner's, the rollout's (redfish_rollout_sa)
 # and Grafana's
+# The lab site's event receiver's credentials, which each BMC's subscription carries
+site/.events.env:
+	@umask 077; python3 -c 'import secrets; print(f"EVENT_USERNAME=bmc-events\nEVENT_PASSWORD={secrets.token_urlsafe(24)}")' > $@
+	@echo "Made $@: the event receiver's credentials"
+
 control/state/.state.env:
 	@umask 077; python3 -c 'import secrets; \
 	print("".join(f"{k}_PASSWORD={secrets.token_urlsafe(24)}\n" \

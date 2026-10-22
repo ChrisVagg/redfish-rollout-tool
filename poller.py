@@ -593,7 +593,7 @@ def exposition(server, found, seconds) -> list[str]:
                           software_id=ids.get(component, "-"), updateable=updatable(found, component), push=push,
                           pull=pull, ab_bank=ab_bank(found, component)))
     # Each part whose integrity the BMC reports (ComponentIntegrity: SPDM or TPM), with the BMC's own verdict on its
-    # identity; nothing here checks its signed measurements (README.md, Not built yet: SPDM attestation)
+    # identity; nothing here checks its signed measurements (README.md, What needs to be done: SPDM attestation)
     for uri, d in of(found, "ComponentIntegrity"):
         kind = text(d.get("ComponentIntegrityType"))
         verdict = obj(obj(d.get(kind)).get("IdentityAuthentication")).get("VerificationStatus")

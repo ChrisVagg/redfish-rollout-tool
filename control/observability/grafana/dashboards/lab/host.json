@@ -724,10 +724,10 @@
        "component": 0,
        "version": 1,
        "updateable": 2,
-       "push": 3,
-       "pull": 4,
-       "software_id": 6,
-       "ab_bank": 5
+       "ab_bank": 3,
+       "push": 4,
+       "pull": 5,
+       "software_id": 6
       }
      }
     }
@@ -1046,7 +1046,7 @@
   },
   {
    "type": "row",
-   "title": "BMC logs · LogService",
+   "title": "BMC logs · LogService and EventService",
    "collapsed": false,
    "panels": [],
    "id": 36,
@@ -1358,7 +1358,7 @@
   },
   {
    "type": "logs",
-   "title": "Every log entry of $host",
+   "title": "LogService",
    "gridPos": {
     "x": 0,
     "y": 29,
@@ -1396,12 +1396,100 @@
    "transparent": true
   },
   {
+   "type": "logs",
+   "title": "EventService",
+   "gridPos": {
+    "x": 0,
+    "y": 43,
+    "w": 24,
+    "h": 8
+   },
+   "datasource": {
+    "type": "loki",
+    "uid": "loki"
+   },
+   "id": 42,
+   "description": "What the BMC posts as it happens: its EventService subscription (make subscribe) to the site's receiver, Vector, which writes each event to Loki. The lab only today: a subscription is a write to the BMC, so production's BMCs aren't subscribed; their logs above are read every 5 min.",
+   "targets": [
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "refId": "A",
+     "queryType": "range",
+     "maxLines": 5000,
+     "expr": "{job=\"bmc-event\",site=\"$site\",host=\"$host\"} |~ `(?i)${search:regex}` | json | line_format \"{{.severity}} · {{.Message}}{{if .MessageId}} · {{.MessageId}}{{end}}{{if .OriginOfCondition__odata_id}} · {{.OriginOfCondition__odata_id}}{{end}}\""
+    }
+   ],
+   "options": {
+    "showTime": true,
+    "showLabels": false,
+    "showCommonLabels": false,
+    "wrapLogMessage": true,
+    "prettifyLogMessage": false,
+    "enableLogDetails": true,
+    "dedupStrategy": "none",
+    "sortOrder": "Descending"
+   },
+   "transparent": true
+  },
+  {
+   "type": "logs",
+   "title": "Rollout steps, LogService and EventService, by time",
+   "gridPos": {
+    "x": 0,
+    "y": 51,
+    "w": 24,
+    "h": 12
+   },
+   "datasource": {
+    "type": "loki",
+    "uid": "loki"
+   },
+   "id": 43,
+   "description": "One host in time order, for correlation: what a rollout did to it (job rollout: each step and its state, from the run record) beside what the BMC said, its log entries (bmc-log, read every 5 min, stamped with their Created) and its pushed events (bmc-event). A pushed event usually shows again as a log entry: count from the panels above, not here.",
+   "targets": [
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "refId": "A",
+     "queryType": "range",
+     "maxLines": 5000,
+     "expr": "{job=~\"bmc-log|bmc-event\",site=\"$site\",host=\"$host\"} | json | line_format \"{{.job}} · {{.MessageId}} · {{.Message}}\""
+    },
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "refId": "B",
+     "queryType": "range",
+     "maxLines": 5000,
+     "expr": "{job=\"rollout\",site=\"$site\"} | json | host=\"$host\" | line_format \"rollout · {{.pipeline}} {{.stage}} · {{.step}}: {{.state}}\""
+    }
+   ],
+   "options": {
+    "showTime": true,
+    "showLabels": false,
+    "showCommonLabels": false,
+    "wrapLogMessage": true,
+    "prettifyLogMessage": false,
+    "enableLogDetails": true,
+    "dedupStrategy": "none",
+    "sortOrder": "Descending"
+   },
+   "transparent": true
+  },
+  {
    "type": "row",
    "title": "Component integrity · SPDM, TPM",
    "collapsed": false,
    "gridPos": {
     "x": 0,
-    "y": 43,
+    "y": 63,
     "w": 24,
     "h": 1
    },
@@ -1413,7 +1501,7 @@
    "title": "ComponentIntegrity",
    "gridPos": {
     "x": 0,
-    "y": 44,
+    "y": 64,
     "w": 24,
     "h": 6
    },
@@ -1567,7 +1655,7 @@
    "id": 30,
    "gridPos": {
     "x": 0,
-    "y": 50,
+    "y": 70,
     "w": 24,
     "h": 1
    },
@@ -1583,7 +1671,7 @@
    },
    "gridPos": {
     "x": 0,
-    "y": 51,
+    "y": 71,
     "w": 24,
     "h": 9
    },
@@ -1746,7 +1834,7 @@
    },
    "gridPos": {
     "x": 0,
-    "y": 60,
+    "y": 80,
     "w": 24,
     "h": 17
    },
@@ -1840,7 +1928,7 @@
    "id": 10,
    "gridPos": {
     "x": 0,
-    "y": 77,
+    "y": 97,
     "w": 24,
     "h": 1
    },
@@ -1851,7 +1939,7 @@
    "title": "$thermal_context",
    "gridPos": {
     "x": 0,
-    "y": 78,
+    "y": 98,
     "w": 12,
     "h": 10
    },
@@ -2197,7 +2285,7 @@
    "id": 13,
    "gridPos": {
     "x": 0,
-    "y": 88,
+    "y": 108,
     "w": 24,
     "h": 1
    },
@@ -2208,7 +2296,7 @@
    "title": "$power_kind",
    "gridPos": {
     "x": 0,
-    "y": 89,
+    "y": 109,
     "w": 12,
     "h": 12
    },
@@ -2554,7 +2642,7 @@
    "id": 16,
    "gridPos": {
     "x": 0,
-    "y": 101,
+    "y": 121,
     "w": 24,
     "h": 1
    },
@@ -2565,7 +2653,7 @@
    "title": "$system_kind",
    "gridPos": {
     "x": 0,
-    "y": 102,
+    "y": 122,
     "w": 12,
     "h": 12
    },
@@ -2911,7 +2999,7 @@
    "id": 19,
    "gridPos": {
     "x": 0,
-    "y": 114,
+    "y": 134,
     "w": 24,
     "h": 1
    },
@@ -2922,7 +3010,7 @@
    "title": "$manager_kind",
    "gridPos": {
     "x": 0,
-    "y": 115,
+    "y": 135,
     "w": 12,
     "h": 12
    },
@@ -3268,7 +3356,7 @@
    "id": 22,
    "gridPos": {
     "x": 0,
-    "y": 127,
+    "y": 147,
     "w": 24,
     "h": 1
    },
@@ -3279,7 +3367,7 @@
    "title": "BMC memory",
    "gridPos": {
     "x": 0,
-    "y": 128,
+    "y": 148,
     "w": 6,
     "h": 9
    },
@@ -3344,7 +3432,7 @@
    "title": "BMC free storage",
    "gridPos": {
     "x": 6,
-    "y": 128,
+    "y": 148,
     "w": 6,
     "h": 9
    },
@@ -3409,7 +3497,7 @@
    "title": "Crawl time",
    "gridPos": {
     "x": 12,
-    "y": 128,
+    "y": 148,
     "w": 6,
     "h": 9
    },
@@ -3474,7 +3562,7 @@
    "title": "Failed GETs per read",
    "gridPos": {
     "x": 18,
-    "y": 128,
+    "y": 148,
     "w": 6,
     "h": 9
    },
@@ -3539,7 +3627,7 @@
    "title": "Answering Redfish",
    "gridPos": {
     "x": 0,
-    "y": 137,
+    "y": 157,
     "w": 24,
     "h": 4
    },
@@ -3623,14 +3711,14 @@
    "id": 28,
    "gridPos": {
     "x": 0,
-    "y": 141,
+    "y": 161,
     "w": 24,
     "h": 1
    }
   },
   {
    "type": "table",
-   "title": "Every firmware update of $host",
+   "title": "Every firmware update",
    "datasource": {
     "type": "grafana-postgresql-datasource",
     "uid": "state"
@@ -3705,7 +3793,7 @@
    "id": 29,
    "gridPos": {
     "x": 0,
-    "y": 142,
+    "y": 162,
     "w": 24,
     "h": 8
    },

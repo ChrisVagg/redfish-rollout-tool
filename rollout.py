@@ -33,10 +33,16 @@ unless --allow-downgrade, and a component without a rollback path unless --accep
                     fails (a failing canary or strict wave, or failures over failure_rate) exits 1, so the next stage
                     doesn't run. pipeline.sh runs plan, the canary stage, then the waves stage.
 
+  subscribe [--remove]
+                    Each host tagged writable gets one EventService subscription, its events posted to the site's
+                    receiver (EVENT_RECEIVER/events/<host>, Vector, which writes them to Loki), its credentials in the
+                    subscription's HttpHeaders. Run again it keeps what is there; --remove deletes ours.
+
 The site is the fleet: SITE=prod (the default) or SITE=lab. Its hosts are NetBox's site of that name (NETBOX_URL, read
 with NETBOX_TOKEN), its baseline and image catalog control/catalog/<site>/, and its folder holds its policy and run
 records."""
 import argparse
+import base64
 import getpass
 import hashlib
 import json
@@ -967,7 +973,7 @@ def after_checks(found, key, want, before) -> tuple[bool, list[dict], str]:
 # How the post-check knows the running version: the firmware reports it itself, "self-reported", unless the BMC
 # reports SPDM integrity for the component, a ComponentIntegrity that targets or protects one of its firmware inventory
 # entries or what they belong to (RelatedItem). That is only offered here: checking its signed measurements against the
-# release's reference values is production's (README.md, Not built yet)
+# release's reference values is production's (README.md, What needs to be done)
 def evidence(found, component) -> str:
     docs = entries(found, component)
     mine = {uri_of(d) for d in docs} | {uri_of(i) for d in docs for i in d.get("RelatedItem") or []}
@@ -1674,6 +1680,55 @@ def fault_spec(value) -> tuple[str, str]:
 
 
 # Parse the command, run it, print what it returns and write the files asked for
+# ---- BMC events: each writable host's EventService posts its events to the site's receiver (Vector, then Loki) ----
+
+# One BMC's subscription to destination: kept when it is there, else made, with the receiver's credentials in its
+# HttpHeaders; with remove, every one to destination deleted. (what was done, the subscription's URI)
+def subscription(t, destination, headers, remove=False) -> tuple[str, str]:
+    service = link(call(t, ROOT), "EventService")
+    collection = service and link(call(t, service), "Subscriptions")
+    if not collection:
+        return "no EventService subscriptions", "-"
+    members = filter(None, map(uri_of, call(t, collection).get("Members") or []))
+    ours = [u for u in members if call(t, u).get("Destination") == destination]
+    if remove:
+        gone = [u for u in ours if send(t, "DELETE", u)[0] in (200, 202, 204)]
+        return (f"removed {len(gone)} of {len(ours)}" if ours else "none to remove"), ", ".join(ours) or "-"
+    if ours:
+        return "kept", ours[0]
+    status, answer, body = send(t, "POST", collection, json={
+        "Destination": destination, "Protocol": "Redfish", "EventFormatType": "Event",
+        "Context": destination.rsplit("/", 1)[-1], "HttpHeaders": [headers]})
+    if status in (200, 201, 204):
+        return "created", answer.get("Location", "-")
+    return f"refused: {status} {reason(text(obj(body.get('error')).get('message')))}", "-"
+
+
+# Subscribe each host of the site tagged writable to the site's event receiver, EVENT_RECEIVER/events/<host>: run
+# again, it keeps what is there; --remove deletes ours. A subscription is a write to the BMC, so a host NetBox doesn't
+# tag writable is never touched, as with run --yes
+def subscribe(args) -> list:
+    receiver, password = os.environ.get("EVENT_RECEIVER", "").rstrip("/"), os.environ.get("EVENT_PASSWORD", "")
+    if not receiver or not password:
+        raise SystemExit("EVENT_RECEIVER and EVENT_PASSWORD aren't set: make subscribe sets them, on the lab only")
+    token = base64.b64encode(f"{os.environ.get('EVENT_USERNAME', 'bmc-events')}:{password}".encode()).decode()
+    rows = []
+    for server in load_servers():
+        if server.get("writable") is not True:
+            rows.append((server["host"], "skipped: not tagged writable", "-"))
+            continue
+        t = tunnel(server)
+        location = login(t)
+        try:
+            rows.append((server["host"], *subscription(t, f"{receiver}/events/{server['host']}",
+                                                       {"Authorization": f"Basic {token}"}, args.remove)))
+        finally:
+            if location:
+                logout(t, location)
+    args.exit_code = int(any(row[1].startswith(("refused", "no ")) for row in rows))
+    return [block(f"EventService subscriptions to {receiver}", ("Host", "Done", "Subscription"), rows)]
+
+
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     commands = p.add_subparsers(dest="command", required=True, metavar="command")
@@ -1716,6 +1771,10 @@ def main() -> None:
     rp.add_argument("--details", action="store_true", help="every host's steps, with their evidence")
     rp.add_argument("--host", help="one host's steps only")
     rp.set_defaults(run=report)
+    s = commands.add_parser("subscribe", parents=[output_options()],
+                            help="each writable host's EventService to the site's event receiver (EVENT_RECEIVER)")
+    s.add_argument("--remove", action="store_true", help="delete our subscriptions instead")
+    s.set_defaults(run=subscribe)
     args = p.parse_args()
     logging.Formatter.converter = time.gmtime  # log times in UTC, like the records and the reports
     logging.basicConfig(level=logging.INFO, format="%(asctime)s UTC %(levelname)s %(message)s")

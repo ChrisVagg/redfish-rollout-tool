@@ -1052,9 +1052,9 @@
        "component": 2,
        "version": 3,
        "updateable": 4,
-       "push": 5,
-       "pull": 6,
-       "ab_bank": 7
+       "ab_bank": 5,
+       "push": 6,
+       "pull": 7
       }
      }
     }

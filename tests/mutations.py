@@ -89,6 +89,9 @@ BREAKS = [  # (what a careless edit does, the line as it is, the line broken, th
      "test_bmc_logs"),
     ("the JobService's log not read", '| ({link(get(jobs), "Log")} - {None} if jobs else set())', "",
      "test_bmc_logs"),
+    ("an untagged host subscribed", 'if server.get("writable") is not True:', "if False:", "test_subscribe"),
+    ("a second subscription each run", '    if ours:\n        return "kept", ours[0]',
+     '    if False:\n        return "kept", ours[0]', "test_subscribe"),
 ]
 
 if __name__ == "__main__":

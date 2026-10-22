@@ -1,0 +1,65 @@
+# The site's event receiver: each BMC's EventService posts its Redfish Event payloads here, to /events/<the BMC>, as
+# make subscribe set it up; each Event in a payload becomes one Loki line, {job="bmc-event", site, host, severity}.
+# vector test checks the transform without a BMC: docker run --rm -v ./site:/etc/vector timberio/vector:0.46.1-alpine
+# test /etc/vector/vector.yaml
+sources:
+  bmc_events:
+    type: http_server
+    address: "0.0.0.0:${EVENT_PORT:-8088}"  # every address: the BMCs reach it over their own network
+    path: /events
+    strict_path: false  # /events/<the BMC's address>: the subscription names its BMC, as a BMC's Context is optional
+    path_key: path
+    method: POST
+    framing: {method: bytes}  # the whole body is one payload: bmcweb indents its JSON over many lines
+    decoding: {codec: json}
+    # the credentials each subscription carries in its HttpHeaders, so nobody else's posts reach Loki
+    auth: {strategy: basic, username: "${EVENT_USERNAME:-bmc-events}", password: "${EVENT_PASSWORD:-}"}
+
+transforms:
+  events:
+    type: remap
+    inputs: [bmc_events]
+    # the payload's Events, one Loki line each: the event's standard properties, the BMC, its severity (MessageSeverity
+    # from Event v1_x on, Severity before)
+    source: |
+      bmc = replace(string(.path) ?? "", r'^/events/?', "")
+      if bmc == "" { bmc = "-" }
+      . = map_values(array(.Events) ?? []) -> |e| {
+        e = object(e) ?? {}
+        e.bmc = bmc
+        e.severity = string(e.MessageSeverity) ?? string(e.Severity) ?? "-"
+        e
+      }
+
+sinks:
+  loki:
+    type: loki
+    inputs: [events]
+    endpoint: "${LOKI:-http://127.0.0.1:3100}"
+    encoding: {codec: json}
+    labels: {job: bmc-event, site: "${SITE:-lab}", host: "{{ bmc }}", severity: "{{ severity }}"}
+    healthcheck: {enabled: false}  # Loki may start after it; a line it can't take waits in Vector's buffer
+
+tests:
+  - name: each Event of a payload is a line, tagged with its BMC and severity
+    inputs:
+      - insert_at: events
+        type: vrl
+        source: |
+          . = {"path": "/events/127.1.0.1", "Id": "2", "Events": [
+            {"MemberId": "0", "MessageId": "TaskEvent.1.0.TaskCompletedOK", "MessageSeverity": "OK"},
+            {"MemberId": "1", "MessageId": "Base.1.19.Success", "Severity": "Warning"}]}
+    outputs:
+      - extract_from: events
+        conditions:
+          - type: vrl
+            source: |
+              assert!(.bmc == "127.1.0.1")
+              assert!(includes(["OK", "Warning"], .severity))
+              assert!(!exists(.path) && !exists(.Events))
+  - name: a payload with no Events gives no line
+    inputs:
+      - insert_at: events
+        type: vrl
+        source: '. = {"path": "/events/127.1.0.2", "Id": "3"}'
+    no_outputs_from: [events]
