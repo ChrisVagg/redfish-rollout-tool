@@ -1857,5 +1857,26 @@
    },
    "transparent": true
   }
- ]
+ ],
+ "annotations": {
+  "list": [
+   {
+    "name": "Firmware changed",
+    "datasource": {
+     "type": "prometheus",
+     "uid": "prometheus"
+    },
+    "enable": true,
+    "iconColor": "#8f3bb8",
+    "expr": "count by (host, component) (count by (host, component, version) (last_over_time(redfish_firmware_info{site=\"$site\",host=~\"$host\"}[1h]))) > 1",
+    "titleFormat": "Firmware changed",
+    "textFormat": "{{host}} · {{component}}",
+    "tagKeys": "host,component",
+    "target": {
+     "expr": "count by (host, component) (count by (host, component, version) (last_over_time(redfish_firmware_info{site=\"$site\",host=~\"$host\"}[1h]))) > 1",
+     "refId": "Anno"
+    }
+   }
+  ]
+ }
 }

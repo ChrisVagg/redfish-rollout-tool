@@ -311,6 +311,13 @@ Checked on real Redfish services with the latest DMTF schemas.
   budget of three intervals.
 - `$filter` can't ask for new log entries only: a Supermicro answers `Created gt …` with 400, bmcweb returns the
   whole log.
+- `$expand` and `$select` gain nothing here, though the service root's `ProtocolFeaturesSupported` advertises both on
+  every BMC but iLO 4, so the crawl stays one GET per resource. `$select` only trims a body, it never saves a GET.
+  `$expand=.($levels=1)` against the plain crawl, one host per model: the iDRAC 8 stopped answering, the Gigabyte JBOD
+  took 141 s instead of 78 s, the Gigabyte LQC5 returned 458 of its 734 resources, the ASUS took as long, and the older
+  Supermicro answered the root with 500. Only the newer Supermicro gained, 11 s instead of 14.5 s. AMI also leaves
+  `@odata.type` out of inline members. On the lab's bmcweb, 46 GETs became 17 in the same ~2 s, as it serves one
+  request at a time.
 - What a model keeps outside the standard around updates is in its Oem extensions, which `make oem [MODEL=...]`
   lists per model and BMC firmware, update-related first: iDRAC 8's update jobs (Oem `DellJob`, its job queue), AMI's
   second BMC image (`DualImageConfigurations`: a Gigabyte's image 2 runs 13.06.10, invisible to the standard A/B
@@ -671,9 +678,80 @@ The BMC stays the only truth about what runs: a host is read again over Redfish 
 | Rollout state | PostgreSQL for every site, the gate as a query, partitioned retention | PostgreSQL: locks, append-only events, no retention |
 | Site agent | long-lived, one per site, its own `/metrics` | `rollout.py run` on an admin host, pushing to a Pushgateway |
 | Scheduler | Slurm or Kubernetes, through a validated integration | hooks, none configured |
+| In-band updates | an in-band runner per site, its own task queue: `ansible-runner` (or Salt) on one host, SSH, the vendor's tool | none: Redfish only |
 | Secrets | Vault | git-ignored env files |
 | Alerts | Alertmanager pages on a halt or `needs_attention` | none |
 | BMC events | `EventService` subscriptions to a receiver per site (Vector), forwarding to Loki | the logs, polled every 5 minutes; the lab's BMCs push theirs to Vector |
+
+### The rollout in a workflow engine
+
+In production a rollout runs as a workflow in a durable engine, Temporal (or Argo Workflows on Kubernetes), not as
+`pipeline.sh` on an admin host. The engine takes the orchestration; the per-host steps and their Redfish code don't
+change, they become the engine's activities, run by each site's agent.
+
+| Today: `pipeline.sh`, `rollout.py run` | In the engine |
+|---|---|
+| a process per stage; a crash keeps the locks, and a person plans the run again | one workflow per rollout: its history is replayed after a crash, and it goes on from the last step that finished |
+| the soak a `sleep` | a durable timer, which a restart doesn't reset |
+| `YES=1` before the run starts | a signal: a person approves wave 1 after the canary, through the API |
+| each host's steps in a thread on an admin host | activities on the site's task queue, run by that site's agent, the only one that reaches its BMCs; the agent polls the engine, so the site still only connects out |
+| `make cancel` writes a file | a cancellation: the wave under way finishes, no wave starts after it |
+| metrics pushed to a Pushgateway | the agent's and the engine's own `/metrics`, scraped |
+
+What stays: the plan frozen as the workflow's input, pre-flight on a fresh read before each host, the gates, a lock
+per host in the state database, the run record and `report.json`. Why not make `pipeline.sh` resume instead: after a
+crash mid-flash the BMC may or may not have taken the image. The engine knows which steps finished, and the push and
+the reset are never retried blindly: the activity reads the BMC again first (is the target running, is a task still
+open) and acts on what it finds.
+
+### Out-of-band and in-band updates, one pipeline
+
+The stages and their rules are the same for every component: the plan and pre-flight, the canary, waves, gates,
+locks, soak and evidence; each host goes pre-flight, drain, update, activate, post-check, undrain or roll back. Only
+the update step on the host differs, chosen per component, and the plan records which path each host's component
+takes, as it records push or pull today.
+
+Each site is two networks, and each path has its own worker on its own: out-of-band, the BMC management network, holds
+the site agent, the image cache, the BMCs and the event receiver; in-band, the hosts' network, holds the in-band
+runner, the hosts and the scheduler. The drain and the undrain go through the scheduler's API (`scontrol` or
+`slurmrestd`, or the Kubernetes API), so they are the in-band runner's steps for both paths. The image cache serves
+both networks (or each has its own, filled from the same approved store), and both workers check an image's sha256
+against the catalog before it reaches a device.
+
+Only the workflow engine spans the two: both workers connect out to it, and it orders their steps. A BIOS update is
+an in-band drain, an out-of-band push, reset and post-check, then an in-band check from the host (`nvidia-smi`,
+`ibstat`) and undrain, each step on the worker that reaches it. One path joins the networks inside each server: the
+Redfish Host Interface (DSP0270), the host OS's own link to its BMC over an internal USB NIC. Keep it disabled, or
+limited to an account that may only read.
+
+#### Out-of-band: Redfish, over the BMC
+
+- **When**: the component is in the BMC's firmware inventory, `Updateable`, with an update method the BMC allows.
+- **How**: Redfish `UpdateService`, a push or `SimpleUpdate`, `Targets` naming the component; the Task followed to
+  its end.
+- **Activate**: the BMC's or the host's reset.
+- **Verify**: the running version in `SoftwareInventory`, health, no new failed Task.
+- **Pre-flight blocks**: `Updateable` false, a method the BMC doesn't allow.
+
+More components take this path on newer platforms: the BMC updates the devices behind it (GPUs, NICs, retimers) with
+PLDM for Firmware Update (DSP0267) over MCTP (DSP0236), so they show in its firmware inventory and take a standard
+`UpdateService` call. How the BMC reaches the device is its own business.
+
+#### In-band: Ansible, over SSH to the host
+
+- **When**: Redfish doesn't reach the component on this platform.
+- **How**: the site's in-band runner, a worker of its own on its own task queue, runs `ansible-runner` (or Salt) on
+  one host: SSH, the image from the site's cache with its sha256 checked, then the vendor's tool, `mstflint` or
+  `mlxup` for ConnectX and InfiniBand, `nvme-cli` for drives.
+  The workflow engine hands it the step, as it hands the site agent its Redfish steps: the agent reaches only the
+  BMCs' management network, the runner only the hosts over SSH, so neither worker reaches both.
+- **Activate**: `mlxfwreset`, or a reboot.
+- **Verify**: the same tool's query (`mstflint query`), `ibstat`.
+- **Pre-flight blocks**: an OS that doesn't answer, the tool or the driver missing.
+
+The vendor's tool isn't rewritten, only wrapped: one host per step, the version read first, then flash, activate,
+read again, and JSON evidence back, which the workflow judges like any other step. In-band stays for what a platform
+doesn't expose: one more kind of step in the same pipeline, never a second rollout system with weaker rules.
 
 ### What needs to be done
 
@@ -693,11 +771,12 @@ read-only while each one writes to the BMC. They need a lab host of each real mo
 - **Firmware beyond the BMC**: BIOS, NICs and InfiniBand HCAs, GPUs, PSUs, CPLDs. The plan already reads every
   firmware inventory row and its update targets, and the order is the BMC first, then BIOS; only the BMC has been
   updated end to end. A BIOS update restarts the host, so it needs the scheduler's drain. Firmware Redfish doesn't
-  reach (ConnectX through `mstflint` or `mlxup` in the OS) needs another runner on the same pipeline.
+  reach (ConnectX through `mstflint` or `mlxup` in the OS) needs the in-band step on the same pipeline
+  ([out-of-band and in-band](#out-of-band-and-in-band-updates-one-pipeline)).
 - **The scheduler**: a validated drain and undrain through Slurm or Kubernetes, for every update that restarts the
   host.
 - **Resume**: a stopped run keeps its locks; a person checks and unlocks the hosts, and it is planned again. Durable
-  orchestration (resume, resolving a request whose answer was lost) belongs to the workflow engine.
+  orchestration belongs to [the workflow engine](#the-rollout-in-a-workflow-engine).
 - **Alerts**: Alertmanager paging on a halt, a host left `needs_attention`, a BMC down outside an update, a log about
   to wrap.
 - **A rollout API**, with an approval between the canary and wave 1, which a person, Salt or Ansible can call; the CLI

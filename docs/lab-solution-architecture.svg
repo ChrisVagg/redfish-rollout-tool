@@ -72,25 +72,25 @@
     <path class="edge g-inv" d="M210 289H235V240H256" marker-end="url(#pl-inv)"/>
     <path class="edge g-wf" d="M434 229H446" marker-end="url(#pl-wf)" marker-start="url(#pl-wf)"/>
     <!-- Grafana reads the rollout state over SQL, with an account that may only read -->
-    <path class="edge g-wf" d="M620 240H626V296H662" marker-end="url(#pl-wf)"/>
-    <text class="elabel" x="660" y="326" text-anchor="end">SQL, reads only</text>
+    <path class="edge g-wf" d="M620 240H626V340H776V324" marker-end="url(#pl-wf)"/>
+    <text class="elabel" x="660" y="354">SQL, reads only</text>
     <text class="band hi" x="650" y="124">OBSERVABILITY</text>
     <rect class="cut" x="650" y="130" width="230" height="200" rx="10"/>
-    <rect class="box" x="666" y="144" width="96" height="40" rx="8"/><rect class="bar g-obs" x="666" y="150" width="3" height="28" rx="1.5"/>
-    <text class="name" x="714" y="160" text-anchor="middle" style="font-size:11px">Pushgateway</text><text class="sub" x="714" y="175" text-anchor="middle">:9091 metrics</text>
-    <rect class="box" x="774" y="144" width="90" height="40" rx="8"/><rect class="bar g-obs" x="774" y="150" width="3" height="28" rx="1.5"/>
-    <text class="name" x="819" y="160" text-anchor="middle">Loki</text><text class="sub" x="819" y="175" text-anchor="middle">:3100 events</text>
-    <rect class="box" x="666" y="210" width="198" height="40" rx="8"/><rect class="bar g-obs" x="666" y="216" width="3" height="28" rx="1.5"/>
-    <text class="name" x="765" y="226" text-anchor="middle">Prometheus</text><text class="sub" x="765" y="241" text-anchor="middle">:9090</text>
-    <rect class="box" x="666" y="276" width="198" height="40" rx="8"/><rect class="bar g-obs" x="666" y="282" width="3" height="28" rx="1.5"/>
-    <text class="name" x="765" y="292" text-anchor="middle">Grafana</text><text class="sub" x="765" y="307" text-anchor="middle">:3000 · Prometheus, Loki, SQL</text>
+    <rect class="box" x="666" y="140" width="96" height="40" rx="8"/><rect class="bar g-obs" x="666" y="146" width="3" height="28" rx="1.5"/>
+    <text class="name" x="714" y="156" text-anchor="middle" style="font-size:11px">Pushgateway</text><text class="sub" x="714" y="171" text-anchor="middle">:9091 metrics</text>
+    <rect class="box" x="774" y="140" width="90" height="40" rx="8"/><rect class="bar g-obs" x="774" y="146" width="3" height="28" rx="1.5"/>
+    <text class="name" x="819" y="156" text-anchor="middle">Loki</text><text class="sub" x="819" y="171" text-anchor="middle">:3100 events</text>
+    <rect class="box" x="666" y="214" width="198" height="40" rx="8"/><rect class="bar g-obs" x="666" y="220" width="3" height="28" rx="1.5"/>
+    <text class="name" x="765" y="230" text-anchor="middle">Prometheus</text><text class="sub" x="765" y="245" text-anchor="middle">:9090</text>
+    <rect class="box" x="666" y="280" width="198" height="40" rx="8"/><rect class="bar g-obs" x="666" y="286" width="3" height="28" rx="1.5"/>
+    <text class="name" x="765" y="296" text-anchor="middle">Grafana</text><text class="sub" x="765" y="311" text-anchor="middle">:3000 · Prometheus, Loki, SQL</text>
     <!-- Metrics: Pushgateway to Prometheus to Grafana. Events: Loki directly to Grafana. -->
-    <path class="edge g-obs" d="M690 184V206" marker-end="url(#pl-obs)"/>
-    <text class="elabel" x="698" y="200">GET /metrics · 5 s</text>
-    <path class="edge g-obs" d="M690 250V272" marker-end="url(#pl-obs)"/>
-    <text class="elabel" x="698" y="266">PromQL</text>
-    <path class="edge g-obs" d="M846 184V194H878V260H846V272" marker-end="url(#pl-obs)"/>
-    <text class="elabel" x="800" y="266">LogQL</text>
+    <path class="edge g-obs" d="M690 180V210" marker-end="url(#pl-obs)"/>
+    <text class="elabel" x="698" y="205">GET /metrics · 5 s</text>
+    <path class="edge g-obs" d="M690 254V276" marker-end="url(#pl-obs)"/>
+    <text class="elabel" x="698" y="270">PromQL</text>
+    <path class="edge g-obs" d="M846 180V190H878V266H846V276" marker-end="url(#pl-obs)"/>
+    <text class="elabel" x="800" y="270">LogQL</text>
     <text class="band hi" x="20" y="356">EACH SITE</text>
     <rect class="cut" x="20" y="362" width="860" height="170" rx="10"/>
     <rect class="box" x="260" y="390" width="170" height="46" rx="8"/><rect class="bar g-wf" x="260" y="398" width="3" height="30" rx="1.5"/>
@@ -106,8 +106,8 @@
     <text class="name" x="125" y="490" text-anchor="middle">Event receiver</text><text class="sub" x="125" y="506" text-anchor="middle">Vector · :8088 · auth</text>
     <path class="edge g-rf" d="M450 493H214" marker-end="url(#pl-rf)"/>
     <text class="elabel" x="330" y="488" text-anchor="middle">EventService: POST /events</text>
-    <path class="edge g-obs" d="M125 470V446H634V194H816V188" marker-end="url(#pl-obs)"/>
-    <text class="elabel" x="133" y="461">events → Loki</text>
+    <path class="edge g-obs" d="M125 470V348H640V190H816V184" marker-end="url(#pl-obs)"/>
+    <text class="elabel" x="133" y="414">events → Loki</text>
     <path class="edge g-wf" d="M345 252V386" marker-end="url(#pl-wf)"/>
     <text class="elabel" x="352" y="300" text-anchor="start">work per wave</text>
     <path class="edge g-sec" d="M530 312V372H400V386" marker-end="url(#pl-sec)"/>
@@ -116,19 +116,19 @@
     <text class="elabel" x="866" y="381" text-anchor="end">fetch on miss, cache</text>
     <path class="edge g-rf" d="M345 436V458H530V466" marker-end="url(#pl-rf)"/>
     <text class="elabel" x="438" y="454" text-anchor="middle">Redfish: update · tasks · reset</text>
-    <path class="edge g-img" d="M666 428H434" marker-end="url(#pl-img)"/>
-    <text class="elabel" x="548" y="442" text-anchor="middle">file, to push it</text>
-    <path class="edge g-obs" d="M430 404H640V164H662" marker-end="url(#pl-obs)"/>
-    <text class="elabel" x="535" y="400" text-anchor="middle">PUT /metrics/job/rollout</text>
-    <path class="edge g-obs" d="M430 414H634V194H816V188" marker-end="url(#pl-obs)"/>
-    <text class="elabel" x="535" y="416" text-anchor="middle">POST /loki/api/v1/push</text>
+    <path class="edge g-img" d="M666 431H434" marker-end="url(#pl-img)"/>
+    <text class="elabel" x="548" y="427" text-anchor="middle">file, to push it</text>
+    <path class="edge g-obs" d="M430 395H634V160H662" marker-end="url(#pl-obs)"/>
+    <text class="elabel" x="535" y="391" text-anchor="middle">PUT /metrics/job/rollout</text>
+    <path class="edge g-obs" d="M430 413H640V190H816V184" marker-end="url(#pl-obs)"/>
+    <text class="elabel" x="535" y="409" text-anchor="middle">POST /loki/api/v1/push</text>
     <path class="edge g-rf" d="M620 493H662" marker-end="url(#pl-rf)"/>
-    <path class="edge g-obs" d="M690 470V452H648V230H662" marker-end="url(#pl-obs)"/>
+    <path class="edge g-obs" d="M690 470V452H648V234H662" marker-end="url(#pl-obs)"/>
     <text class="elabel" x="698" y="462">remote write · 10 s</text>
     <!-- where each stage happens in the lab: the update is a push, then reset, post-check and rollback at the BMCs -->
     <g class="badge"><title>Stage 0: Ingest</title><circle cx="510" cy="44" r="8"/><text x="510" y="47.5" text-anchor="middle">0</text></g>
     <g class="badge"><title>Stage 1: Plan and pre-flight</title><circle cx="235" cy="192" r="8"/><text x="235" y="195.5" text-anchor="middle">1</text></g>
-    <g class="badge"><title>Stage 3: Update, a push</title><circle cx="615" cy="428" r="8"/><text x="615" y="431.5" text-anchor="middle">3</text></g>
+    <g class="badge"><title>Stage 3: Update, a push</title><circle cx="615" cy="431" r="8"/><text x="615" y="434.5" text-anchor="middle">3</text></g>
     <g class="badge"><title>Stage 4: Reset of the BMC</title><circle cx="470" cy="470" r="8"/><text x="470" y="473.5" text-anchor="middle">4</text></g>
     <g class="badge"><title>Stage 5: Post-check over Redfish, and the rollback when it fails</title><circle cx="490" cy="470" r="8"/><text x="490" y="473.5" text-anchor="middle">5</text></g>
     <text class="band" x="20" y="560">CONNECTIONS</text>
