@@ -678,6 +678,7 @@ The BMC stays the only truth about what runs: a host is read again over Redfish 
 | Rollout state | PostgreSQL for every site, the gate as a query, partitioned retention | PostgreSQL: locks, append-only events, no retention |
 | Site agent | long-lived, one per site, its own `/metrics` | `rollout.py run` on an admin host, pushing to a Pushgateway |
 | Scheduler | Slurm or Kubernetes, through a validated integration | hooks, none configured |
+| Provisioning | Ironic or Metal3 owns each host's power, boot and reinstall. The rollout either takes the host from it (Ironic maintenance mode, Metal3's detached annotation) before taking its lock and gives it back after, or hands it the update (`HostFirmwareComponents`, an Ironic service step). Never two actors on one BMC: a power sync during the update's reset, or a reinstall mid-flash | none: the rollout is the only actor on a BMC |
 | In-band updates | an in-band runner per site, its own task queue: `ansible-runner` (or Salt) on one host, SSH, the vendor's tool | none: Redfish only |
 | Secrets | Vault | git-ignored env files |
 | Alerts | Alertmanager pages on a halt or `needs_attention` | none |
