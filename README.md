@@ -254,7 +254,7 @@ the fleet is on two builds, and the report says which host runs which.
 
 | Layer | Command | What it proves |
 |---|---|---|
-| Unit | `make test`: 31 tests, about a second, no BMC | the decisions that stop a bad image, on a real lab BMC's Redfish data ([testdata](tests/testdata/openbmc-gb200.json)) with one fact changed per case. `make update` runs it first |
+| Unit | `make test`: 33 tests, about a second, no BMC | the decisions that stop a bad image, on a real lab BMC's Redfish data ([testdata](tests/testdata/openbmc-gb200.json)) with one fact changed per case. `make update` runs it first |
 | Mutation | `make mutations`: 48 cases | each safety rule broken the way a careless edit would; the test that guards it must fail. 48 of 48 do |
 | Fault injection | `make fault SCENARIO=…` | the real pipeline on the lab's BMCs, past the network boundary the unit tests stop at |
 

@@ -84,6 +84,7 @@ services:
     volumes: ["store:/data", "./store/access.json:/etc/seaweedfs/access.json:ro"]
     healthcheck:
       test: [CMD, wget, -qO, /dev/null, "http://127.0.0.1:8888/"]
+      start_period: 60s
       interval: 5s
       retries: 2
 
