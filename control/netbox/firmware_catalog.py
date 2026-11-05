@@ -72,7 +72,7 @@ def sync_catalog(source, warn=print) -> tuple[int, int, int]:
     created = updated = 0
     for name, row in rows.items():
         vendor, model = split_model(row["catalog_model"])
-        if vendor not in vendors or row["site"] not in sites:
+        if vendor is None or row["site"] not in sites:
             warn(f"{name}: no hosts: NetBox has no site {row['site']}, or VENDORS in firmware_catalog.py no vendor "
                  f"for it")
         hosts = [d for d in devices if is_host_of(d, row["site"], vendor, model)]

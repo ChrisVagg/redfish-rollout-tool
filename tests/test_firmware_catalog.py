@@ -30,11 +30,14 @@ BASELINE = '''
   "Manager (BMC)": "3.1.0"
 "Unknown Corp X1":
   "System BIOS": "1.0"
+"Nowhere Inc. X1":
+  "System BIOS": "1.0"
 '''
 BIOS_OLD = "cata: Dell Inc. PowerEdge R630 / System BIOS / 2.19.0"
 BIOS_NEW = "cata: Dell Inc. PowerEdge R630 / System BIOS / 2.20"
 PSU, BMC = "cata: Dell Inc. PowerEdge R630 / PSU DELTA    / 00.14.7A", "cata: - - / Manager (BMC) / 3.1.0"
 UNKNOWN = "cata: Unknown Corp X1 / System BIOS / 1.0"
+NO_DEVICES = "cata: Nowhere Inc. X1 / System BIOS / 1.0"
 
 
 def sync_catalog(source, warn=lambda _: None):
@@ -90,6 +93,7 @@ def refused(source, repo, files, says):
 
 
 def run(repo):
+    firmware_catalog.VENDORS["Nowhere Inc."] = "Nowhere"
     source = DataSource.objects.create(name="catalog test", type="git", source_url=str(repo),
                                        ignore_rules=DataSource.objects.get(name=SOURCE).ignore_rules)
     for row in rows().values():  # the real ones, until the rollback
@@ -116,7 +120,7 @@ def run(repo):
     # Every row equals git, field by field: images, approved versions with no image, text left as text
     warnings = []
     counts = sync_catalog(source, warnings.append)
-    assert counts == (5, 0, 0), counts
+    assert counts == (6, 0, 0), counts
     got = rows()
     assert {k: fields(v) for k, v in got.items()} == {
         BIOS_OLD: ("cata", "DELL", "Dell Inc. PowerEdge R630", "System BIOS", "2.19.0", "images/r630-2.19.0.bin",
@@ -126,13 +130,15 @@ def run(repo):
         PSU: ("cata", "DELL", "Dell Inc. PowerEdge R630", "PSU DELTA   ", "00.14.7A", "", "", True),
         BMC: ("cata", "NVIDIA", "- -", "Manager (BMC)", "3.1.0", "https://cache/gb200.tar", "cccc", True),
         UNKNOWN: ("cata", None, "Unknown Corp X1", "System BIOS", "1.0", "", "", True),
+        NO_DEVICES: ("cata", None, "Nowhere Inc. X1", "System BIOS", "1.0", "", "", True),
     }, {k: fields(v) for k, v in got.items()}
 
-    # Mapped by site and vendor, and by model where NetBox knows it. A vendor it can't place maps to nothing, and says
-    # so
+    # Mapped by site and vendor, and by model where NetBox knows it. A vendor it can't place maps to nothing and says
+    # so; a known vendor NetBox has no device of yet, as on a fresh clone, is no problem and stays quiet
     assert hosts(got[BIOS_NEW]) == hosts(got[PSU]) == {"any-dell", "r630"}, hosts(got[BIOS_NEW])
     assert hosts(got[BMC]) == {"gb200"}, hosts(got[BMC])
-    assert hosts(got[UNKNOWN]) == set() and [w for w in warnings if UNKNOWN in w], warnings
+    assert hosts(got[UNKNOWN]) == hosts(got[NO_DEVICES]) == set(), hosts(got[NO_DEVICES])
+    assert len(warnings) == 1 and UNKNOWN in warnings[0], warnings
 
     # Nothing changed, nothing is written
     stamps = {k: v.last_updated for k, v in rows().items()}
