@@ -429,6 +429,18 @@ Two limits of the mapping, both from what NetBox records. Prod's device types ar
 list all three Dell hosts; a real device type narrows them with no code change. And NetBox records no firmware per device,
 so every component of a model maps to the same hosts.
 
+<details>
+<summary>The firmware catalog in NetBox (6 screenshots)</summary>
+
+![NetBox: the lab's two firmware images, each with its file, sha256, approval and the ten hosts it maps to](docs/netbox/firmware-images.png)
+![NetBox: the approved image, every field from git and its hosts bmc1 to bmc10](docs/netbox/firmware-image.png)
+![NetBox: bmc1's Custom Objects tab, the two images that apply to it](docs/netbox/device-firmware.png)
+![NetBox: the data source, this repository's git every minute, only the catalog's three files in](docs/netbox/catalog-source.png)
+![NetBox: the data source's sync jobs, one a minute](docs/netbox/catalog-sync-jobs.png)
+![NetBox: the script's run after a commit moved the approval: 0 created, 2 updated, 0 deleted](docs/netbox/catalog-sync-result.png)
+
+</details>
+
 ## Observability
 
 **The exporter**, `poller.py exporter`, one per site (lab every 10 s on `:9101`, prod every 30 s on `:9102`), crawls
