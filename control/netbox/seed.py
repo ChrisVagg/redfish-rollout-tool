@@ -8,13 +8,17 @@ NetBox's own edits stay:
     NVIDIA GB200 NVL in racks r1 to r3 in turn, each tagged writable, bmc1 also canary
 A device is the server and its BMC how it's reached: its management-only interface bmc holds the BMC's address, the
 device's out-of-band IP. Prod's servers are added in NetBox (README.md, Production), each with the platform whose config context
-names its BMC account."""
+names its BMC account.
+  the firmware catalog's view: the firmware_image object type, the data source that pulls git every minute, and the
+    event rule that runs firmware_catalog.py after each sync"""
 import os
 
-from core.models import ObjectType
+from core.events import JOB_COMPLETED
+from core.models import DataSource, ObjectType
 from dcim.models import Device, DeviceRole, DeviceType, Interface, Manufacturer, Rack, Site
-from extras.models import ConfigContext, Tag
+from extras.models import ConfigContext, EventRule, Script, ScriptModule, Tag
 from ipam.models import IPAddress
+from netbox_custom_objects.models import CustomObjectType, CustomObjectTypeField
 from tenancy.models import Tenant
 from users.models import ObjectPermission, Token, User
 
@@ -68,3 +72,34 @@ else:
         device.save()
         device.tags.add(writable, *([canary] if n == 1 else []))
     print(f"Added the lab's 10 BMCs to NetBox, site {lab}")
+
+# The firmware catalog as a view in NetBox: git is the authority, firmware_catalog.py keeps these objects equal to it.
+# The source is this clone's own git, so only what is committed comes in, and it works without a push; the ignore rules
+# keep all but control/catalog/ out of NetBox's database. Production points it at the hosted catalog repository
+firmware, _ = CustomObjectType.objects.get_or_create(
+    name="firmware_image", defaults={"slug": "firmware-images", "verbose_name": "firmware image",
+                                     "verbose_name_plural": "firmware images",
+                                     "description": "From the catalog in git: edits here are undone by its next sync"})
+for weight, (name, kind, target) in enumerate((
+        ("image", "text", None), ("site", "object", Site), ("vendor", "object", Manufacturer),
+        ("catalog_model", "text", None), ("component", "text", None), ("version", "text", None),
+        ("file", "text", None), ("sha256", "text", None), ("approved", "boolean", None),
+        ("hosts", "multiobject", Device))):
+    CustomObjectTypeField.objects.get_or_create(
+        custom_object_type=firmware, name=name,
+        defaults={"type": kind, "primary": name == "image", "unique": name == "image", "weight": weight * 10,
+                  "related_object_type": ObjectType.objects.get_for_model(target) if target else None})
+module, _ = ScriptModule.objects.get_or_create(file_root="scripts", file_path="firmware_catalog.py")
+module.sync_classes()
+rule, _ = EventRule.objects.get_or_create(
+    name="firmware catalog sync",
+    defaults={"event_types": [JOB_COMPLETED], "action_type": "script",
+              "action_object_type": ObjectType.objects.get_for_model(Script),
+              "action_object_id": Script.objects.get(module=module, name="FirmwareCatalogSync").pk})
+rule.object_types.set([ObjectType.objects.get_for_model(DataSource)])
+source, _ = DataSource.objects.get_or_create(
+    name="firmware catalog",
+    # file://, as NetBox clones shallow only with a scheme. A rule also matches a bare file name: those with a / can't
+    defaults={"type": "git", "source_url": "file:///catalog-repo", "parameters": {"branch": "main"}, "sync_interval": 1,
+              "ignore_rules": "[!c]*/*\ncontrol/[!c]*\n*.py\n*.sh\n*.md\n*.txt\nMakefile"})
+source.save()  # schedules its recurring sync, if it has none

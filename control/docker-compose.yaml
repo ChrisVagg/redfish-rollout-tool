@@ -2,6 +2,7 @@
 # site. make control-up starts it, then runs the ingest, ingest/, when the firmware catalog is missing: the download,
 # the sandbox's checks, the upload into the store; the catalog itself, catalog/<site>/, is YAML in git, not a service.
 #   netbox, netbox-postgres, netbox-redis   the inventory, http://127.0.0.1:8000
+#   netbox-worker                           NetBox's background jobs: pulls the catalog from git into NetBox every minute
 #   state-postgres                          the rollout state, 127.0.0.1:5432
 #   store                                   the approved images; each site's cache reads them over S3, :8333
 #   sandbox                                 the ingest's checks of each downloaded package, run once per ingest
@@ -10,21 +11,45 @@
 name: redfish-control
 x-netbox-secrets: &netbox-secrets
   env_file: netbox/.netbox.env
+x-netbox: &netbox
+  image: redfish/netbox:v4.7.2-5.1.1-custom-objects-0.7.2
+  build:
+    context: netbox
+    dockerfile_inline: |
+      FROM netboxcommunity/netbox:v4.7.2-5.1.1
+      RUN uv pip install --python /opt/netbox/venv/bin/python netboxlabs-netbox-custom-objects==0.7.2
+      RUN echo 'PLUGINS = ["netbox_custom_objects"]' > /etc/netbox/config/plugins.py
+      # the catalog's sync runs every minute: a week of its jobs, not the default 90 days
+      RUN echo 'JOB_RETENTION = 7' >> /etc/netbox/config/extra.py
+      RUN SECRET_KEY=build-only-not-a-secret-build-only-not-a-secret-build-only /opt/netbox/venv/bin/python \
+          /opt/netbox/netbox/manage.py collectstatic --no-input
+  restart: unless-stopped
+  user: "netbox:root"
+  environment: [DB_HOST=netbox-postgres, DB_NAME=netbox, DB_USER=netbox, REDIS_HOST=netbox-redis,
+                SKIP_SUPERUSER=false, SUPERUSER_NAME=admin, GRANIAN_EXTRA_ARGS=--host=0.0.0.0]
+  volumes: ["./netbox/firmware_catalog.py:/opt/netbox/netbox/scripts/firmware_catalog.py:ro"]
 
 services:
-  # netbox used as service inventory
+  # netbox used as service inventory, with the Custom Objects plugin that holds the firmware catalog's view
   netbox:
-    image: netboxcommunity/netbox:v4.7.2-5.1.1
-    env_file: [netbox/.netbox.env, netbox/.tokens.env] 
-    restart: unless-stopped
+    <<: *netbox
+    env_file: [netbox/.netbox.env, netbox/.tokens.env]
     depends_on:
       netbox-postgres: {condition: service_healthy}
       netbox-redis: {condition: service_healthy}
-    user: "netbox:root"
     ports: ["127.0.0.1:8000:8080"]
-    environment: [DB_HOST=netbox-postgres, DB_NAME=netbox, DB_USER=netbox, REDIS_HOST=netbox-redis,
-                  SKIP_SUPERUSER=false, SUPERUSER_NAME=admin, GRANIAN_EXTRA_ARGS=--host=0.0.0.0]
     healthcheck: {test: /opt/netbox/health.sh, start_period: 600s, timeout: 3s, interval: 5s}
+  # Runs the data source's sync and firmware_catalog.py, which is all that reads this clone's git, read-only
+  netbox-worker:
+    <<: *netbox
+    env_file: netbox/.netbox.env
+    depends_on:
+      netbox: {condition: service_healthy}
+    command: [/opt/netbox/venv/bin/python, /opt/netbox/netbox/manage.py, rqworker]
+    volumes:
+      - ./netbox/firmware_catalog.py:/opt/netbox/netbox/scripts/firmware_catalog.py:ro
+      - ../.git:/catalog-repo:ro
+    healthcheck: {test: ps -aux | grep -v grep | grep -q rqworker, start_period: 60s, timeout: 3s, interval: 15s}
   netbox-postgres:
     image: postgres:18-alpine
     <<: *netbox-secrets

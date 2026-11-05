@@ -1,0 +1,6 @@
+# Written by control/ingest/promote-fw-images.sh: the lab's approved firmware. The emulated GB200 NVL reports no manufacturer or
+# model, so its model reads "- -". The lab boots build 1765 and this approves build 1766, so make update updates it. To
+# roll the lab back and forth, swap which line is commented.
+"- -":
+  # "Manager (BMC)": "3.1.0-dev-1465-g07b3626ee8.1791946321.6609914"  # build 1766
+  "Manager (BMC)": "3.1.0-dev-1458-g00a7cfdbab.1791862670.3259783"  # build 1765, the one the lab boots

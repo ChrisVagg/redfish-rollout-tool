@@ -14,7 +14,6 @@ lab/qemu-system-arm
 lab/bmc.mtd
 # the downloads promote-store-fw-package.sh hasn't promoted yet, and the sandbox's list of the verified ones
 control/ingest/staging/
-control/catalog/lab/
 lab/scenario/
 /lab/runs/
 /prod/runs/

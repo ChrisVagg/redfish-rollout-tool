@@ -51,12 +51,15 @@ Setup
   make test                the rollout's decisions on recorded Redfish data, in about a second, no BMC needed; the
                            host locks' test needs the state database, else it's skipped
   make mutations           break each safety rule of the tools, in a copy: each break must fail a test
+  make catalog-test        the firmware catalog's sync in NetBox itself, from a throwaway git repository; everything it
+                           does is rolled back. Needs make control-up
 
 Control plane: one per fleet, every port on 127.0.0.1; the sites connect to it, never it to them
   make control-up          start NetBox (http://127.0.0.1:8000, admin's password: control/netbox/.netbox.env), the state
                            database (127.0.0.1:5432; its passwords: control/state/.state.env), the approved store,
                            Prometheus, the Pushgateway, Loki and Grafana (http://127.0.0.1:3000, account:
-                           control/observability/grafana/.grafana.env). Give NetBox the services' read-only accounts
+                           control/observability/grafana/.grafana.env). NetBox's worker pulls the committed firmware
+                           catalog from git every minute. Give NetBox the services' read-only accounts
                            (tokens: control/netbox/.tokens.env) and, when it has none, the lab's ten BMCs; ingest
                            OpenBMC's two newest builds into the store when the catalog is missing (download; check
                            them in a sandbox with no network; upload)
@@ -114,7 +117,7 @@ export HELP
 
 .DEFAULT_GOAL := help
 .DELETE_ON_ERROR:
-.PHONY: help setup test mutations control-up control-down state unlock site-up site-logs site-down lab-up lab-down \
+.PHONY: help setup test mutations catalog-test control-up control-down state unlock site-up site-logs site-down lab-up lab-down \
         lab-reset lab-clean subscribe collect $(VIEWS) oem detail views plan dry-run update report watch cancel fault
 
 help:
@@ -133,6 +136,11 @@ mutations: control/netbox/.netbox.env control/netbox/.tokens.env control/state/.
            control/observability/grafana/.grafana.env
 	$(CONTROL) up --detach --wait state-postgres
 	$(DB) $(PY) tests/mutations.py
+
+# The firmware catalog's sync, in NetBox itself: everything it does is rolled back
+catalog-test:
+	$(CONTROL) exec -T netbox /opt/netbox/venv/bin/python /opt/netbox/netbox/manage.py shell --no-startup --no-imports \
+	  --interface python < tests/test_firmware_catalog.py
 
 # ---- Control plane ----
 # Up, then NetBox's seed (the services' accounts and tokens, the sites, and the lab's BMCs when it has none), then

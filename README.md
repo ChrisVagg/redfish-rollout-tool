@@ -29,7 +29,7 @@ tagged `writable` in NetBox. No production host is tagged.
 | Post-update health | the target version runs, System and Manager health is no worse than before, no new failed Task or Job |
 | Rollback | reinstall the version that ran before, reset, verify again; a host that can't be recovered stays drained and locked as `needs_attention` |
 | Image integrity | signatures checked against a pinned key in a sandbox with no network, at ingest; sha256 checked against the catalog by the agent before every push |
-| Change control | `plan.json` freezes the inputs (file sha256s, NetBox entries, each BMC's identity); later stages refuse anything that changed. Baseline and catalog are YAML reviewed in git |
+| Change control | `plan.json` freezes the inputs (file sha256s, NetBox entries, each BMC's identity); later stages refuse anything that changed. Baseline and catalog are YAML in git; NetBox shows a read-only copy |
 | Concurrency | one PostgreSQL lock per host, taken all-or-nothing per stage; locks never expire, a person releases them |
 | Audit | a run record per stage, written before and after every step; an append-only events table; `report.json` with who planned, approved and ran it |
 | Observability | an exporter per site → Prometheus; rollout events, BMC `LogService` entries and, on the lab, the BMCs' pushed events (`EventService` → Vector) → Loki; Grafana per site |
@@ -255,6 +255,7 @@ the fleet is on two builds, and the report says which host runs which.
 | Layer | Command | What it proves |
 |---|---|---|
 | Unit | `make test`: 33 tests, about a second, no BMC | the decisions that stop a bad image, on a real lab BMC's Redfish data ([testdata](tests/testdata/openbmc-gb200.json)) with one fact changed per case. `make update` runs it first |
+| Catalog sync | `make catalog-test`: NetBox itself, needs `make control-up` | the [catalog's sync](#the-firmware-catalog-in-netbox) from a throwaway git repository through a real data source sync; each field against git, the mapping, a moved approval, a removed image, a bad commit. Rolled back, so NetBox keeps nothing |
 | Mutation | `make mutations`: 48 cases | each safety rule broken the way a careless edit would; the test that guards it must fail. 48 of 48 do |
 | Fault injection | `make fault SCENARIO=…` | the real pipeline on the lab's BMCs, past the network boundary the unit tests stop at |
 
@@ -350,7 +351,8 @@ Checked on real Redfish services with the latest DMTF schemas.
    One package that fails stops them all: nothing is listed.
 3. **Promote** ([promote-store-fw-package.sh](control/ingest/promote-store-fw-package.sh)): checks each listed
    package's sha256 again (one changed since the sandbox is refused), uploads it into the store, writes the catalog
-   (`images.yaml`: path and sha256) and approves the newer build in `baseline.yaml`.
+   (`images.yaml`: path and sha256) and approves the newer build in `baseline.yaml`. Committing them is the approval, and
+   what [NetBox shows](#the-firmware-catalog-in-netbox).
 4. **Distribute**: each site's nginx cache (HTTPS, 2 GiB, 30 days) fetches from the store on a miss. Pre-flight
    downloads the image into the agent's spool and checks its sha256 against the catalog before a byte reaches a BMC;
    a copy that doesn't match is deleted.
@@ -370,7 +372,8 @@ admin with Docker access can bypass the ingest.
 ## Inventory: NetBox
 
 NetBox, in the control plane, is the only inventory for both sites. The poller, the exporter and
-the rollout read their site's devices over its REST API. Baseline, catalog and policy stay YAML in git, where a merged pull request is the approval.
+the rollout read their site's devices over its REST API. Baseline, catalog and policy stay YAML in git, where a merged pull request is the approval;
+NetBox [shows the catalog](#the-firmware-catalog-in-netbox) and decides nothing.
 
 | The tools read | From NetBox |
 |---|---|
@@ -396,6 +399,35 @@ may only view devices; a write gets 403. Who may edit devices in NetBox still de
 ![NetBox: the API tokens, one read-only token per service](docs/netbox/tokens.png)
 
 </details>
+
+### The firmware catalog in NetBox
+
+Git stays the authority, and the rollout reads the files. NetBox holds a read-only copy so an operator sees, on a device's
+**Custom Objects** tab, which images and approved versions apply to it. No tool gets a token that writes to NetBox: all of
+it runs inside NetBox, with the [Custom Objects](https://github.com/netboxlabs/netbox-custom-objects) plugin.
+
+```
+commit → data source clones this repository's git, every minute → event rule on that job → firmware_catalog.py
+         (only what is committed, only control/catalog/)                                    makes the objects equal git
+```
+
+One `firmware_image` object per image in `images.yaml` and per approved version in `baseline.yaml`:
+
+| Field | From |
+|---|---|
+| `site` | the catalog's folder, `control/catalog/<site>/` |
+| `catalog_model`, `component`, `version` | the keys in `images.yaml` and `baseline.yaml` |
+| `file`, `sha256` | `images.yaml`; empty for an approved version with no image |
+| `approved` | whether `baseline.yaml` approves this version |
+| `vendor`, `hosts` | NetBox's manufacturer for that model's vendor, and the site's devices of that vendor |
+| `image` | the row's name and identity: site, model, component, version |
+
+An edit in NetBox is undone by the next sync. A broken commit, or a field in `images.yaml` the object type lacks, errors the
+job and changes nothing. `make catalog-test` checks all of this against NetBox itself, inside a transaction it rolls back.
+
+Two limits of the mapping, both from what NetBox records. Prod's device types are `unspecified`, so each Dell model's rows
+list all three Dell hosts; a real device type narrows them with no code change. And NetBox records no firmware per device,
+so every component of a model maps to the same hosts.
 
 ## Observability
 
@@ -671,7 +703,7 @@ The BMC stays the only truth about what runs: a host is read again over Redfish 
 | Qualify | lab hosts of every model before approval | none |
 | Approved store | S3 or Artifactory, digest-addressed, immutable | SeaweedFS, build-number names |
 | Site cache | nginx over HTTPS per site | the same, in the lab site |
-| Catalog, baseline | YAML in git, every change checked in CI | YAML in git; the plan freezes what it used |
+| Catalog, baseline | YAML in its own git repository, every change checked in CI; NetBox pulls it to show it | YAML in this repository; NetBox pulls it to show it; the plan freezes what it used |
 | Inventory | NetBox or Nautobot, SSO, backed up | NetBox, a read-only account per service |
 | API, approval | a service, with an approval between the canary and wave 1 | the CLI: `make`, `YES=1` |
 | Workflow engine | Temporal or Argo Workflows: resumes after a crash | `pipeline.sh` and `rollout.py run`; no resume |
@@ -796,8 +828,9 @@ poller.py       collect, the views (health, firmware, inventory, telemetry, capa
 redfish.py      the Redfish connection both tools share: session, token, GET, POST, DELETE
 constants.py    what to crawl, table columns, rollout constants
 helpers.py      shared helpers
-tests/          test_rollout.py (make test), mutations.py (make mutations), testdata/: a lab BMC's Redfish data
-control/        the control plane: ingest/ (download, sandbox verify, promote, the pinned key), store/, netbox/seed.py,
+tests/          test_rollout.py (make test), test_firmware_catalog.py (make catalog-test), mutations.py (make mutations),
+                testdata/: a lab BMC's Redfish data
+control/        the control plane: ingest/ (download, sandbox verify, promote, the pinned key), store/, netbox/ (seed.py, firmware_catalog.py),
                 state/schema.sql, observability/ (Prometheus, Loki, Grafana), catalog/<site>/ (baseline, images)
 site/           a site: the exporter's Dockerfile, the Prometheus agent, cache/ (nginx), vector.yaml (the event receiver)
 lab/            the lab: the BMCs' Dockerfile and Compose, scenario.sh, policy.yaml, prometheus-agent.yml

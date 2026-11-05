@@ -1,0 +1,6 @@
+# Written by control/ingest/promote-fw-images.sh: the lab's firmware images, GB200 NVL whole-flash update
+# packages of OpenBMC's Jenkins builds 1765 1766, each at its path in the store
+"- -":
+  "Manager (BMC)":
+    "3.1.0-dev-1458-g00a7cfdbab.1791862670.3259783": {file: "images/gb200nvl-1765.static.mtd.all.tar", sha256: "3fd2fb49c8e948ea5454555424bc3a1104f116953ba00c299ae35c0dc8961530"}
+    "3.1.0-dev-1465-g07b3626ee8.1791946321.6609914": {file: "images/gb200nvl-1766.static.mtd.all.tar", sha256: "b0169acc7dbef85d0122f6d366f96b323d146945dd79131b8cf82fac8e2230a7"}
