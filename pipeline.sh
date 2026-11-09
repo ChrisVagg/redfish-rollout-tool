@@ -19,7 +19,8 @@ py=${PY:-venv/bin/python}
 runs=${SITE:-prod}/runs  # where rollout.py records the site's runs
 out=$runs/pipeline-$(date -u +%Y%m%dT%H%M%SZ)
 mkdir -p "$runs"
-mkdir "$out" 2>/dev/null || { echo "$out exists: another pipeline started this second, start again" >&2; exit 1; }
+# mkdir says why it can't: the folder exists (another pipeline started this second) or no permission on $runs
+mkdir "$out" || { echo "$out not created (why above): if it exists, another pipeline started this second" >&2; exit 1; }
 yes=$([ "${YES:-}" = 1 ] && echo --yes)  # only YES=1 writes: YES=0 or YES=no stays a dry run
 read -ra run_args <<< "${RUN_ARGS:-}"
 

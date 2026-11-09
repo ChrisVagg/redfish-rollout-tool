@@ -140,7 +140,7 @@ before and after it runs, so a run stopped halfway shows where each host was.
 |----|----|----|
 | 1 | Pre-flight | Fresh read & the BMC must be the one the plan approved (model, service UUID, serial) |
 | 2 | Drain | only when the reset restarts the host (BIOS, system firmware); In the LAB there is no Drain -> BMC reset. |
-| 3 | Update | multipart push to `MultipartHttpPushUri`, or `SimpleUpdate` from a URL, with `OperationApplyTime: OnReset`, or `OnStartUpdateRequest` then `UpdateService.StartUpdate` on a BMC that offers it (the Apply time column); the Task followed to its end, every `TaskState`, `PercentComplete` and message recorded. **In LAB no Task migrate to Job.** |
+| 3 | Update | multipart push to `MultipartHttpPushUri`, or `SimpleUpdate` from a URL, with `OperationApplyTime: OnReset`, or `OnStartUpdateRequest` on a BMC that offers `UpdateService.StartUpdate`, called while the Task waits `Pending` (not once the BMC started it); the Apply time column says which; the Task followed to its end, every `TaskState`, `PercentComplete` and message recorded. **In LAB no Task migrate to Job.** |
 | 4 | Reset | `Manager.Reset` or `ComputerSystem.Reset`, graceful first, `On` for a system the update left off, then wait for the BMC to answer, or the system to boot again (`OSRunning`, or the boot state it reported before, reached again) |
 | 5 | Post-check | the target version runs, health no worse than before (or a resource gone from the telemetry), no new failed or hung Task or Job. In LAB the BMCs don't expose ComponentIntegrity Redfish resource. On a failure: reinstall the version before, reset, check again |
 | 6 | Undrain | back to the scheduler; a host that can't be recovered stays drained as `needs_attention` - remote hands - and keeps its lock in the state DB. |
@@ -329,7 +329,10 @@ Checked on real Redfish services with the latest DMTF schemas.
 - No production BMC advertises the apply times its updates accept (`@Redfish.OperationApplyTimeSupport`: AMI puts it
   on its reset actions only). The Supermicros offer `UpdateService.StartUpdate`, which applies only images uploaded
   with `OnStartUpdateRequest`, so the rollout stages there and starts the update itself; every other model gets
-  `OnReset`. Supermicro's choices to keep the BIOS settings or back up the running image aren't in Redfish, and its
+  `OnReset`. On the Supermicro (BMC 01.07.01) the upload's Task waits `Pending` until `StartUpdate` (or the web UI's
+  Resume Firmware Update); the BIOS flash then runs about 4.5 min with the host up, updates the ME region too, and
+  takes effect at the next system reset, whose first boot retrains memory (3 min to
+  `SystemHardwareInitializationComplete`). Supermicro's choices to keep the BIOS settings or back up the running image aren't in Redfish, and its
   `Systems/1/Bios` needs the DCMS license (403 `OemLicenseNotPassed`). Its BMC stops `BootProgress` at
   `SystemHardwareInitializationComplete`, so a system counts as back once it reaches the state it reported before.
 

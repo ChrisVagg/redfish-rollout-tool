@@ -845,14 +845,15 @@ def handed(headers, body) -> tuple:
     return headers.get("Location") or body.get("TaskMonitor") or task, task
 
 
-# Step 3's end on a BMC whose apply time is OnStartUpdateRequest: the image is staged, StartUpdate applies it; the
-# task followed as the upload's was, (end state, its last message, the task)
-def start_staged(tunnel, found, changed) -> tuple[str, str, dict]:
+# Step 3 on a BMC whose apply time is OnStartUpdateRequest: the upload's task waits Pending until StartUpdate. The task
+# to follow from then on (StartUpdate's own, if it hands one, else the upload's), and what StartUpdate did
+def start_staged(tunnel, found, monitor, task_uri) -> tuple[tuple, str]:
     target = obj(obj(first_of(found, "UpdateService").get("Actions")).get("#UpdateService.StartUpdate")).get("target")
     status, headers, body = send(tunnel, "POST", target, json={})
     if status not in (200, 202, 204):
-        return "failed", f"StartUpdate: {error_text(status, body)}", {}
-    return follow_task(tunnel, *(handed(headers, body) if status == 202 else (None, None)), TASK_TIMEOUT, changed)
+        return (monitor, task_uri), f"refused: {error_text(status, body)}"
+    own = handed(headers, body) if status == 202 else (None, None)
+    return (own if own[0] else (monitor, task_uri)), "started"
 
 
 # A Task resource's standard properties, as the record keeps them
@@ -865,10 +866,10 @@ def task_of(uri, body) -> dict:
 
 
 # Follow an update task until it ends: (end state, its last message, the task as last read)
-def follow_task(tunnel, monitor, task_uri, timeout, changed) -> tuple[str, str, dict]:
+def follow_task(tunnel, monitor, task_uri, timeout, changed, stop=()) -> tuple[str, str, dict]:
     """The Task resource carries the state, PercentComplete and messages; the monitor only says whether it's done, so
     it's polled only when the BMC names no task. changed(task) is called on every change of state, percent or
-    messages, so the record follows the task."""
+    messages, so the record follows the task. stop: states to return at too, as Pending for a staged update."""
     if not (monitor or task_uri):
         return "Completed", "accepted without a task", {}
     until, task, seen = time.monotonic() + timeout, {}, None
@@ -885,7 +886,7 @@ def follow_task(tunnel, monitor, task_uri, timeout, changed) -> tuple[str, str, 
         if task and (task["state"], task["percent"], len(task["messages"])) != seen:
             seen = task["state"], task["percent"], len(task["messages"])
             changed(task)
-        if state in ("Completed", "Exception", "Killed", "Cancelled"):
+        if state in ("Completed", "Exception", "Killed", "Cancelled", *stop):
             last = task["messages"][-1] if task.get("messages") else None
             return state, f"{last['message_id']}: {last['message']}" if last else "-", task
         time.sleep(min(int(headers.get("Retry-After") or 5), 30))
@@ -1030,10 +1031,17 @@ def apply(server, found, key, image, want, before, policy, rec, phase) -> tuple[
     # lambda task: the task as just read -> one record event, so the record follows it through every change
     changed = lambda task: rec(host, f"{phase}update", "task", task=task, detail=task_line(task))
     state, message, task = (("failed", error, {}) if error
-                            else follow_task(link_, monitor, task_uri, TASK_TIMEOUT, changed))
-    if staged and state == "Completed":  # uploaded and staged: StartUpdate applies it, its task under the same step
-        state, message, task = start_staged(link_, found, changed)
-    rec(host, f"{phase}update", state, detail=message, task=task, **{"start_update": True} if staged else {})
+                            else follow_task(link_, monitor, task_uri, TASK_TIMEOUT, changed,
+                                             ("Pending",) if staged else ()))
+    started = None  # what StartUpdate did, for the record
+    if staged and state == "Pending":  # staged: StartUpdate applies it, its task followed under the same step
+        (monitor, task_uri), started = start_staged(link_, found, monitor, task_uri)
+        # refused: followed still, as the BMC or a person may start it; Pending at the timeout fails, unreset
+        state, message, task = follow_task(link_, monitor, task_uri, TASK_TIMEOUT, changed)
+        message += f"; StartUpdate {started}" if started != "started" else ""
+    elif staged and state == "Completed":  # the BMC, or a person, ran it already: a StartUpdate would be refused
+        started = "not needed: the BMC started it"
+    rec(host, f"{phase}update", state, detail=message, task=task, **{"start_update": started} if started else {})
     if location and state != "gone":
         logout(link_, location)
     if state not in ("Completed", "gone"):
@@ -1586,7 +1594,8 @@ def step_detail(step) -> str:
         lines += [f"{step['method']} · {step['action']} {step['uri']}" + (f" · {step['protocol']}"
                                                                          if step.get("protocol") else ""),
                   f"{image.get('file')} (sha256 {str(image.get('sha256'))[:12]}…) → {step.get('target')}",
-                  f"apply {step.get('apply_time')}" + (", then StartUpdate" if step.get("start_update") else "") +
+                  f"apply {step.get('apply_time')}" + (f", StartUpdate {step['start_update']}" if isinstance(
+                      step.get("start_update"), str) else ", then StartUpdate" if step.get("start_update") else "") +
                   f" · targets {', '.join(step.get('targets') or []) or 'BMC decides'}"]
         lines += [trail(step.get("progress") or []), *task_detail(step["task"])] if step.get("task") else []
     elif kind.endswith("reset") and "action" in step:

@@ -436,26 +436,39 @@ def test_wait_host():
 
 # When an update's image is applied, as the dashboards show it (redfish_firmware_info's apply_time): OnReset, by step
 # 4's reset, unless the UpdateService offers StartUpdate, which applies only images uploaded with OnStartUpdateRequest:
-# then the upload is staged and StartUpdate applies it, before the reset
+# their task waits Pending until StartUpdate, which the rollout then calls, before the reset. A task the BMC (or a
+# person) already started needs no StartUpdate; one refused stays Pending, and fails at the task timeout, unreset
 def test_apply_time():
     start = "/redfish/v1/UpdateService/Actions/UpdateService.StartUpdate"
 
-    # lambda found: one update on the lab BMC, the network replaced -> what it sent: (method, uri, parameters), reset
-    def update(found) -> list:
-        sent = []
+    # lambda found, bmc: one update on the lab BMC, its network a simulated BMC -> (what it was sent: (method, uri,
+    # parameters) and the reset, the update step's last record, passed). bmc: "waits" holds the task Pending until
+    # StartUpdate (a Supermicro), "starts" runs it by itself, "refuses" holds it Pending and refuses StartUpdate
+    def update(found, bmc="starts") -> tuple[list, dict, bool]:
+        sent, recs, task = [], [], {"TaskState": "Pending", "TaskStatus": "OK"}
 
         def send(link, method, uri, **kw) -> tuple:
             files = kw.get("files") or {}
             sent.append((method, uri, json.loads(files["UpdateParameters"][1]) if files else kw.get("json")))
+            if method == "GET":  # the update's task
+                task["TaskState"] = "Completed" if bmc == "starts" else task["TaskState"]
+                return 200, {}, {"@odata.id": TASK, **task}
+            if uri == start:
+                if bmc == "refuses":
+                    return 400, {}, {"error": {"message": "The action StartUpdate cannot execute for current "
+                                                          "surroundings"}}
+                task["TaskState"] = "Completed"
+                return 204, {}, {}
             return 202, {"Location": TASK}, {}
         with (patch.object(rollout, "tunnel", lambda s: None), patch.object(rollout, "login", lambda link: None),
-              patch.object(rollout, "send", send),
-              patch.object(rollout, "follow_task", lambda *a: ("Completed", "-", {})),
+              patch.object(rollout, "send", send), patch.object(rollout.time, "sleep", lambda s: None),
+              patch.object(rollout, "TASK_TIMEOUT", 0.2),
               patch.object(rollout, "reset", lambda *a: sent.append(("reset",)) or (True, "-")),
               patch.object(rollout, "post_check", lambda *a: (True, [], TARGET))):
-            assert rollout.apply({"host": "h"}, found, BMC, catalog()[MODEL][BMC][TARGET], TARGET, {},
-                                 {"reset_timeout": 1}, lambda *a, **k: None, "")[0]
-        return sent
+            passed = rollout.apply({"host": "h"}, found, BMC, catalog()[MODEL][BMC][TARGET], TARGET, {},
+                                   {"reset_timeout": 1}, lambda *a, **k: recs.append((a, k)), "")[0]
+        last = [k for a, k in recs if a[1] == "update" and a[2] not in ("start", "task")][-1]
+        return [s for s in sent if s[0] != "GET"], last, passed
 
     # lambda found: the apply time the exporter publishes for the BMC's firmware
     def published(found) -> str:
@@ -465,14 +478,23 @@ def test_apply_time():
         return line.split('apply_time="')[1].split('"')[0]
 
     found = lab()
-    sent = update(found)
-    assert [s[0] for s in sent] == ["POST", "reset"] and sent[0][2]["@Redfish.OperationApplyTime"] == "OnReset", sent
-    assert poller.apply_time(found) == published(found) == "OnReset"
+    sent, last, passed = update(found)
+    assert passed and [s[0] for s in sent] == ["POST", "reset"] and "start_update" not in last, (sent, last)
+    assert sent[0][2]["@Redfish.OperationApplyTime"] == poller.apply_time(found) == published(found) == "OnReset"
     found["/redfish/v1/UpdateService"].setdefault("Actions", {})["#UpdateService.StartUpdate"] = {"target": start}
-    sent = update(found)
-    assert sent[0][2]["@Redfish.OperationApplyTime"] == "OnStartUpdateRequest", sent
-    assert sent[1][:2] == ("POST", start) and sent[2] == ("reset",), sent
     assert poller.apply_time(found) == published(found) == "OnStartUpdateRequest"
+    # the task waits Pending: StartUpdate once, the same task followed to its end, then the reset
+    sent, last, passed = update(found, "waits")
+    assert sent[0][2]["@Redfish.OperationApplyTime"] == "OnStartUpdateRequest", sent
+    assert passed and [s[:2] for s in sent[1:]] == [("POST", start), ("reset",)] and last["start_update"] == "started"
+    # already started by the BMC or a person: no StartUpdate, which would be refused, so the update goes on to the reset
+    sent, last, passed = update(found, "starts")
+    assert passed and [s[0] for s in sent] == ["POST", "reset"], sent
+    assert last["start_update"] == "not needed: the BMC started it", last
+    # refused while Pending: kept following in case it starts another way; still Pending at the timeout: failed, unreset
+    sent, last, passed = update(found, "refuses")
+    assert not passed and [s[:2] for s in sent[1:]] == [("POST", start)], sent
+    assert last["start_update"].startswith("refused: HTTP 400") and "StartUpdate refused" in last["detail"], last
     # an UpdateService that is disabled, or none at all (iLO 4): no update, so no apply time either, as push and pull
     found["/redfish/v1/UpdateService"]["ServiceEnabled"] = False
     assert published(found) == "-"
