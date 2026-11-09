@@ -70,14 +70,14 @@ from rich.rule import Rule
 from rich.table import Column, Table
 from rich.text import Text
 
-from constants import (ACTION_ROW, ACTIONS_ROW, APPLY_TIME, BASELINE, CACHE_CA, DOTTED, FAILED_STATES, FAULTS, HOST_ROW,
+from constants import (ACTION_ROW, ACTIONS_ROW, BASELINE, CACHE_CA, DOTTED, FAILED_STATES, FAULTS, HOST_ROW,
                        HOST_STATES, HOST_STEP, IMAGE_CACHE, IMAGES, LEFT_OUT_ROW, NETBOX_URL, NEXT_STEP, PLAN_ROW, PREFLIGHT_ROW,
                        PROPS, REPORT_SCHEMA, RESET_PREFERENCE, ROLLOUT, ROLLOUT_DEFAULTS, ROOT, RUNNING_STATES, RUNS,
                        SCENARIO, SCHEDULER_TIMEOUT, SITE, SPOOL, STEP_ROW, STYLE, TASK_TIMEOUT, VERSIONS_ROW, WAVE_ROW)
 from helpers import (block, first_of, first_real, identity, label, link, norm, obj, of, output_options, reason, sample,
                      show, text, uri_of)
-from poller import (ab_bank, allowable, entries, firmware, host_baseline, image_state, load_baseline, load_servers,
-                    open_jobs, software_ids, update_targets, update_targets_of, updatable, ways_in)
+from poller import (ab_bank, allowable, apply_time, entries, firmware, host_baseline, image_state, load_baseline,
+                    load_servers, open_jobs, software_ids, update_targets, update_targets_of, updatable, ways_in)
 from redfish import call, login, logout, send, tunnel
 
 log = logging.getLogger("redfish")
@@ -818,10 +818,11 @@ def handover(found, image) -> dict:
     return {}
 
 
-# Step 3: hand the image to the BMC, to install at the next reset; ((task monitor, task), error), None if none
+# Step 3: hand the image to the BMC, to install at its apply time (the reset, or StartUpdate); ((task monitor, task),
+# error), None if none
 def start_update(tunnel, found, component, image, cut=None) -> tuple[tuple, str | None]:
     file, targets, how = image.get("file", ""), update_targets_of(found, component), handover(found, image)
-    params = {**({"Targets": targets} if targets else {}), "@Redfish.OperationApplyTime": APPLY_TIME}
+    params = {**({"Targets": targets} if targets else {}), "@Redfish.OperationApplyTime": apply_time(found)}
     if how.get("method") == "push":
         with open(image_path(file), "rb") as f:
             # urllib3 applies the first timeout while it sends the body, so it has to cover the whole upload
@@ -834,9 +835,24 @@ def start_update(tunnel, found, component, image, cut=None) -> tuple[tuple, str 
     else:
         return (None, None), "no way to hand this image over: multipart push needs a file, SimpleUpdate a URL"
     if status == 202:
-        task = uri_of(body) if body.get("TaskState") else None  # a BMC may answer with the Task itself
-        return (headers.get("Location") or body.get("TaskMonitor") or task, task), None
+        return handed(headers, body), None
     return (None, None), (None if status in (200, 201, 204) else error_text(status, body))
+
+
+# What a 202 hands back to follow: (task monitor, task); a BMC may answer with the Task itself
+def handed(headers, body) -> tuple:
+    task = uri_of(body) if body.get("TaskState") else None
+    return headers.get("Location") or body.get("TaskMonitor") or task, task
+
+
+# Step 3's end on a BMC whose apply time is OnStartUpdateRequest: the image is staged, StartUpdate applies it; the
+# task followed as the upload's was, (end state, its last message, the task)
+def start_staged(tunnel, found, changed) -> tuple[str, str, dict]:
+    target = obj(obj(first_of(found, "UpdateService").get("Actions")).get("#UpdateService.StartUpdate")).get("target")
+    status, headers, body = send(tunnel, "POST", target, json={})
+    if status not in (200, 202, 204):
+        return "failed", f"StartUpdate: {error_text(status, body)}", {}
+    return follow_task(tunnel, *(handed(headers, body) if status == 202 else (None, None)), TASK_TIMEOUT, changed)
 
 
 # A Task resource's standard properties, as the record keeps them
@@ -891,15 +907,20 @@ def wait_back(server, timeout, grace=180) -> tuple[bool, float]:
     return False, time.monotonic() - start
 
 
-# Wait for a system after its reset: PowerState On and, where reported, BootProgress OSRunning; (back, last seen)
-def wait_host(server, uri, timeout) -> tuple[bool, str]:
+# Wait for a system after its reset: PowerState On and, where reported, BootProgress OSRunning, or the state the system
+# reported before the reset reached again by a new boot (a newer LastStateTime): a BMC that can't see the OS stops
+# earlier, at SystemHardwareInitializationComplete say; (back, last seen)
+def wait_host(server, uri, timeout, before) -> tuple[bool, str]:
+    was = obj(before.get("BootProgress"))
     time.sleep(60)
     until, seen = time.monotonic() + timeout, "-"
     while time.monotonic() < until:
         _, _, doc = send(tunnel(server), "GET", uri)
-        power, boot = doc.get("PowerState"), obj(doc.get("BootProgress")).get("LastState")
+        progress = obj(doc.get("BootProgress"))
+        power, boot, at = doc.get("PowerState"), progress.get("LastState"), progress.get("LastStateTime")
         seen = f"PowerState {text(power)}, BootProgress {text(boot)}"
-        if power == "On" and boot in (None, "OSRunning"):
+        again = boot == was.get("LastState") and at not in (None, was.get("LastStateTime"))
+        if power == "On" and (boot in (None, "OSRunning") or again):
             return True, seen
         time.sleep(10)
     return False, seen
@@ -917,6 +938,10 @@ def reset(server, found, kind, uri, restarted, timeout) -> tuple[bool, str]:
             return False, f"no {kind}.Reset to activate the firmware with"
         link_ = tunnel(server)
         location = login(link_)
+        # a system the update left off (a BMC that flashes the BIOS with the host powered off) is powered on, not
+        # restarted: a restart of a system that is off is refused
+        if kind != "Manager" and obj(send(link_, "GET", uri)[2]).get("PowerState") == "Off":
+            rtype = "On"
         status, _, body = send(link_, "POST", target, json={"ResetType": rtype})
         if kind != "Manager" and location:
             logout(link_, location)
@@ -925,7 +950,8 @@ def reset(server, found, kind, uri, restarted, timeout) -> tuple[bool, str]:
     if kind == "Manager":
         back, seconds = wait_back(server, timeout)
         return back, (f"BMC back after {seconds:.0f}s" if back else f"BMC not back after {timeout}s")
-    return wait_host(server, uri, timeout)
+    back, seen = wait_host(server, uri, timeout, obj(found.get(uri)))
+    return back, (f"{kind}.Reset {rtype}: {seen}" if not restarted else seen)
 
 
 # The state post-checks compare against: running version, the health of every system and manager, open jobs
@@ -995,8 +1021,9 @@ def apply(server, found, key, image, want, before, policy, rec, phase) -> tuple[
     location = login(link_)
     fault = policy.get("fault")
     noted = lambda *kinds: {"fault": f"{fault}: {FAULTS[fault]}"} if fault in kinds else {}  # where a fault acts
+    staged = apply_time(found) == "OnStartUpdateRequest"
     rec(host, f"{phase}update", "start", **handover(found, image), image={k: image.get(k) for k in ("file", "sha256")},
-        target=want, apply_time=APPLY_TIME, targets=update_targets_of(found, component),
+        target=want, apply_time=apply_time(found), targets=update_targets_of(found, component),
         **noted("silent-fail", "rejected") if not phase else {})
     cut = 8 * 2**20 if fault == "rejected" and not phase else None
     (monitor, task_uri), error = start_update(link_, found, component, image, cut)
@@ -1004,7 +1031,9 @@ def apply(server, found, key, image, want, before, policy, rec, phase) -> tuple[
     changed = lambda task: rec(host, f"{phase}update", "task", task=task, detail=task_line(task))
     state, message, task = (("failed", error, {}) if error
                             else follow_task(link_, monitor, task_uri, TASK_TIMEOUT, changed))
-    rec(host, f"{phase}update", state, detail=message, task=task)
+    if staged and state == "Completed":  # uploaded and staged: StartUpdate applies it, its task under the same step
+        state, message, task = start_staged(link_, found, changed)
+    rec(host, f"{phase}update", state, detail=message, task=task, **{"start_update": True} if staged else {})
     if location and state != "gone":
         logout(link_, location)
     if state not in ("Completed", "gone"):
@@ -1114,8 +1143,11 @@ def actions(server, found, r, policy, letter) -> tuple[str, ...]:
     targets = ", ".join(update_targets_of(found, component)) or "BMC decides"
     back = r["rollback"]
     return (server["host"], component, f"{letter[text(r['running'])]} → {letter[r['want']]}", drain,
-            f"{how['method']} · {APPLY_TIME} · to {targets}" if how else "no way to hand it over",
-            f"{kind}.Reset {text(rtype)}" if kind != "none" else "none needed",
+            f"{how['method']} · {apply_time(found)}" + (" · then StartUpdate" if apply_time(found) ==
+                                                        "OnStartUpdateRequest" else "") + f" · to {targets}"
+            if how else "no way to hand it over",
+            (f"{kind}.Reset {text(rtype)}" + (", On if the update left it off" if kind != "Manager" else ""))
+            if kind != "none" else "none needed",
             f"reinstall {letter[text(r['running'])]}" if back.startswith("reinstall") else back)
 
 
@@ -1238,7 +1270,8 @@ def run(args) -> list:
         push_metrics(path, group, pushing, planned_stage)
     rec("-", "run", "start", component=args.component, waves={name: [s["host"] for s in h] for name, h in planned},
         target=", ".join(sorted({r["want"] for r in results if r["verdict"] == "go" and r["want"]})),
-        plan=args.plan, stage=args.stage, failure_rate=rollout["failure_rate"], rollout=rollout, apply_time=APPLY_TIME,
+        plan=args.plan, stage=args.stage, failure_rate=rollout["failure_rate"], rollout=rollout,
+        apply_time=", ".join(sorted({apply_time(found) for _, found, _ in go})) or None,
         faults=policy["faults"], actor=actor())
     last = list(saved["waves"])[-1]
     outcomes, halted = [], None
@@ -1553,7 +1586,8 @@ def step_detail(step) -> str:
         lines += [f"{step['method']} · {step['action']} {step['uri']}" + (f" · {step['protocol']}"
                                                                          if step.get("protocol") else ""),
                   f"{image.get('file')} (sha256 {str(image.get('sha256'))[:12]}…) → {step.get('target')}",
-                  f"apply {step.get('apply_time')} · targets {', '.join(step.get('targets') or []) or 'BMC decides'}"]
+                  f"apply {step.get('apply_time')}" + (", then StartUpdate" if step.get("start_update") else "") +
+                  f" · targets {', '.join(step.get('targets') or []) or 'BMC decides'}"]
         lines += [trail(step.get("progress") or []), *task_detail(step["task"])] if step.get("task") else []
     elif kind.endswith("reset") and "action" in step:
         lines.append(f"{step['action']} {step.get('reset_type')} on {step.get('resource')}" if step["action"]

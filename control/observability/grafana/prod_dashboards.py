@@ -8,9 +8,10 @@ from pathlib import Path
 DASHBOARDS = Path(__file__).parent / "dashboards"
 NOTE = {"type": "text", "title": "", "id": 99, "gridPos": {"x": 0, "y": 0, "w": 24, "h": 3}, "transparent": True,
         "options": {"mode": "markdown", "content": (
-            "**Production is read-only.** `rollout.py run --yes` refuses hosts not tagged `writable` in NetBox, and no "
-            "host of site `prod` is, so no pipeline pushes here. `make plan SITE=prod` shows what a rollout would "
-            "do.")}}
+            "**Production is read-only but for a change window.** `rollout.py run --yes` refuses hosts not tagged "
+            "`writable` in NetBox; a prod host is tagged only for its window, and its run goes through `pipeline.sh` "
+            "from an admin host (`make update` refuses `SITE=prod`). `make plan SITE=prod` shows what a rollout "
+            "would do.")}}
 # Grafana's Group to nested tables: a row per project, its hosts in a table under it. A field aggregated into the
 # project's row leaves the hosts' table, so the row's are copies of the Redfish (I) and health (J) queries: how many
 # hosts, the worst Redfish (0 down) and the worst health of them, so a collapsed project still shows a host down

@@ -475,6 +475,14 @@ def ways_in(found, component, url=None) -> tuple[str, str]:
     return push, ("yes · " if allowed_targets is not None and protocols is not None else "not verified: ") + listed
 
 
+# When an update's image is applied (@Redfish.OperationApplyTime): OnStartUpdateRequest when the UpdateService offers
+# StartUpdate (v1_11_0), which applies only images uploaded with it, then called before the reset; else OnReset, the
+# reset applying it. The rollout updates by it and the exporter publishes it, so the dashboards show what an update does
+def apply_time(found) -> str:
+    actions = obj(first_of(found, "UpdateService").get("Actions"))
+    return "OnStartUpdateRequest" if obj(actions.get("#UpdateService.StartUpdate")).get("target") else "OnReset"
+
+
 # What an update can target on this BMC: System BIOS, Manager (BMC) and every firmware inventory row
 def update_targets(found) -> set[str]:
     return {"System BIOS", "Manager (BMC)", *inventory_groups(found)}
@@ -587,11 +595,14 @@ def exposition(server, found, seconds) -> list[str]:
             if isinstance(speed, (int, float)):
                 out.append(sample("redfish_network_speed_mbps", speed * scale, **labels))
     ids, targets = software_ids(found), update_targets(found)
+    update = first_of(found, "UpdateService")  # none, or disabled: no update to apply, as ways_in says
+    when = apply_time(found) if update and update.get("ServiceEnabled") is not False else "-"
     for component, (version, _) in firmware(found).items():
         push, pull = ways_in(found, component) if component in targets else ("-", "-")
         out.append(sample("redfish_firmware_info", 1, host=host, component=component, version=text(version),
                           software_id=ids.get(component, "-"), updateable=updatable(found, component), push=push,
-                          pull=pull, ab_bank=ab_bank(found, component)))
+                          pull=pull, ab_bank=ab_bank(found, component),
+                          apply_time=when if component in targets else "-"))
     # Each part whose integrity the BMC reports (ComponentIntegrity: SPDM or TPM), with the BMC's own verdict on its
     # identity; nothing here checks its signed measurements (README.md, What needs to be done: SPDM attestation)
     for uri, d in of(found, "ComponentIntegrity"):

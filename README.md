@@ -10,7 +10,8 @@ automatic rollback. Standard Redfish only, no vendor Oem code: one code path for
 | **Production** | ASUS, Dell, HPE, Gigabyte and Supermicro servers, 7 hardware models | read-only: inventory, telemetry, BMC logs, plans, dry runs |
 
 Writes have three gates: `make update` refuses `SITE=prod`, `rollout.py run` needs `--yes`, and it only touches hosts
-tagged `writable` in NetBox. No production host is tagged.
+tagged `writable` in NetBox. A production host is tagged only for its change window, and its run goes through
+`pipeline.sh` from an admin host (Before enabling writes).
 
 ![The rollout: plan, canary and waves on the ten lab BMCs, step by step](docs/lab-rollout.svg)
 
@@ -110,7 +111,7 @@ BMC ──POST each event · as it happens───────▶ Vector ──
 
 | Path | Over Redfish | Stored |
 |---|---|---|
-| exporter → agent → Prometheus | GET the whole tree but logs, sessions, accounts, certificates, registries: `Status` (health), `Sensor`, `Thermal`, `Power` (readings, thresholds), `SoftwareInventory` and `UpdateService` (version, `Updateable`, push/pull, A/B bank), `EthernetInterface` and `Port`, `ComponentIntegrity`, `ManagerDiagnosticData` | numbers over time: `redfish_*` |
+| exporter → agent → Prometheus | GET the whole tree but logs, sessions, accounts, certificates, registries: `Status` (health), `Sensor`, `Thermal`, `Power` (readings, thresholds), `SoftwareInventory` and `UpdateService` (version, `Updateable`, push/pull, A/B bank, apply time), `EthernetInterface` and `Port`, `ComponentIntegrity`, `ManagerDiagnosticData` | numbers over time: `redfish_*` |
 | exporter → Loki | GET each `LogService` of the systems, managers and chassis, and `JobService.Log`: its new `Entries`, its `DateTime` (the BMC's clock) and `MaxNumberOfRecords` | a line per entry; each log's size and the clock's skew go to Prometheus |
 | `rollout.py` → Pushgateway → Prometheus, and → Loki | a live read of 10-30 GETs per host (systems, managers and their health and identity, `UpdateService`, the firmware inventory, Tasks, Jobs, `ComponentIntegrity`, the reset ActionInfo); then the writes: the image push, `Manager.Reset` or `ComputerSystem.Reset`, and the update's Task polled to its end | the rollout's decisions, not BMC data: `rollout_*` metrics (hosts per state, step durations, gates), and in Loki each step with its checks, the Task's messages and a rollback's reason |
 | BMC → Vector → Loki (the lab) | nothing read: the BMC posts its `Event` payloads (`MessageId`, `Message`, `Severity`, `EventTimestamp`, `OriginOfCondition`) to the subscription `rollout.py subscribe` made | a line per event, labelled with the BMC and its severity |
@@ -139,8 +140,8 @@ before and after it runs, so a run stopped halfway shows where each host was.
 |----|----|----|
 | 1 | Pre-flight | Fresh read & the BMC must be the one the plan approved (model, service UUID, serial) |
 | 2 | Drain | only when the reset restarts the host (BIOS, system firmware); In the LAB there is no Drain -> BMC reset. |
-| 3 | Update | multipart push to `MultipartHttpPushUri`, or `SimpleUpdate` from a URL, with `OperationApplyTime: OnReset`; the Task followed to its end, every `TaskState`, `PercentComplete` and message recorded. **In LAB no Task migrate to Job.** |
-| 4 | Reset | `Manager.Reset` or `ComputerSystem.Reset`, graceful first, then wait for the BMC to answer |
+| 3 | Update | multipart push to `MultipartHttpPushUri`, or `SimpleUpdate` from a URL, with `OperationApplyTime: OnReset`, or `OnStartUpdateRequest` then `UpdateService.StartUpdate` on a BMC that offers it (the Apply time column); the Task followed to its end, every `TaskState`, `PercentComplete` and message recorded. **In LAB no Task migrate to Job.** |
+| 4 | Reset | `Manager.Reset` or `ComputerSystem.Reset`, graceful first, `On` for a system the update left off, then wait for the BMC to answer, or the system to boot again (`OSRunning`, or the boot state it reported before, reached again) |
 | 5 | Post-check | the target version runs, health no worse than before (or a resource gone from the telemetry), no new failed or hung Task or Job. In LAB the BMCs don't expose ComponentIntegrity Redfish resource. On a failure: reinstall the version before, reset, check again |
 | 6 | Undrain | back to the scheduler; a host that can't be recovered stays drained as `needs_attention` - remote hands - and keeps its lock in the state DB. |
 
@@ -176,7 +177,7 @@ it. An option overrides one value for one plan; the plan and the report record w
 | `failure_rate` | 10 % | 2 % | later waves halt above this share of the hosts tried; exactly the limit passes |
 | `max_parallel` | 10 | 50 | updates at once in a wave |
 | `soak` | 60 s | 30 min | after each wave but the last: wait, post-check its hosts again; a failure is `needs_attention` and halts |
-| `drain`, `undrain` | none | none | scheduler commands, run only for a reset that restarts the host |
+| `drain`, `undrain` | none | a person confirms | scheduler commands, run only for a reset that restarts the host |
 
 The lab's ten BMCs give: canary bmc1, wave 1 of 3 (one per rack), wave 2 of 6. The failure rate counts the hosts
 tried in that stage: skipped and blocked hosts are left out, and the canary is its own stage. So a passed gate doesn't
@@ -325,6 +326,12 @@ Checked on real Redfish services with the latest DMTF schemas.
   check), HPE's backup BIOS ROM, Supermicro's `SmcUpdateService.Install`, and the resources a license or role refuses
   (403). It is discovery, to qualify a model: pre-flight and the post-check judge standard Jobs and Tasks only, as an
   Oem path can change with the firmware the rollout installs.
+- No production BMC advertises the apply times its updates accept (`@Redfish.OperationApplyTimeSupport`: AMI puts it
+  on its reset actions only). The Supermicros offer `UpdateService.StartUpdate`, which applies only images uploaded
+  with `OnStartUpdateRequest`, so the rollout stages there and starts the update itself; every other model gets
+  `OnReset`. Supermicro's choices to keep the BIOS settings or back up the running image aren't in Redfish, and its
+  `Systems/1/Bios` needs the DCMS license (403 `OemLicenseNotPassed`). Its BMC stops `BootProgress` at
+  `SystemHardwareInitializationComplete`, so a system counts as back once it reaches the state it reported before.
 
 | BMC | Log entry order | Paging | Clock |
 |---|---|---|---|
@@ -453,7 +460,7 @@ scrapes it and remote-writes to the control plane, so nothing connects into a si
 | `redfish_host_info` | NetBox's vendor, project and rack; the BMC's Manufacturer and Model |
 | `redfish_health` | every object with a `Status`, fans and PSUs included |
 | `redfish_reading`, `_threshold`, `_crossed` | every sensor with its unit and `PhysicalContext`, its thresholds, how far past them (0 to 3) |
-| `redfish_firmware_info` | each component's version, `Updateable`, push and pull support, and whether it reports an A/B bank (`ab_bank`) |
+| `redfish_firmware_info` | each component's version, `Updateable`, push and pull support, whether it reports an A/B bank (`ab_bank`), and when an update is applied (`apply_time`: `OnReset`, or `OnStartUpdateRequest` where the BMC offers `StartUpdate`) |
 | `redfish_network_link`, `redfish_network_speed_mbps` | every interface and port |
 | `redfish_component_integrity` | each `ComponentIntegrity` (SPDM, TPM) and the BMC's verdict |
 | `redfish_log_entries`, `redfish_log_max_entries`, `redfish_bmc_clock_skew_seconds` | how full each log is; the BMC clock's offset |
@@ -524,11 +531,12 @@ The production fleet:
 
 ![Prod · Fleet manager: what is not OK, and crawl times](docs/grafana/prod/fleet-details-1.png)
 
-The lab: every BMC, then firmware per version and per host, and the BMCs' own memory and storage
+The lab: every BMC, then the hosts on each firmware version (a host's own firmware is on its Host
+dashboard), and the BMCs' own memory and storage
 
 ![Lab · Fleet manager](docs/grafana/lab/fleet.png)
 
-![Lab · Fleet manager: firmware per version and per host](docs/grafana/lab/fleet-firmware.png)
+![Lab · Fleet manager: hosts per firmware version](docs/grafana/lab/fleet-firmware.png)
 
 ![Lab · Fleet manager: the BMCs' memory, storage and crawl times](docs/grafana/lab/fleet-1.png)
 
@@ -692,8 +700,8 @@ account's env vars, which `prod/.env` (git-ignored) sets:
 - **Activation**: validate the supported apply time, reset and recovery per model, and read `make oem MODEL=...` for
   what the model keeps in Oem (a job queue, a second image). Only OpenBMC's path has been exercised end to end.
 - **Scheduler**: write and test `drain` and `undrain` (`{node}`); the drain returns once the node is empty.
-- **Images**: the vendor packages in `prod/images.yaml` with their sha256, and the packages of the versions running
-  now, so every host has a way back; served from the site's HTTPS cache (`IMAGE_CACHE`).
+- **Images**: the vendor packages in `control/catalog/prod/images.yaml` with their sha256, and the packages of the
+  versions running now, so every host has a way back; served from the site's HTTPS cache (`IMAGE_CACHE`).
 - **Run** from an admin host, never the Makefile: `SITE=prod YES=1 ./pipeline.sh "Manager (BMC)"` with `prod/.env`
   exported, `NETBOX_TOKEN` the rollout's token, one `STATE_DB` for every admin host, and `ROLLOUT_ACTOR` naming who
   authorized it.

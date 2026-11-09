@@ -393,6 +393,93 @@ def test_drain():
         assert not ok and "timed out" in output, output
 
 
+# A system is back after its reset once it is On and its BootProgress reached OSRunning, or, on a BMC that can't see the
+# OS and stops earlier, the state it reported before the reset, reached again by a new boot: a newer LastStateTime. The
+# same state at the same time is still the boot from before the reset
+def test_wait_host():
+    system = "/redfish/v1/Systems/1"
+    boot = lambda state, at: {"PowerState": "On", "BootProgress": {"LastState": state, "LastStateTime": at}}
+    before = boot("SystemHardwareInitializationComplete", "2026-10-15T22:07:45Z")
+
+    # lambda *reads: the system as the BMC answers it, read after read, the last one again -> back in time
+    def back(*reads, before=before) -> bool:
+        reads = list(reads)
+        read = lambda *a, **k: (200, {}, reads.pop(0) if len(reads) > 1 else reads[0])
+        with (patch.object(rollout, "send", read), patch.object(rollout, "tunnel", lambda s: None),
+              patch.object(rollout.time, "sleep", lambda s: None)):
+            # restarted: no reset is sent, only the wait runs
+            return rollout.reset({"host": "h"}, {system: before}, "ComputerSystem", system, True, 0.2)[0]
+    assert back(before, {"PowerState": "Off"}, boot("SystemHardwareInitializationComplete", "2026-11-05T10:00:00Z"))
+    assert not back(before)  # never restarted
+    assert not back(boot("MemoryInitializationStarted", "2026-11-05T10:00:00Z"))  # still booting
+    assert back(boot("OSRunning", "2026-11-05T10:00:00Z"))
+    assert back({"PowerState": "On"}, before={"PowerState": "On"})  # no BootProgress: On is all it says
+
+    # A system the update left off (a BMC that flashes the BIOS with the host powered off) is powered on, not restarted
+    reset = {"target": f"{system}/Actions/ComputerSystem.Reset",
+             "ResetType@Redfish.AllowableValues": ["On", "ForceRestart", "GracefulRestart"]}
+    power, posted = ["Off"], []
+
+    def send(link, method, uri, **kw) -> tuple:
+        if method == "POST":
+            posted.append(kw["json"]["ResetType"])
+            return 204, {}, {}
+        return 200, {}, {"PowerState": power[0]}
+    with (patch.object(rollout, "send", send), patch.object(rollout, "tunnel", lambda s: None),
+          patch.object(rollout, "login", lambda link: None),
+          patch.object(rollout, "wait_host", lambda *a: (True, "-"))):
+        for power[0] in ("Off", "On"):
+            assert rollout.reset({"host": "h"}, {system: {**before, "Actions": {"#ComputerSystem.Reset": reset}}},
+                                 "ComputerSystem", system, False, 1)[0]
+    assert posted == ["On", "GracefulRestart"], posted
+
+
+# When an update's image is applied, as the dashboards show it (redfish_firmware_info's apply_time): OnReset, by step
+# 4's reset, unless the UpdateService offers StartUpdate, which applies only images uploaded with OnStartUpdateRequest:
+# then the upload is staged and StartUpdate applies it, before the reset
+def test_apply_time():
+    start = "/redfish/v1/UpdateService/Actions/UpdateService.StartUpdate"
+
+    # lambda found: one update on the lab BMC, the network replaced -> what it sent: (method, uri, parameters), reset
+    def update(found) -> list:
+        sent = []
+
+        def send(link, method, uri, **kw) -> tuple:
+            files = kw.get("files") or {}
+            sent.append((method, uri, json.loads(files["UpdateParameters"][1]) if files else kw.get("json")))
+            return 202, {"Location": TASK}, {}
+        with (patch.object(rollout, "tunnel", lambda s: None), patch.object(rollout, "login", lambda link: None),
+              patch.object(rollout, "send", send),
+              patch.object(rollout, "follow_task", lambda *a: ("Completed", "-", {})),
+              patch.object(rollout, "reset", lambda *a: sent.append(("reset",)) or (True, "-")),
+              patch.object(rollout, "post_check", lambda *a: (True, [], TARGET))):
+            assert rollout.apply({"host": "h"}, found, BMC, catalog()[MODEL][BMC][TARGET], TARGET, {},
+                                 {"reset_timeout": 1}, lambda *a, **k: None, "")[0]
+        return sent
+
+    # lambda found: the apply time the exporter publishes for the BMC's firmware
+    def published(found) -> str:
+        with patch.object(poller, "schema_file", lambda name: {}):
+            line = next(line for line in poller.exposition({"host": "h"}, found, 1.0)
+                        if line.startswith("redfish_firmware_info{") and f'component="{BMC}"' in line)
+        return line.split('apply_time="')[1].split('"')[0]
+
+    found = lab()
+    sent = update(found)
+    assert [s[0] for s in sent] == ["POST", "reset"] and sent[0][2]["@Redfish.OperationApplyTime"] == "OnReset", sent
+    assert poller.apply_time(found) == published(found) == "OnReset"
+    found["/redfish/v1/UpdateService"].setdefault("Actions", {})["#UpdateService.StartUpdate"] = {"target": start}
+    sent = update(found)
+    assert sent[0][2]["@Redfish.OperationApplyTime"] == "OnStartUpdateRequest", sent
+    assert sent[1][:2] == ("POST", start) and sent[2] == ("reset",), sent
+    assert poller.apply_time(found) == published(found) == "OnStartUpdateRequest"
+    # an UpdateService that is disabled, or none at all (iLO 4): no update, so no apply time either, as push and pull
+    found["/redfish/v1/UpdateService"]["ServiceEnabled"] = False
+    assert published(found) == "-"
+    del found["/redfish/v1/UpdateService"]
+    assert published(found) == "-"
+
+
 # A run does what its plan approved: an input file changed or gone since the plan stops it, as does a host whose
 # inventory entry changed or is gone (NetBox has no file to pin), and a host whose BMC isn't the one the plan read
 # (another identity at its address) is blocked, not updated

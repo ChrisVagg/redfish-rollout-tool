@@ -1,0 +1,8 @@
+# The production firmware images, each at its path next to this file (images/, git-ignored): the vendor's package is
+# checked against the checksums on its download page, then the image is taken out of it and its own sha256 written here.
+#   BIOS 3.1: bundle X13DEM_3.1_X1.14.07_SAA1.6.0-p7.zip, sha256 071189a1cdab88682d57123763cdefadd05f2ea53c72e51cfa0d11e50ba54563
+#   (md5 and sha1 match too), its BIOS_X13DEM-1C30_20260808_3.1_STDsp.zip, the .bin in it. No 2.8 image: the way back
+#   is the BMC's Golden BIOS, restored by hand, so plan with --accept-no-rollback
+"Supermicro SYS-221H-TNR":
+  "BIOS":
+    "BIOS Date: 08/08/2026 Ver 3.1": {file: "images/BIOS_X13DEM-1C30_20260808_3.1_STDsp.bin", sha256: "32b9d914f03903661574d04f8a30d21cfd1dc849c1d70b9752e99e5f349be72f"}

@@ -6,3 +6,9 @@ strict_waves: 1       # the first waves after the canary, halt on first error
 failure_rate: 0.02    # later waves: halt when more than this share of the hosts tried failed
 max_parallel: 50      # updates running at once in a wave: the BMCs pull from one image server
 soak: 1800            # wait before the next wave run.
+# The scheduler around a reset that restarts the host (BIOS, system firmware), {node} its name in NetBox. The hosts' OS
+# isn't reachable from the control plane, so a person confirms at the terminal that the node is empty; without a
+# terminal the drain fails and the host is left untouched. ponytail: one host at a time; the scheduler's own drain
+# (scontrol, kubectl drain), which returns once the node is empty, when the control plane reaches it
+drain: sh -c 'printf "Is {node} empty, its jobs stopped? yes or no " > /dev/tty; read a < /dev/tty; [ "$a" = yes ]'
+undrain: sh -c 'echo "{node} is back, give it to its users" > /dev/tty'

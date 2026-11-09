@@ -718,16 +718,18 @@
        "updateable": "Updateable",
        "push": "Push",
        "pull": "Pull",
-       "ab_bank": "A/B bank"
+       "ab_bank": "A/B bank",
+       "apply_time": "Apply time"
       },
       "indexByName": {
        "component": 0,
        "version": 1,
        "updateable": 2,
        "ab_bank": 3,
-       "push": 4,
-       "pull": 5,
-       "software_id": 6
+       "apply_time": 4,
+       "push": 5,
+       "pull": 6,
+       "software_id": 7
       }
      }
     }
@@ -869,6 +871,43 @@
            "result": {
             "color": "orange",
             "index": 2
+           }
+          }
+         }
+        ]
+       },
+       {
+        "id": "custom.cellOptions",
+        "value": {
+         "type": "color-text"
+        }
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "Apply time"
+      },
+      "properties": [
+       {
+        "id": "description",
+        "value": "When an update's image is applied on this BMC, as the rollout does it: OnReset, applied by the reset after the upload; OnStartUpdateRequest, the BMC offers UpdateService.StartUpdate, so the upload is staged and StartUpdate applies it, then the reset (On if the BMC left the host off)"
+       },
+       {
+        "id": "mappings",
+        "value": [
+         {
+          "type": "value",
+          "options": {
+           "OnReset": {
+            "text": "OnReset: the reset applies it",
+            "index": 0
+           },
+           "OnStartUpdateRequest": {
+            "text": "OnStartUpdateRequest: StartUpdate applies it",
+            "color": "#00c9a7",
+            "index": 1
            }
           }
          }

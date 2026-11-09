@@ -53,3 +53,6 @@
   "System BIOS": "P89 v2.92 (11/23/2021)"
   "Manager (BMC)": "iLO 4 v2.81"
   "PSU 720478-B21": "1.01 2.00"
+
+"Supermicro SYS-221H-TNR":  # 4 hosts
+  "BIOS": "BIOS Date: 08/08/2026 Ver 3.1"
