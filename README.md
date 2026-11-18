@@ -391,6 +391,7 @@ NetBox [shows the catalog](#the-firmware-catalog-in-netbox) and decides nothing.
 | vendor, model, project, rack | manufacturer, device type, tenant, rack |
 | canary, writable | tags; only a tag makes a host writable |
 | how its BMC is reached | the merged site and platform config contexts: TLS verify, retries, deadline, and the names of the env vars holding its account |
+| a GPU's PCIe Bus-Id | the device's local config context `bus_ids`, `{SerialNumber: Bus-Id}` from the host's `nvidia-smi --query-gpu=serial,pci.bus_id --format=csv`: the label `bus_id` beside `serial_number`, where the BMC doesn't report the bus |
 
 A device is skipped when it has no out-of-band IP, isn't reached over HTTPS, or its account isn't named
 `X_USERNAME`/`X_PASSWORD` with both set: an edit in NetBox can't make a tool send another of its secrets (`STATE_DB`,
@@ -462,9 +463,10 @@ scrapes it and remote-writes to the control plane, so nothing connects into a si
 | `redfish_up`, `redfish_failed_requests` | the BMC answered; GETs that failed in the read |
 | `redfish_host_info` | NetBox's vendor, project and rack; the BMC's Manufacturer and Model |
 | `redfish_health` | every object with a `Status`, fans and PSUs included |
-| `redfish_reading`, `_threshold`, `_crossed` | every sensor with its unit and `PhysicalContext`, its thresholds, how far past them (0 to 3) |
+| `redfish_reading`, `_threshold`, `_crossed` | every sensor with its unit, `PhysicalContext`, `serial_number` (of the part its `RelatedItem` names, a GPU's PCIeDevice) and `bus_id` (from NetBox), its thresholds, how far past them (0 to 3) |
 | `redfish_firmware_info` | each component's version, `Updateable`, push and pull support, whether it reports an A/B bank (`ab_bank`), and when an update is applied (`apply_time`: `OnReset`, or `OnStartUpdateRequest` where the BMC offers `StartUpdate`) |
 | `redfish_network_link`, `redfish_network_speed_mbps` | every interface and port |
+| `redfish_pcie_link_gen`, `redfish_pcie_link_lanes` | each PCIeDevice's `PCIeInterface`: generation and lanes in use, the maximum as a label, `serial_number` and `bus_id` as on its readings |
 | `redfish_component_integrity` | each `ComponentIntegrity` (SPDM, TPM) and the BMC's verdict |
 | `redfish_log_entries`, `redfish_log_max_entries`, `redfish_bmc_clock_skew_seconds` | how full each log is; the BMC clock's offset |
 

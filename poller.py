@@ -168,7 +168,8 @@ def reading(uri, doc, definitions, path, value) -> dict:
             "role": "limit" if LIMIT.search(prop) else "reading", "value": value,
             "unit": unit, "critical": flat.get(choose(flat, CRITICAL)), "precision": md.get("Precision"),
             "definition": md.get("Id"), "health": obj(item.get("Status")).get("Health"),
-            "state": obj(item.get("Status")).get("State"), "source": name}
+            "state": obj(item.get("Status")).get("State"), "source": name,
+            "related": list(filter(None, map(uri_of, item.get("RelatedItem") or [])))}
 
 
 # Every reading and every limit (threshold, range, capacity...) of one host, as records
@@ -412,7 +413,9 @@ def load_servers(url=NETBOX_URL, site=SITE.name) -> list[dict]:
                 server = {"host": host, "vendor": d["device_type"]["manufacturer"]["name"],
                           "project": (d["tenant"] or {}).get("name"), "rack": (d["rack"] or {}).get("name"),
                           "canary": "canary" in tags or None, "writable": "writable" in tags or None,
-                          "node": d["name"] if d["name"] != host else None}
+                          "node": d["name"] if d["name"] != host else None,
+                          # {SerialNumber: PCIe Bus-Id} from the host OS (nvidia-smi): the BMC may not report the bus
+                          "bus_ids": obj((d.get("config_context") or {}).get("bus_ids")) or None}
                 # unless its context says otherwise, HTTPS with the certificate checked: every reader takes the entry
                 servers.append({"scheme": "https", "verify": True, **context,
                                 **{k: v for k, v in server.items() if v is not None}})
@@ -568,10 +571,14 @@ def exposition(server, found, seconds) -> list[str]:
         name = r["role"] == "limit" and threshold(r["property"])
         if name and isinstance(r["value"], (int, float)) and r["value"]:
             limits.setdefault((r["resource"], r["kind"]), {})[name] = r["value"]
+    # lambda r: the SerialNumber of the part the reading's RelatedItem names (a GPU's PCIeDevice), '-' without one
+    serial = lambda r: text(next(filter(real, (obj(found.get(u)).get("SerialNumber") for u in r["related"])), None))
     for r in records:  # an Absent part's reading (iLO 4 reports 0 °C for one) is no reading
         if r["role"] == "reading" and isinstance(r["value"], (int, float)) and r["state"] != "Absent":
             # context: the reading's PhysicalContext (CPU, GPU, Memory...), '-' when the BMC reports none
+            sn = serial(r)
             labels = {"host": host, "kind": r["kind"], "context": r["context"] or "-", "resource": r["resource"],
+                      "serial_number": sn, "bus_id": text(obj(server.get("bus_ids")).get(sn)),
                       "sensor": r["name"] or "-", "property": r["property"], "unit": r["unit"] or "-"}
             out.append(sample("redfish_reading", r["value"], **labels))
             th, v = limits.get((r["resource"], r["kind"]), {}), r["value"]
@@ -580,6 +587,16 @@ def exposition(server, found, seconds) -> list[str]:
             if th:
                 out.append(sample("redfish_reading_crossed", next(
                     (n for n, level in ((3, "Fatal"), (2, "Critical"), (1, "Caution")) if past(level)), 0), **labels))
+    # Each PCIe device's link as the BMC reports it (PCIeInterface): its generation and lanes in use, their maximum as a
+    # label; serial_number and bus_id as on a GPU's readings, so a narrowed or retrained link shows beside its sensor
+    for uri, d in of(found, "PCIeDevice"):
+        link, sn = obj(d.get("PCIeInterface")), text(d.get("SerialNumber"))
+        labels = {"host": host, "resource": uri, "name": text(named(d)), "serial_number": sn,
+                  "bus_id": text(obj(server.get("bus_ids")).get(sn))}
+        if gen := re.fullmatch(r"Gen(\d+)", text(link.get("PCIeType"))):
+            out.append(sample("redfish_pcie_link_gen", int(gen[1]), **labels, max=text(link.get("MaxPCIeType"))))
+        if isinstance(link.get("LanesInUse"), int):
+            out.append(sample("redfish_pcie_link_lanes", link["LanesInUse"], **labels, max=text(link.get("MaxLanes"))))
     for resource, kind, name, health, health_rollup, state in components(found):
         out.append(sample("redfish_health", {"OK": 0, "Warning": 1, "Critical": 2}.get(health, -1), host=host,
                           resource=resource, type=kind, name=name, health=health, rollup=health_rollup, state=state))

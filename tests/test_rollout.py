@@ -921,6 +921,25 @@ def test_exposition():
     fan["Reading"] = 500  # under its lower caution
     assert any(line.startswith("redfish_reading_crossed{") and 'sensor="Fan1"' in line and line.endswith(" 1")
                for line in poller.exposition({"host": "h"}, found, 1.0))
+    # a reading carries the SerialNumber of the part its RelatedItem names (a GPU's PCIeDevice); '-' without one
+    found["/redfish/v1/Chassis/1/PCIeDevices/GPU1"] = {"SerialNumber": "SN1"}
+    found["/redfish/v1/Chassis/1/Sensors/1"]["RelatedItem"] = [{"@odata.id": "/redfish/v1/Chassis/1/PCIeDevices/GPU1"}]
+    serials = sorted(line.split('serial_number="')[1].split('"')[0]
+                     for line in poller.exposition({"host": "h"}, found, 1.0) if line.startswith("redfish_reading{"))
+    assert serials == ["-", "-", "SN1"], serials
+    # and its PCIe Bus-Id, from the host's NetBox config context bus_ids, keyed by that serial number
+    out = poller.exposition({"host": "h", "bus_ids": {"SN1": "00000000:98:00.0"}}, found, 1.0)
+    assert sum('serial_number="SN1",bus_id="00000000:98:00.0"' in line for line in out
+               if line.startswith("redfish_reading{")) == 1, out
+    # a PCIeDevice's link (PCIeInterface): its generation and lanes, the maximum as a label, the GPU's serial and bus
+    found["/redfish/v1/Chassis/1/PCIeDevices/GPU1"] = {
+        "@odata.type": "#PCIeDevice.v1_19_0.PCIeDevice", "Name": "GPU1Slot1", "SerialNumber": "SN1",
+        "PCIeInterface": {"PCIeType": "Gen4", "MaxPCIeType": "Gen5", "LanesInUse": 16, "MaxLanes": 16}}
+    out = poller.exposition({"host": "h", "bus_ids": {"SN1": "00000000:98:00.0"}}, found, 1.0)
+    links = sorted(line for line in out if line.startswith("redfish_pcie_link_"))
+    assert len(links) == 2 and links[0].startswith("redfish_pcie_link_gen{") and links[0].endswith(" 4") \
+        and 'max="Gen5"' in links[0] and 'bus_id="00000000:98:00.0"' in links[0] and links[1].endswith(" 16"), links
+
 
 
 # The firmware inventory's A/B bank, as the rollout's plan reads it: the lab BMC reports one image; a second, inactive

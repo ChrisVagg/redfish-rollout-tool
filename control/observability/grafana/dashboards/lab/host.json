@@ -1993,8 +1993,8 @@
       "type": "prometheus",
       "uid": "prometheus"
      },
-     "expr": "redfish_reading{site=\"$site\",host=\"$host\",resource=~\"/redfish/v1/Chassis/.*\",kind!~\"Power|Voltage|Current|Energy.*|Frequency|ChargeAh\",context=\"$thermal_context\"}",
-     "legendFormat": "{{sensor}} · {{property}} ({{unit}})",
+     "expr": "label_replace(label_replace(redfish_reading{site=\"$site\",host=\"$host\",resource=~\"/redfish/v1/Chassis/.*\",kind!~\"Power|Voltage|Current|Energy.*|Frequency|ChargeAh\",context=\"$thermal_context\"}, \"sn\", \" · SN $1\", \"serial_number\", \"([^-].*)\"), \"bus\", \" · bus $1\", \"bus_id\", \"(?:0+:)?([^-].*)\")",
+     "legendFormat": "{{sensor}}{{sn}}{{bus}} · {{property}} ({{unit}})",
      "refId": "A",
      "instant": false,
      "range": true
